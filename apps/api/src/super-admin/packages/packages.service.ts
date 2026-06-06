@@ -2,10 +2,14 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePackageDto } from './dto/create-package.dto';
 import { UpsertPackageFeatureDto } from './dto/upsert-package-feature.dto';
+import { PermissionCacheService } from '../../cache/permission-cache.service';
 
 @Injectable()
 export class PackagesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cache: PermissionCacheService,
+  ) {}
 
   async findAll() {
     return this.prisma.package.findMany({
@@ -44,13 +48,16 @@ export class PackagesService {
     });
     if (existing) throw new ConflictException('Feature already added to this package');
 
-    return this.prisma.packageFeature.create({
+    const created = await this.prisma.packageFeature.create({
       data: {
         packageId,
         featureKey: dto.featureKey,
         subFeatureKey: dto.subFeatureKey ?? null,
       },
     });
+    // Affects every school on this package — clear the whole cache.
+    this.cache.invalidateAll();
+    return created;
   }
 
   async removeFeature(packageId: string, featureId: string) {
@@ -59,7 +66,9 @@ export class PackagesService {
     });
     if (!feature) throw new NotFoundException('Feature not found on this package');
 
-    return this.prisma.packageFeature.delete({ where: { id: featureId } });
+    const deleted = await this.prisma.packageFeature.delete({ where: { id: featureId } });
+    this.cache.invalidateAll();
+    return deleted;
   }
 
   // Returns the dev/testing all-features package, creating it if needed

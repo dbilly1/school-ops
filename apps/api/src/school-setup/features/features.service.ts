@@ -7,10 +7,14 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { FeatureState } from '@prisma/client';
 import { BulkConfigureFeaturesDto } from './dto/features.dto';
+import { PermissionCacheService } from '../../cache/permission-cache.service';
 
 @Injectable()
 export class FeaturesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cache: PermissionCacheService,
+  ) {}
 
   // ── Bulk configure (onboarding) ───────────────────────────────────────────
 
@@ -48,6 +52,7 @@ export class FeaturesService {
       }),
     );
 
+    this.cache.invalidateSchool(schoolId);
     return { configured: dto.features.filter(f => f.active).length };
   }
 
@@ -185,6 +190,7 @@ export class FeaturesService {
     // Apply platform sub-feature defaults on first activation
     await this.applySubFeatureDefaults(schoolId, featureKey);
 
+    this.cache.invalidateSchool(schoolId);
     return { featureKey, state: schoolFeature.state };
   }
 
@@ -204,6 +210,7 @@ export class FeaturesService {
       data: { state: FeatureState.AVAILABLE },
     });
 
+    this.cache.invalidateSchool(schoolId);
     return { featureKey, state: updated.state };
   }
 
@@ -259,6 +266,7 @@ export class FeaturesService {
       update: { enabled },
     });
 
+    this.cache.invalidateSchool(schoolId);
     return { featureKey, subFeatureKey, enabled };
   }
 

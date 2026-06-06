@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
+import { PermissionCacheService } from '../cache/permission-cache.service';
 import { Prisma } from '@prisma/client';
 import { retryOnUniqueViolation } from '../common/retry-unique';
 import { generateTempPassword as randomTempPassword } from '../common/password.util';
@@ -20,6 +21,7 @@ export class UsersService {
     private audit: AuditService,
     private mail: MailService,
     private config: ConfigService,
+    private cache: PermissionCacheService,
   ) {}
 
   // ── Actor capability checks (defense-in-depth — no global authz guard yet) ──
@@ -261,6 +263,7 @@ export class UsersService {
       beforeValue: { email: user.email },
     });
 
+    this.cache.invalidateSchool(schoolId);
     return { deleted: true };
   }
 
@@ -329,6 +332,7 @@ export class UsersService {
       before: { roles: before }, after: { roles: dto.roles },
     });
 
+    this.cache.invalidateSchool(schoolId);
     return { userId, roles: dto.roles };
   }
 
@@ -399,6 +403,7 @@ export class UsersService {
       after: { granted: dto.granted },
     });
 
+    this.cache.invalidateSchool(schoolId);
     return result;
   }
 
@@ -437,6 +442,7 @@ export class UsersService {
       after: { granted: dto.granted },
     });
 
+    this.cache.invalidateSchool(schoolId);
     return result;
   }
 
@@ -461,6 +467,7 @@ export class UsersService {
     });
     if (!record) return { deleted: false };
     await this.prisma.rolePermissionOverride.delete({ where: { id: record.id } });
+    this.cache.invalidateSchool(schoolId);
     return { deleted: true };
   }
 
@@ -485,6 +492,7 @@ export class UsersService {
     });
     if (!record) return { deleted: false };
     await this.prisma.userPermissionOverride.delete({ where: { id: record.id } });
+    this.cache.invalidateSchool(schoolId);
     return { deleted: true };
   }
 
