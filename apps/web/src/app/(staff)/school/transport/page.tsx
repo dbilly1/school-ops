@@ -1,0 +1,518 @@
+'use client';
+
+import { useState, useCallback, useEffect } from 'react';
+import { staffApi, type ApiError } from '@/lib/api';
+import { useApi } from '@/hooks/use-api';
+import { SaveButton, Alert, FormField, Input } from '@/components/ui/settings-card';
+import { Modal } from '@/components/ui/modal';
+import { cn } from '@/lib/cn';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type Vehicle  = { id: string; make: string; model: string; plateNumber: string; capacity: number };
+type Driver   = { id: string; name: string; phone: string | null; licenseNumber: string | null };
+type PickupPoint = { id: string; name: string; order: number };
+type Route    = {
+  id: string; name: string; dailyRate: number;
+  vehicle: Vehicle | null; driver: Driver | null;
+  pickupPoints: PickupPoint[];
+  _count: { studentAssignments: number };
+};
+type Student  = { id: string; studentId: string; firstName: string; lastName: string };
+type DailyFeeStatus = 'paid' | 'pre_covered' | 'absent' | 'unpaid';
+type CollectionEntry = {
+  student: Student;
+  status: DailyFeeStatus;
+  prePaymentBalance: number;
+  dailyRate: number;
+};
+
+const STATUS_CONFIG: Record<DailyFeeStatus, { label: string; color: string; bg: string }> = {
+  paid:        { label: 'Paid',        color: '#22c55e', bg: '#f0fdf4' },
+  pre_covered: { label: 'Pre-covered', color: '#3b82f6', bg: '#eff6ff' },
+  absent:      { label: 'Absent',      color: '#94a3b8', bg: '#f8fafc' },
+  unpaid:      { label: 'Unpaid',      color: '#ef4444', bg: '#fef2f2' },
+};
+
+type Tab = 'routes' | 'vehicles' | 'drivers' | 'fees';
+
+// ── Routes tab ────────────────────────────────────────────────────────────────
+
+function RoutesTab() {
+  const [showNew, setShowNew]   = useState(false);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [drivers, setDrivers]   = useState<Driver[]>([]);
+  const [form, setForm]         = useState({ name: '', dailyRate: '', vehicleId: '', driverId: '' });
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+
+  const fetchRoutes  = useCallback(() => staffApi.get<Route[]>('/school/transport/routes'), []);
+  const fetchV       = useCallback(() => staffApi.get<Vehicle[]>('/school/transport/vehicles'), []);
+  const fetchD       = useCallback(() => staffApi.get<Driver[]>('/school/transport/drivers'), []);
+  const { data: routes, loading, refetch } = useApi(fetchRoutes);
+  const { data: vData } = useApi(fetchV);
+  const { data: dData } = useApi(fetchD);
+
+  useEffect(() => { if (vData) setVehicles(vData); }, [vData]);
+  useEffect(() => { if (dData) setDrivers(dData); }, [dData]);
+
+  // Student assignment
+  const fetchStudents = useCallback(() => staffApi.get<Student[]>('/school/students'), []);
+  const { data: students } = useApi(fetchStudents);
+  const [assigningRoute, setAssigningRoute] = useState('');
+  const [assignStudentId, setAssignStudentId] = useState('');
+  const [assigning, setAssigning] = useState(false);
+
+  async function createRoute() {
+    if (!form.name || !form.dailyRate) { setError('Name and daily rate are required.'); return; }
+    setError(null); setSaving(true);
+    try {
+      await staffApi.post('/school/transport/routes', {
+        name: form.name,
+        dailyRate: parseFloat(form.dailyRate),
+        vehicleId: form.vehicleId || null,
+        driverId: form.driverId || null,
+      });
+      setForm({ name:'', dailyRate:'', vehicleId:'', driverId:'' });
+      setShowNew(false); refetch();
+    } catch (err) {
+      setError((err as ApiError).message ?? 'Failed to create route.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function assignStudent(routeId: string) {
+    if (!assignStudentId) return;
+    setAssigning(true);
+    try {
+      await staffApi.post('/school/transport/assignments', { studentId: assignStudentId, routeId });
+      setAssignStudentId(''); refetch();
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex justify-end mb-4">
+        <button onClick={() => setShowNew(true)}
+          className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition"
+          style={{ backgroundColor: 'var(--accent)' }}
+          onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--accent-hover)'}
+          onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--accent)'}>
+          + Add route
+        </button>
+      </div>
+
+      {loading && <div className="space-y-3">{[1,2].map(i => <div key={i} className="h-32 bg-slate-100 rounded-2xl animate-pulse" />)}</div>}
+
+      <div className="space-y-4">
+        {routes?.map(route => (
+          <div key={route.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">{route.name}</p>
+                <div className="flex items-center gap-3 mt-1 flex-wrap text-xs text-slate-500">
+                  <span>GHS {route.dailyRate}/day</span>
+                  {route.vehicle && <span>{route.vehicle.plateNumber} ({route.vehicle.make} {route.vehicle.model})</span>}
+                  {route.driver  && <span>Driver: {route.driver.name}</span>}
+                  <span className="font-medium" style={{ color: 'var(--accent)' }}>{route._count.studentAssignments} students</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Pickup points */}
+            {route.pickupPoints.length > 0 && (
+              <div className="px-5 py-3 border-b border-slate-50 flex flex-wrap gap-2">
+                {route.pickupPoints.sort((a,b) => a.order - b.order).map(p => (
+                  <span key={p.id} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded">{p.name}</span>
+                ))}
+              </div>
+            )}
+
+            {/* Assign student */}
+            <div className="px-5 py-3 flex gap-2">
+              <select
+                value={assigningRoute === route.id ? assignStudentId : ''}
+                onChange={e => { setAssigningRoute(route.id); setAssignStudentId(e.target.value); }}
+                className="flex-1 text-sm px-3 py-1.5 border border-slate-200 rounded-lg outline-none text-slate-700"
+              >
+                <option value="">Assign student to this route…</option>
+                {students?.map(s => <option key={s.id} value={s.id}>{s.lastName}, {s.firstName} ({s.studentId})</option>)}
+              </select>
+              {assigningRoute === route.id && assignStudentId && (
+                <button onClick={() => assignStudent(route.id)} disabled={assigning}
+                  className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg transition disabled:opacity-50"
+                  style={{ backgroundColor: 'var(--accent)' }}>
+                  {assigning ? '…' : 'Assign'}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {!loading && (!routes || routes.length === 0) && (
+          <div className="bg-white rounded-2xl border border-slate-100 px-6 py-12 text-center text-sm text-slate-400">
+            No routes yet.
+          </div>
+        )}
+      </div>
+
+      <Modal open={showNew} onClose={() => setShowNew(false)} title="Add transport route">
+        <div className="space-y-4">
+          {error && <Alert type="error" message={error} />}
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Route name" required>
+              <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Accra North Route" />
+            </FormField>
+            <FormField label="Daily rate (GHS)" required>
+              <Input type="number" value={form.dailyRate} onChange={e => setForm(f => ({ ...f, dailyRate: e.target.value }))} placeholder="0.00" />
+            </FormField>
+            <FormField label="Vehicle (optional)">
+              <select value={form.vehicleId} onChange={e => setForm(f => ({ ...f, vehicleId: e.target.value }))}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
+                <option value="">None</option>
+                {vehicles.map(v => <option key={v.id} value={v.id}>{v.plateNumber} — {v.make} {v.model}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Driver (optional)">
+              <select value={form.driverId} onChange={e => setForm(f => ({ ...f, driverId: e.target.value }))}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
+                <option value="">None</option>
+                {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </FormField>
+          </div>
+          <div className="flex justify-end">
+            <SaveButton loading={saving} onClick={createRoute} label="Create route" />
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+// ── Vehicles tab ──────────────────────────────────────────────────────────────
+
+function VehiclesTab() {
+  const [form, setForm] = useState({ make:'', model:'', plateNumber:'', capacity:'50' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
+
+  const fetchVehicles = useCallback(() => staffApi.get<Vehicle[]>('/school/transport/vehicles'), []);
+  const { data: vehicles, loading, refetch } = useApi(fetchVehicles);
+
+  async function create() {
+    if (!form.make || !form.model || !form.plateNumber) { setError('Make, model, and plate are required.'); return; }
+    setError(null); setSaving(true);
+    try {
+      await staffApi.post('/school/transport/vehicles', { ...form, capacity: parseInt(form.capacity) });
+      setForm({ make:'', model:'', plateNumber:'', capacity:'50' });
+      refetch();
+    } catch (err) {
+      setError((err as ApiError).message ?? 'Failed.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteVehicle(id: string) {
+    if (!confirm('Delete this vehicle?')) return;
+    await staffApi.delete(`/school/transport/vehicles/${id}`);
+    refetch();
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && <Alert type="error" message={error} />}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50">
+              {['Make', 'Model', 'Plate', 'Capacity', ''].map(h => (
+                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && Array.from({length:3}).map((_,i) => (
+              <tr key={i}><td colSpan={5} className="px-4 py-3"><div className="h-6 bg-slate-100 rounded animate-pulse" /></td></tr>
+            ))}
+            {vehicles?.map(v => (
+              <tr key={v.id} className="border-b border-slate-50 hover:bg-slate-50/40">
+                <td className="px-4 py-3 text-sm text-slate-700">{v.make}</td>
+                <td className="px-4 py-3 text-sm text-slate-700">{v.model}</td>
+                <td className="px-4 py-3 text-sm font-mono text-slate-600">{v.plateNumber}</td>
+                <td className="px-4 py-3 text-sm text-slate-600">{v.capacity}</td>
+                <td className="px-4 py-3 text-right">
+                  <button onClick={() => deleteVehicle(v.id)} className="text-xs text-red-400 hover:text-red-600 transition">Delete</button>
+                </td>
+              </tr>
+            ))}
+            {!loading && (!vehicles || vehicles.length === 0) && (
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-400">No vehicles yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-5">
+        <p className="text-sm font-semibold text-slate-700 mb-4">Add vehicle</p>
+        <div className="grid grid-cols-4 gap-3">
+          <FormField label="Make"><Input value={form.make} onChange={e => setForm(f => ({ ...f, make: e.target.value }))} placeholder="e.g. Toyota" /></FormField>
+          <FormField label="Model"><Input value={form.model} onChange={e => setForm(f => ({ ...f, model: e.target.value }))} placeholder="e.g. Hiace" /></FormField>
+          <FormField label="Plate number"><Input value={form.plateNumber} onChange={e => setForm(f => ({ ...f, plateNumber: e.target.value }))} placeholder="GR-1234-20" /></FormField>
+          <FormField label="Capacity"><Input type="number" value={form.capacity} onChange={e => setForm(f => ({ ...f, capacity: e.target.value }))} /></FormField>
+        </div>
+        <div className="flex justify-end mt-3">
+          <SaveButton loading={saving} onClick={create} label="Add vehicle" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Drivers tab ───────────────────────────────────────────────────────────────
+
+function DriversTab() {
+  const [form, setForm] = useState({ name:'', phone:'', licenseNumber:'' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
+
+  const fetchDrivers = useCallback(() => staffApi.get<Driver[]>('/school/transport/drivers'), []);
+  const { data: drivers, loading, refetch } = useApi(fetchDrivers);
+
+  async function create() {
+    if (!form.name) { setError('Name is required.'); return; }
+    setError(null); setSaving(true);
+    try {
+      await staffApi.post('/school/transport/drivers', { name: form.name, phone: form.phone || null, licenseNumber: form.licenseNumber || null });
+      setForm({ name:'', phone:'', licenseNumber:'' });
+      refetch();
+    } catch (err) {
+      setError((err as ApiError).message ?? 'Failed.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteDriver(id: string) {
+    if (!confirm('Delete this driver?')) return;
+    await staffApi.delete(`/school/transport/drivers/${id}`);
+    refetch();
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && <Alert type="error" message={error} />}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50">
+              {['Name', 'Phone', 'License', ''].map(h => (
+                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && Array.from({length:3}).map((_,i) => (
+              <tr key={i}><td colSpan={4} className="px-4 py-3"><div className="h-6 bg-slate-100 rounded animate-pulse" /></td></tr>
+            ))}
+            {drivers?.map(d => (
+              <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50/40">
+                <td className="px-4 py-3 text-sm font-medium text-slate-800">{d.name}</td>
+                <td className="px-4 py-3 text-sm text-slate-600">{d.phone ?? '—'}</td>
+                <td className="px-4 py-3 text-xs font-mono text-slate-500">{d.licenseNumber ?? '—'}</td>
+                <td className="px-4 py-3 text-right">
+                  <button onClick={() => deleteDriver(d.id)} className="text-xs text-red-400 hover:text-red-600 transition">Delete</button>
+                </td>
+              </tr>
+            ))}
+            {!loading && (!drivers || drivers.length === 0) && (
+              <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-400">No drivers yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-5">
+        <p className="text-sm font-semibold text-slate-700 mb-4">Add driver</p>
+        <div className="grid grid-cols-3 gap-3">
+          <FormField label="Full name" required><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Driver name" /></FormField>
+          <FormField label="Phone"><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+233 20 000 0000" /></FormField>
+          <FormField label="License number"><Input value={form.licenseNumber} onChange={e => setForm(f => ({ ...f, licenseNumber: e.target.value }))} placeholder="License #" /></FormField>
+        </div>
+        <div className="flex justify-end mt-3">
+          <SaveButton loading={saving} onClick={create} label="Add driver" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Transport fees tab ────────────────────────────────────────────────────────
+
+function TransportFeesTab() {
+  const today = new Date().toISOString().split('T')[0];
+  const [date, setDate]       = useState(today);
+  const [routeId, setRouteId] = useState('');
+  const [markingPaid, setMarkingPaid] = useState<string | null>(null);
+
+  const fetchRoutes  = useCallback(() => staffApi.get<Route[]>('/school/transport/routes'), []);
+  const fetchEntries = useCallback(
+    () => routeId ? staffApi.get<CollectionEntry[]>(`/school/transport-fees/daily/${routeId}?date=${date}`).catch(() => []) : Promise.resolve([]),
+    [routeId, date],
+  );
+
+  const { data: routes }                     = useApi(fetchRoutes);
+  const { data: entries, loading, refetch }  = useApi(fetchEntries);
+
+  async function markPaid(studentId: string) {
+    setMarkingPaid(studentId);
+    try {
+      await staffApi.post('/school/transport-fees/mark-paid', { studentId, date, routeId });
+      refetch();
+    } finally {
+      setMarkingPaid(null);
+    }
+  }
+
+  const summary = entries?.reduce((acc, e) => ({
+    paid: acc.paid + (e.status === 'paid' ? 1 : 0),
+    cash: acc.cash + (e.status === 'paid' ? e.dailyRate : 0),
+    unpaid: acc.unpaid + (e.status === 'unpaid' ? 1 : 0),
+  }), { paid: 0, cash: 0, unpaid: 0 });
+
+  return (
+    <div>
+      <div className="flex gap-3 mb-5">
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} max={today}
+          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
+          onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+          onBlur={e => e.currentTarget.style.boxShadow = ''} />
+        <select value={routeId} onChange={e => setRouteId(e.target.value)}
+          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
+          <option value="">Select route…</option>
+          {routes?.map(r => <option key={r.id} value={r.id}>{r.name} (GHS {r.dailyRate}/day)</option>)}
+        </select>
+      </div>
+
+      {summary && routeId && (
+        <div className="flex gap-4 mb-4">
+          {[
+            { label: 'Paid', value: summary.paid, color: '#22c55e' },
+            { label: 'Unpaid', value: summary.unpaid, color: '#ef4444' },
+            { label: 'Cash today', value: `GHS ${summary.cash.toFixed(2)}`, color: 'var(--accent)' },
+          ].map(c => (
+            <div key={c.label} className="bg-white rounded-xl border border-slate-100 px-4 py-3 text-center">
+              <p className="text-xs text-slate-400">{c.label}</p>
+              <p className="text-lg font-bold" style={{ color: c.color }}>{c.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!routeId && (
+        <div className="bg-white rounded-2xl border border-slate-100 px-6 py-12 text-center text-sm text-slate-400">Select a route.</div>
+      )}
+
+      {routeId && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Student</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Status</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Balance</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {loading && Array.from({length:6}).map((_,i) => (
+                <tr key={i}><td colSpan={4} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td></tr>
+              ))}
+              {!loading && entries?.map(entry => {
+                const cfg    = STATUS_CONFIG[entry.status];
+                const canPay = entry.status === 'unpaid';
+                return (
+                  <tr key={entry.student.id} className={cn('border-b border-slate-50', entry.status === 'absent' ? 'opacity-50' : 'hover:bg-slate-50/40 transition')}>
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-medium text-slate-800">{entry.student.lastName}, {entry.student.firstName}</p>
+                      <p className="text-xs font-mono text-slate-400">{entry.student.studentId}</p>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full"
+                        style={{ color: cfg.color, backgroundColor: cfg.bg }}>
+                        {cfg.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {entry.prePaymentBalance > 0 ? (
+                        <span className="text-sm font-medium text-blue-600">{entry.prePaymentBalance}d</span>
+                      ) : <span className="text-slate-300 text-sm">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {canPay && (
+                        <button onClick={() => markPaid(entry.student.id)} disabled={markingPaid === entry.student.id}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
+                          style={{ backgroundColor: '#22c55e' }}>
+                          {markingPaid === entry.student.id ? '…' : 'Mark paid'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!loading && (!entries || entries.length === 0) && (
+                <tr><td colSpan={4} className="px-4 py-10 text-center text-sm text-slate-400">No students on this route.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default function TransportPage() {
+  const [tab, setTab] = useState<Tab>('routes');
+
+  const TABS: [Tab, string][] = [
+    ['routes',   'Routes'],
+    ['vehicles', 'Vehicles'],
+    ['drivers',  'Drivers'],
+    ['fees',     'Daily Fees'],
+  ];
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Transport</h1>
+          <p className="text-sm text-slate-500 mt-0.5">Manage routes, vehicles, drivers, and daily fee collection.</p>
+        </div>
+      </div>
+
+      <div className="flex gap-1 mb-6 border-b border-slate-200">
+        {TABS.map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)}
+            className={cn(
+              'px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
+              tab === key ? 'border-current' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300',
+            )}
+            style={tab === key ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : {}}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'routes'   && <RoutesTab />}
+      {tab === 'vehicles' && <VehiclesTab />}
+      {tab === 'drivers'  && <DriversTab />}
+      {tab === 'fees'     && <TransportFeesTab />}
+    </div>
+  );
+}

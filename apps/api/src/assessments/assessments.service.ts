@@ -1,0 +1,167 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { GradingService } from '../school-setup/grading/grading.service';
+import { CreateAssessmentDto, BulkRecordScoresDto } from './dto/assessment.dto';
+
+@Injectable()
+export class AssessmentsService {
+  constructor(
+    private prisma: PrismaService,
+    private gradingService: GradingService,
+  ) {}
+
+  async findAll(schoolId: string, termId?: string, subjectId?: string) {
+    return this.prisma.assessment.findMany({
+      where: {
+        schoolId,
+        ...(termId ? { termId } : {}),
+        ...(subjectId ? { subjectId } : {}),
+      },
+      include: {
+        subject: { select: { id: true, name: true } },
+        term: { select: { id: true, name: true } },
+        _count: { select: { scores: true } },
+      },
+      orderBy: [{ assessmentDate: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  async findOne(schoolId: string, id: string) {
+    const assessment = await this.prisma.assessment.findFirst({
+      where: { id, schoolId },
+      include: {
+        subject: { select: { id: true, name: true } },
+        term: { select: { id: true, name: true } },
+        scores: {
+          include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
+          orderBy: { rawScore: 'desc' },
+        },
+      },
+    });
+    if (!assessment) throw new NotFoundException('Assessment not found');
+
+    // Attach derived grade labels
+    const scoresWithGrades = await Promise.all(
+      assessment.scores.map(async (s) => ({
+        ...s,
+        gradeLabel: await this.gradingService.deriveGrade(schoolId, Number(s.rawScore)),
+      })),
+    );
+
+    return { ...assessment, scores: scoresWithGrades };
+  }
+
+  async create(schoolId: string, dto: CreateAssessmentDto) {
+    const term = await this.prisma.term.findFirst({ where: { id: dto.termId, schoolId } });
+    if (!term) throw new NotFoundException('Term not found');
+
+    const subject = await this.prisma.subject.findFirst({ where: { id: dto.subjectId, schoolId } });
+    if (!subject) throw new NotFoundException('Subject not found');
+
+    return this.prisma.assessment.create({
+      data: {
+        schoolId,
+        subjectId: dto.subjectId,
+        termId: dto.termId,
+        title: dto.title,
+        totalScore: dto.totalScore,
+        weight: dto.weight,
+        assessmentDate: dto.assessmentDate ? new Date(dto.assessmentDate) : null,
+      },
+      include: {
+        subject: { select: { id: true, name: true } },
+        term: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  async delete(schoolId: string, id: string) {
+    const assessment = await this.prisma.assessment.findFirst({ where: { id, schoolId } });
+    if (!assessment) throw new NotFoundException('Assessment not found');
+    return this.prisma.assessment.delete({ where: { id } });
+  }
+
+  async recordScores(schoolId: string, assessmentId: string, dto: BulkRecordScoresDto) {
+    const assessment = await this.prisma.assessment.findFirst({ where: { id: assessmentId, schoolId } });
+    if (!assessment) throw new NotFoundException('Assessment not found');
+
+    const results = await this.prisma.$transaction(
+      dto.scores.map((s) =>
+        this.prisma.assessmentScore.upsert({
+          where: { assessmentId_studentId: { assessmentId, studentId: s.studentId } },
+          update: { rawScore: s.rawScore, remarks: s.remarks },
+          create: { assessmentId, studentId: s.studentId, rawScore: s.rawScore, remarks: s.remarks },
+        }),
+      ),
+    );
+
+    return { recorded: results.length, assessmentId };
+  }
+
+  async getScoresByStudent(schoolId: string, studentId: string, termId?: string) {
+    const scores = await this.prisma.assessmentScore.findMany({
+      where: {
+        studentId,
+        assessment: {
+          schoolId,
+          ...(termId ? { termId } : {}),
+        },
+      },
+      include: {
+        assessment: {
+          include: {
+            subject: { select: { id: true, name: true } },
+            term: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: { assessment: { assessmentDate: 'desc' } },
+    });
+
+    return Promise.all(
+      scores.map(async (s) => ({
+        ...s,
+        gradeLabel: await this.gradingService.deriveGrade(schoolId, Number(s.rawScore)),
+        percentage: Math.round((Number(s.rawScore) / Number(s.assessment.totalScore)) * 100),
+      })),
+    );
+  }
+
+  async getGradeBook(schoolId: string, classId: string, termId: string) {
+    const students = await this.prisma.studentClassAssignment.findMany({
+      where: { classId },
+      include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
+      orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
+    });
+
+    const assessments = await this.prisma.assessment.findMany({
+      where: {
+        schoolId,
+        termId,
+        subject: { gradeLevels: { some: { gradeLevel: { classes: { some: { id: classId } } } } } },
+      },
+      include: {
+        subject: { select: { id: true, name: true } },
+        scores: true,
+      },
+      orderBy: { assessmentDate: 'asc' },
+    });
+
+    const rows = students.map(({ student }) => {
+      const scores = assessments.map((a) => {
+        const score = a.scores.find((s) => s.studentId === student.id);
+        return {
+          assessmentId: a.id,
+          title: a.title,
+          subject: a.subject.name,
+          totalScore: a.totalScore,
+          rawScore: score?.rawScore ?? null,
+          percentage: score ? Math.round((Number(score.rawScore) / Number(a.totalScore)) * 100) : null,
+        };
+      });
+      return { student, scores };
+    });
+
+    return { assessments: assessments.map((a) => ({ id: a.id, title: a.title, subject: a.subject.name, totalScore: a.totalScore })), rows };
+  }
+}

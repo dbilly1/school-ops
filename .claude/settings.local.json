@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(mkdir -p \\\\ *)",
+      "Bash(git -C apps/web log --oneline -5)",
+      "Bash(git -C apps/web branch --show-current)",
+      "Bash(git -C apps/web status --short)"
+    ]
+  }
+}

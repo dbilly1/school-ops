@@ -1,0 +1,325 @@
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import {
+  CreateFeeStructureDto, CreateInvoiceDto,
+  RecordPaymentDto, AssignStudentCategoryDto,
+  BulkCreateFeeStructuresDto, SaveFeeMatrixDto,
+} from './dto/finance.dto';
+
+@Injectable()
+export class FinanceService {
+  constructor(private prisma: PrismaService) {}
+
+  // ── Fee Structures ────────────────────────────────────────
+
+  async findFeeStructures(schoolId: string, termId?: string) {
+    return this.prisma.feeStructure.findMany({
+      where: { schoolId, ...(termId ? { termId } : {}) },
+      include: {
+        gradeLevel: { select: { id: true, name: true } },
+        studentCategory: { select: { id: true, name: true } },
+        term: { select: { id: true, name: true } },
+      },
+      orderBy: [{ gradeLevel: { sequence: 'asc' } }, { studentCategory: { name: 'asc' } }],
+    });
+  }
+
+  async bulkCreateFeeStructures(schoolId: string, dto: BulkCreateFeeStructuresDto) {
+    const results = await Promise.all(
+      dto.entries.map(async (entry) => {
+        const existing = await this.prisma.feeStructure.findFirst({
+          where: { schoolId, gradeLevelId: entry.gradeLevelId, studentCategoryId: dto.studentCategoryId, termId: dto.termId },
+        });
+        if (existing) {
+          // Update amount if already exists
+          return this.prisma.feeStructure.update({
+            where: { id: existing.id },
+            data: { amount: entry.amount },
+          });
+        }
+        return this.prisma.feeStructure.create({
+          data: { schoolId, gradeLevelId: entry.gradeLevelId, studentCategoryId: dto.studentCategoryId, termId: dto.termId, amount: entry.amount },
+        });
+      }),
+    );
+    return { saved: results.length };
+  }
+
+  async saveFeeMatrix(schoolId: string, dto: SaveFeeMatrixDto) {
+    if (dto.cells.length === 0) return { saved: 0 };
+
+    // Upsert every cell in parallel
+    const results = await Promise.all(
+      dto.cells.map(async (cell) => {
+        const existing = await this.prisma.feeStructure.findFirst({
+          where: {
+            schoolId,
+            gradeLevelId:      cell.gradeLevelId,
+            studentCategoryId: cell.studentCategoryId,
+            termId:            dto.termId,
+          },
+        });
+        if (existing) {
+          return this.prisma.feeStructure.update({
+            where: { id: existing.id },
+            data: { amount: cell.amount },
+          });
+        }
+        return this.prisma.feeStructure.create({
+          data: {
+            schoolId,
+            gradeLevelId:      cell.gradeLevelId,
+            studentCategoryId: cell.studentCategoryId,
+            termId:            dto.termId,
+            amount:            cell.amount,
+          },
+        });
+      }),
+    );
+    return { saved: results.length };
+  }
+
+  async createFeeStructure(schoolId: string, dto: CreateFeeStructureDto) {
+    const existing = await this.prisma.feeStructure.findFirst({
+      where: { schoolId, gradeLevelId: dto.gradeLevelId, studentCategoryId: dto.studentCategoryId, termId: dto.termId },
+    });
+    if (existing) throw new ConflictException('Fee structure already exists for this combination');
+
+    return this.prisma.feeStructure.create({
+      data: { schoolId, ...dto },
+      include: {
+        gradeLevel: { select: { id: true, name: true } },
+        studentCategory: { select: { id: true, name: true } },
+        term: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  async updateFeeStructure(schoolId: string, id: string, amount: number) {
+    const structure = await this.prisma.feeStructure.findFirst({ where: { id, schoolId } });
+    if (!structure) throw new NotFoundException('Fee structure not found');
+    return this.prisma.feeStructure.update({ where: { id }, data: { amount } });
+  }
+
+  async deleteFeeStructure(schoolId: string, id: string) {
+    const structure = await this.prisma.feeStructure.findFirst({ where: { id, schoolId } });
+    if (!structure) throw new NotFoundException('Fee structure not found');
+    return this.prisma.feeStructure.delete({ where: { id } });
+  }
+
+  // ── Student Category Assignment ───────────────────────────
+
+  async assignStudentCategory(schoolId: string, studentId: string, dto: AssignStudentCategoryDto) {
+    const student = await this.prisma.student.findFirst({ where: { id: studentId, schoolId } });
+    if (!student) throw new NotFoundException('Student not found');
+
+    const category = await this.prisma.studentCategory.findFirst({
+      where: { id: dto.studentCategoryId, schoolId },
+    });
+    if (!category) throw new NotFoundException('Student category not found');
+
+    return this.prisma.student.update({
+      where: { id: studentId },
+      data: { studentCategoryId: dto.studentCategoryId },
+      select: { id: true, studentId: true, studentCategoryId: true },
+    });
+  }
+
+  // ── Invoices ──────────────────────────────────────────────
+
+  async findInvoices(schoolId: string, termId?: string, classId?: string) {
+    return this.prisma.invoice.findMany({
+      where: {
+        schoolId,
+        ...(termId ? { termId } : {}),
+        ...(classId
+          ? { student: { classAssignments: { some: { classId } } } }
+          : {}),
+      },
+      include: {
+        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
+        term: { select: { id: true, name: true } },
+        _count: { select: { payments: true } },
+      },
+      orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
+    });
+  }
+
+  async findInvoice(schoolId: string, id: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id, schoolId },
+      include: {
+        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
+        term: { select: { id: true, name: true } },
+        payments: {
+          orderBy: { paymentDate: 'desc' },
+          include: { recordedByUser: { select: { firstName: true, lastName: true } } },
+        },
+      },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
+    return {
+      ...invoice,
+      balance: Number(invoice.amount) - Number(invoice.amountPaid),
+      isPaid: Number(invoice.amountPaid) >= Number(invoice.amount),
+    };
+  }
+
+  async createInvoice(schoolId: string, dto: CreateInvoiceDto) {
+    const existing = await this.prisma.invoice.findFirst({
+      where: { schoolId, studentId: dto.studentId, termId: dto.termId },
+    });
+    if (existing) throw new ConflictException('Invoice already exists for this student and term');
+
+    return this.prisma.invoice.create({
+      data: {
+        schoolId,
+        studentId: dto.studentId,
+        termId: dto.termId,
+        amount: dto.amount,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        notes: dto.notes,
+      },
+      include: {
+        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
+        term: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  // Auto-generate invoices for all students in a term from fee structures
+  async generateTermInvoices(schoolId: string, termId: string) {
+    const term = await this.prisma.term.findFirst({ where: { id: termId, schoolId } });
+    if (!term) throw new NotFoundException('Term not found');
+
+    const assignments = await this.prisma.studentClassAssignment.findMany({
+      where: {
+        academicYearId: term.academicYearId,
+        class: { schoolId },
+      },
+      include: {
+        student: {
+          select: { id: true, studentId: true, studentCategoryId: true },
+        },
+        class: { select: { gradeLevelId: true } },
+      },
+    });
+
+    let created = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const { student, class: cls } of assignments) {
+      if (!student.studentCategoryId) {
+        errors.push(`${student.studentId}: no student category assigned`);
+        skipped++;
+        continue;
+      }
+
+      const existing = await this.prisma.invoice.findFirst({
+        where: { schoolId, studentId: student.id, termId },
+      });
+      if (existing) { skipped++; continue; }
+
+      const feeStructure = await this.prisma.feeStructure.findFirst({
+        where: {
+          schoolId,
+          gradeLevelId: cls.gradeLevelId,
+          studentCategoryId: student.studentCategoryId,
+          termId,
+        },
+      });
+
+      if (!feeStructure) {
+        errors.push(`${student.studentId}: no fee structure for grade level + category`);
+        skipped++;
+        continue;
+      }
+
+      await this.prisma.invoice.create({
+        data: { schoolId, studentId: student.id, termId, amount: feeStructure.amount },
+      });
+      created++;
+    }
+
+    return { created, skipped, errors, termId };
+  }
+
+  // ── Payments ──────────────────────────────────────────────
+
+  async recordPayment(schoolId: string, invoiceId: string, dto: RecordPaymentDto, recordedBy: string) {
+    const invoice = await this.prisma.invoice.findFirst({ where: { id: invoiceId, schoolId } });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
+    const newTotal = Number(invoice.amountPaid) + dto.amount;
+    if (newTotal > Number(invoice.amount))
+      throw new BadRequestException(`Payment of ${dto.amount} would exceed invoice amount of ${invoice.amount}`);
+
+    const [payment] = await this.prisma.$transaction([
+      this.prisma.payment.create({
+        data: {
+          schoolId,
+          invoiceId,
+          amount: dto.amount,
+          paymentDate: new Date(dto.paymentDate),
+          method: dto.method,
+          reference: dto.reference,
+          recordedBy,
+        },
+      }),
+      this.prisma.invoice.update({
+        where: { id: invoiceId },
+        data: { amountPaid: newTotal },
+      }),
+    ]);
+
+    return {
+      payment,
+      invoice: {
+        id: invoiceId,
+        amount: invoice.amount,
+        amountPaid: newTotal,
+        balance: Number(invoice.amount) - newTotal,
+        isPaid: newTotal >= Number(invoice.amount),
+      },
+    };
+  }
+
+  // ── Outstanding Balances ──────────────────────────────────
+
+  async getOutstandingBalances(schoolId: string, termId: string, classId?: string) {
+    const invoices = await this.prisma.invoice.findMany({
+      where: {
+        schoolId,
+        termId,
+        ...(classId ? { student: { classAssignments: { some: { classId } } } } : {}),
+      },
+      include: {
+        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
+      },
+    });
+
+    const outstanding = invoices
+      .map((inv) => ({
+        student: inv.student,
+        invoiceId: inv.id,
+        amount: Number(inv.amount),
+        amountPaid: Number(inv.amountPaid),
+        balance: Number(inv.amount) - Number(inv.amountPaid),
+        isPaid: Number(inv.amountPaid) >= Number(inv.amount),
+      }))
+      .filter((inv) => !inv.isPaid)
+      .sort((a, b) => b.balance - a.balance);
+
+    const totalOutstanding = outstanding.reduce((sum, inv) => sum + inv.balance, 0);
+
+    return {
+      termId,
+      totalStudents: invoices.length,
+      studentsWithBalance: outstanding.length,
+      totalOutstanding,
+      invoices: outstanding,
+    };
+  }
+}
