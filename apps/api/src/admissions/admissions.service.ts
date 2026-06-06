@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { retryOnUniqueViolation } from '../common/retry-unique';
+import { generateTempPassword } from '../common/password.util';
 import {
   CreateAdmissionDto, UpdateAdmissionStageDto,
   AddFollowUpDto, AdmissionFieldConfigDto,
@@ -176,7 +177,6 @@ export class AdmissionsService {
   }
 
   private generatePassword(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    return generateTempPassword(8);
   }
 }

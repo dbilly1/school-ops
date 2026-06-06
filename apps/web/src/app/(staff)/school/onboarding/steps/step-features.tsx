@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { staffApi } from '@/lib/api';
+import { clearFeatureCache } from '@/hooks/use-feature';
 import { WizardShell, WizardNav } from './wizard-shell';
 
 // ── Feature definitions (UI metadata only — states come from API) ─────────────
@@ -135,6 +136,7 @@ export function StepFeatures({ onNext, onSkip }: { onNext: () => void; onSkip: (
           })),
         })),
       });
+      clearFeatureCache(); // feature/sub-feature states changed — drop cache so gates/sidebar re-resolve
     } catch {
       // Non-fatal — proceed to next step regardless
     } finally {

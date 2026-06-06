@@ -56,13 +56,14 @@ export class PermissionsService {
     });
     if (userOverride) return userOverride.granted;
 
-    // Step 6 — Role-level overrides (union across all roles)
-    for (const role of roles) {
-      const roleOverride = await this.prisma.rolePermissionOverride.findFirst({
-        where: { schoolId, role, featureKey, subFeatureKey: sub, action },
-      });
-      if (roleOverride?.granted) return true;
-    }
+    // Step 6 — Role-level overrides (union across all roles). An explicit grant
+    // wins; failing that, an explicit deny blocks (M2 — deny was previously
+    // ignored). Only when no role has an override do we fall through to defaults.
+    const roleOverrides = await this.prisma.rolePermissionOverride.findMany({
+      where: { schoolId, role: { in: roles }, featureKey, subFeatureKey: sub, action },
+    });
+    if (roleOverrides.some((o) => o.granted)) return true;
+    if (roleOverrides.length > 0) return false;
 
     // Step 7 — Role defaults (union across all roles)
     for (const role of roles) {

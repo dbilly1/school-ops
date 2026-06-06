@@ -4,7 +4,9 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
+import { Prisma } from '@prisma/client';
 import { retryOnUniqueViolation } from '../common/retry-unique';
+import { generateTempPassword as randomTempPassword } from '../common/password.util';
 import {
   InviteUserDto, AssignRolesDto,
   RolePermissionOverrideDto, UserPermissionOverrideDto,
@@ -146,8 +148,12 @@ export class UsersService {
     const passwordHash = await bcrypt.hash(tempPassword, 10);
 
     // Generate the STF-#### staff ID inside a retried transaction so a unique
-    // collision under concurrent invites recomputes instead of failing.
-    const user = await retryOnUniqueViolation(() =>
+    // collision under concurrent invites recomputes instead of failing. A
+    // concurrent duplicate *email* (past the pre-check above) can't be retried
+    // away — surface it as a clean 409 rather than a raw P2002.
+    let user;
+    try {
+      user = await retryOnUniqueViolation(() =>
       this.prisma.$transaction(async (tx) => {
         const count = await tx.user.count({ where: { schoolId } });
         const staffId = `STF-${String(count + 1).padStart(4, '0')}`;
@@ -173,7 +179,18 @@ export class UsersService {
         });
         return newUser;
       }),
-    );
+      );
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        Array.isArray(err.meta?.target) &&
+        (err.meta.target as string[]).includes('email')
+      ) {
+        throw new ConflictException('A user with this email already exists in this school');
+      }
+      throw err;
+    }
 
     await this.audit.log({
       schoolId, actorId: invitedBy,
@@ -472,7 +489,6 @@ export class UsersService {
   }
 
   private generateTempPassword(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    return Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    return randomTempPassword(10);
   }
 }

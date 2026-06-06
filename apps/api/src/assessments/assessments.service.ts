@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GradingService } from '../school-setup/grading/grading.service';
 import { CreateAssessmentDto, BulkRecordScoresDto } from './dto/assessment.dto';
@@ -88,6 +88,12 @@ export class AssessmentsService {
     const studentIds = [...new Set(dto.scores.map((s) => s.studentId))];
     const validStudents = await this.prisma.student.count({ where: { id: { in: studentIds }, schoolId } });
     if (validStudents !== studentIds.length) throw new NotFoundException('One or more students not found');
+
+    // Scores must fall within 0..totalScore (M1) — otherwise percentages/grades break.
+    const max = Number(assessment.totalScore);
+    const invalid = dto.scores.find((s) => Number(s.rawScore) < 0 || Number(s.rawScore) > max);
+    if (invalid)
+      throw new BadRequestException(`Score ${invalid.rawScore} is out of range (0–${max}) for this assessment`);
 
     const results = await this.prisma.$transaction(
       dto.scores.map((s) =>

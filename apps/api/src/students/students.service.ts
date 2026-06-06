@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { retryOnUniqueViolation } from '../common/retry-unique';
+import { generateTempPassword } from '../common/password.util';
 import { CreateStudentDto, UpdateStudentDto, AddGuardianDto, AssignClassDto } from './dto/student.dto';
 
 @Injectable()
@@ -278,7 +279,6 @@ export class StudentsService {
   }
 
   private generatePassword(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    return generateTempPassword(8);
   }
 }

@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { useStaffAuth } from '@/contexts/staff-auth';
+import { clearPermissionCache } from '@/hooks/use-permission';
 import { Alert } from '@/components/ui/settings-card';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -275,6 +276,7 @@ export default function RolePermissionsPage() {
       });
       await Promise.all(promises);
       setPendingChanges(new Map());
+      clearPermissionCache(); // overrides changed — drop cached can() results so gates re-resolve
       setAlert({ type: 'success', message: 'Permission overrides saved.' });
       refetchOverrides();
     } catch (err) {

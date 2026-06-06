@@ -105,12 +105,12 @@ export class AuthService {
   async staffRefresh(refreshToken: string) {
     const prefix = refreshToken.slice(0, 16);
 
-    // Narrow the search to just the one record that could match this token
+    // Narrow the search to the records sharing this token's prefix (bounded
+    // bcrypt scan) — the legacy null-prefix fan-out was an unbounded scan (Low).
     const candidates = await this.prisma.refreshToken.findMany({
       where: {
         expiresAt: { gt: new Date() },
-        // tokenPrefix may be null for tokens created before this fix
-        OR: [{ tokenPrefix: prefix }, { tokenPrefix: null }],
+        tokenPrefix: prefix,
       },
       include: { user: { include: { roles: true } } },
     });
@@ -132,7 +132,7 @@ export class AuthService {
     const candidates = await this.prisma.refreshToken.findMany({
       where: {
         expiresAt: { gt: new Date() },
-        OR: [{ tokenPrefix: prefix }, { tokenPrefix: null }],
+        tokenPrefix: prefix,
       },
     });
 
@@ -203,7 +203,7 @@ export class AuthService {
     const candidates = await this.prisma.studentRefreshToken.findMany({
       where: {
         expiresAt: { gt: new Date() },
-        OR: [{ tokenPrefix: prefix }, { tokenPrefix: null }],
+        tokenPrefix: prefix,
       },
       include: { student: true },
     });
@@ -225,7 +225,7 @@ export class AuthService {
     const candidates = await this.prisma.studentRefreshToken.findMany({
       where: {
         expiresAt: { gt: new Date() },
-        OR: [{ tokenPrefix: prefix }, { tokenPrefix: null }],
+        tokenPrefix: prefix,
       },
     });
 
