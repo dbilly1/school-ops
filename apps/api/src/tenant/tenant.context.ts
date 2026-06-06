@@ -4,10 +4,6 @@ interface TenantStore {
   schoolId: string;
 }
 
+// Populated per-request by TenantInterceptor; consumed by the Prisma
+// tenant-scope middleware (see prisma/tenant-scope.middleware.ts).
 export const tenantStorage = new AsyncLocalStorage<TenantStore>();
-
-export function getCurrentSchoolId(): string {
-  const store = tenantStorage.getStore();
-  if (!store) throw new Error('No tenant context — is TenantInterceptor applied?');
-  return store.schoolId;
-}

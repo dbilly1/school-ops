@@ -167,6 +167,9 @@ export class StudentsService {
     const student = await this.prisma.student.findFirst({ where: { id: studentId, schoolId } });
     if (!student) throw new NotFoundException('Student not found');
 
+    const cls = await this.prisma.class.findFirst({ where: { id: dto.classId, schoolId } });
+    if (!cls) throw new NotFoundException('Class not found');
+
     const academicYearId = dto.academicYearId ?? await this.getActiveYearId(schoolId);
 
     return this.prisma.studentClassAssignment.upsert({

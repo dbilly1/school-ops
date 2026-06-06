@@ -103,6 +103,12 @@ export class StaffService {
     const profile = await this.prisma.staffProfile.findFirst({ where: { schoolId, userId } });
     if (!profile) throw new NotFoundException('Staff profile not found');
 
+    const subject = await this.prisma.subject.findFirst({ where: { id: dto.subjectId, schoolId } });
+    if (!subject) throw new NotFoundException('Subject not found');
+
+    const cls = await this.prisma.class.findFirst({ where: { id: dto.classId, schoolId } });
+    if (!cls) throw new NotFoundException('Class not found');
+
     const existing = await this.prisma.teacherSubjectAssignment.findFirst({
       where: { staffProfileId: profile.id, subjectId: dto.subjectId, classId: dto.classId },
     });

@@ -85,6 +85,10 @@ export class AssessmentsService {
     const assessment = await this.prisma.assessment.findFirst({ where: { id: assessmentId, schoolId } });
     if (!assessment) throw new NotFoundException('Assessment not found');
 
+    const studentIds = [...new Set(dto.scores.map((s) => s.studentId))];
+    const validStudents = await this.prisma.student.count({ where: { id: { in: studentIds }, schoolId } });
+    if (validStudents !== studentIds.length) throw new NotFoundException('One or more students not found');
+
     const results = await this.prisma.$transaction(
       dto.scores.map((s) =>
         this.prisma.assessmentScore.upsert({
@@ -128,8 +132,11 @@ export class AssessmentsService {
   }
 
   async getGradeBook(schoolId: string, classId: string, termId: string) {
+    const cls = await this.prisma.class.findFirst({ where: { id: classId, schoolId } });
+    if (!cls) throw new NotFoundException('Class not found');
+
     const students = await this.prisma.studentClassAssignment.findMany({
-      where: { classId },
+      where: { classId, schoolId },
       include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
       orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
     });

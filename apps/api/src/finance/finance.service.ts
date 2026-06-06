@@ -167,6 +167,12 @@ export class FinanceService {
   }
 
   async createInvoice(schoolId: string, dto: CreateInvoiceDto) {
+    const student = await this.prisma.student.findFirst({ where: { id: dto.studentId, schoolId } });
+    if (!student) throw new NotFoundException('Student not found');
+
+    const term = await this.prisma.term.findFirst({ where: { id: dto.termId, schoolId } });
+    if (!term) throw new NotFoundException('Term not found');
+
     const existing = await this.prisma.invoice.findFirst({
       where: { schoolId, studentId: dto.studentId, termId: dto.termId },
     });
