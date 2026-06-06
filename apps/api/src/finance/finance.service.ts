@@ -258,12 +258,20 @@ export class FinanceService {
     const invoice = await this.prisma.invoice.findFirst({ where: { id: invoiceId, schoolId } });
     if (!invoice) throw new NotFoundException('Invoice not found');
 
-    const newTotal = Number(invoice.amountPaid) + dto.amount;
-    if (newTotal > Number(invoice.amount))
-      throw new BadRequestException(`Payment of ${dto.amount} would exceed invoice amount of ${invoice.amount}`);
+    return this.prisma.$transaction(async (tx) => {
+      // Atomic increment (not read-modify-write) so concurrent payments can't
+      // lose an update; validate the resulting total inside the transaction so
+      // an over-payment rolls back.
+      const updated = await tx.invoice.update({
+        where: { id: invoiceId },
+        data: { amountPaid: { increment: dto.amount } },
+      });
+      if (Number(updated.amountPaid) > Number(updated.amount))
+        throw new BadRequestException(
+          `Payment of ${dto.amount} would exceed invoice amount of ${updated.amount}`,
+        );
 
-    const [payment] = await this.prisma.$transaction([
-      this.prisma.payment.create({
+      const payment = await tx.payment.create({
         data: {
           schoolId,
           invoiceId,
@@ -273,23 +281,19 @@ export class FinanceService {
           reference: dto.reference,
           recordedBy,
         },
-      }),
-      this.prisma.invoice.update({
-        where: { id: invoiceId },
-        data: { amountPaid: newTotal },
-      }),
-    ]);
+      });
 
-    return {
-      payment,
-      invoice: {
-        id: invoiceId,
-        amount: invoice.amount,
-        amountPaid: newTotal,
-        balance: Number(invoice.amount) - newTotal,
-        isPaid: newTotal >= Number(invoice.amount),
-      },
-    };
+      return {
+        payment,
+        invoice: {
+          id: invoiceId,
+          amount: updated.amount,
+          amountPaid: updated.amountPaid,
+          balance: Number(updated.amount) - Number(updated.amountPaid),
+          isPaid: Number(updated.amountPaid) >= Number(updated.amount),
+        },
+      };
+    });
   }
 
   // ── Outstanding Balances ──────────────────────────────────

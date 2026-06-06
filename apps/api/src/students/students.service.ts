@@ -3,6 +3,7 @@ import * as bcrypt from 'bcryptjs';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { retryOnUniqueViolation } from '../common/retry-unique';
 import { CreateStudentDto, UpdateStudentDto, AddGuardianDto, AssignClassDto } from './dto/student.dto';
 
 @Injectable()
@@ -16,16 +17,19 @@ export class StudentsService {
   // ── Create directly (bypass admissions) ──────────────────
 
   async create(schoolId: string, dto: CreateStudentDto) {
-    // Generate student ID: YYYY + 4-digit sequence
     const year = new Date().getFullYear();
-    const count = await this.prisma.student.count({ where: { schoolId } });
-    const studentId = `${year}${String(count + 1).padStart(4, '0')}`;
 
     // Generate portal credentials
     const tempPassword = this.generatePassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
 
-    return this.prisma.$transaction(async (tx) => {
+    // Generate the YYYY#### student ID inside a retried transaction so a unique
+    // collision under concurrent inserts recomputes instead of failing.
+    return retryOnUniqueViolation(() =>
+      this.prisma.$transaction(async (tx) => {
+      const count = await tx.student.count({ where: { schoolId } });
+      const studentId = `${year}${String(count + 1).padStart(4, '0')}`;
+
       const student = await tx.student.create({
         data: {
           schoolId,
@@ -73,7 +77,8 @@ export class StudentsService {
         lastName: student.lastName,
         tempPassword,
       };
-    });
+      }),
+    );
   }
 
   async findAll(schoolId: string, classId?: string, academicYearId?: string) {
@@ -160,7 +165,14 @@ export class StudentsService {
     const student = await this.prisma.student.findFirst({ where: { id: studentId, schoolId } });
     if (!student) throw new NotFoundException('Student not found');
 
-    return this.prisma.guardianRelationship.delete({ where: { id: guardianId } });
+    // Scope the delete to this student so a guardian id from another student
+    // (GuardianRelationship has no schoolId, so the tenant guard can't cover it)
+    // can't be deleted.
+    const { count } = await this.prisma.guardianRelationship.deleteMany({
+      where: { id: guardianId, studentId },
+    });
+    if (count === 0) throw new NotFoundException('Guardian not found');
+    return { id: guardianId };
   }
 
   async assignClass(schoolId: string, studentId: string, dto: AssignClassDto) {

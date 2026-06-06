@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Headers, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -18,8 +18,8 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Staff login' })
-  staffLogin(@Body() dto: LoginDto) {
-    return this.authService.staffLogin(dto);
+  staffLogin(@Body() dto: LoginDto, @Headers('x-school-slug') schoolSlug?: string) {
+    return this.authService.staffLogin(dto, schoolSlug);
   }
 
   @Get('me')
@@ -51,8 +51,8 @@ export class AuthController {
   @Post('portal/login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Student portal login' })
-  portalLogin(@Body() dto: StudentLoginDto) {
-    return this.authService.portalLogin(dto);
+  portalLogin(@Body() dto: StudentLoginDto, @Headers('x-school-slug') schoolSlug?: string) {
+    return this.authService.portalLogin(dto, schoolSlug);
   }
 
   @Get('portal/me')

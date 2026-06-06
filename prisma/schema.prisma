@@ -167,6 +167,7 @@ model SubFeatureDefault {
 
 model School {
   id                 String              @id @default(uuid())
+  slug               String?             @unique
   name               String
   country            String
   logoUrl            String?

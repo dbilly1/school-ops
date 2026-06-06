@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
+import { retryOnUniqueViolation } from '../common/retry-unique';
 import {
   InviteUserDto, AssignRolesDto,
   RolePermissionOverrideDto, UserPermissionOverrideDto,
@@ -144,32 +145,35 @@ export class UsersService {
     const tempPassword = this.generateTempPassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
 
-    // Generate staff ID
-    const count = await this.prisma.user.count({ where: { schoolId } });
-    const staffId = `STF-${String(count + 1).padStart(4, '0')}`;
+    // Generate the STF-#### staff ID inside a retried transaction so a unique
+    // collision under concurrent invites recomputes instead of failing.
+    const user = await retryOnUniqueViolation(() =>
+      this.prisma.$transaction(async (tx) => {
+        const count = await tx.user.count({ where: { schoolId } });
+        const staffId = `STF-${String(count + 1).padStart(4, '0')}`;
 
-    const user = await this.prisma.$transaction(async (tx) => {
-      const newUser = await tx.user.create({
-        data: {
-          schoolId,
-          email: dto.email,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          passwordHash,
-          tempPassword,
-          mustChange: true,
-          roles: { create: dto.roles.map((role) => ({ role })) },
-          staffProfile: {
-            create: {
-              schoolId,
-              staffId,
+        const newUser = await tx.user.create({
+          data: {
+            schoolId,
+            email: dto.email,
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            passwordHash,
+            tempPassword,
+            mustChange: true,
+            roles: { create: dto.roles.map((role) => ({ role })) },
+            staffProfile: {
+              create: {
+                schoolId,
+                staffId,
+              },
             },
           },
-        },
-        include: { roles: true, staffProfile: true },
-      });
-      return newUser;
-    });
+          include: { roles: true, staffProfile: true },
+        });
+        return newUser;
+      }),
+    );
 
     await this.audit.log({
       schoolId, actorId: invitedBy,
@@ -195,7 +199,7 @@ export class UsersService {
       id: user.id, email: user.email,
       firstName: user.firstName, lastName: user.lastName,
       roles: user.roles.map((r) => r.role),
-      staffId,
+      staffId: user.staffProfile?.staffId,
     };
   }
 

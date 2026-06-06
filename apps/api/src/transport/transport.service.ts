@@ -120,7 +120,13 @@ export class TransportService {
   async removePickupPoint(schoolId: string, routeId: string, pointId: string) {
     const route = await this.prisma.transportRoute.findFirst({ where: { id: routeId, schoolId } });
     if (!route) throw new NotFoundException('Route not found');
-    return this.prisma.pickupPoint.delete({ where: { id: pointId } });
+    // Scope the delete to this route (PickupPoint has no schoolId) so a point id
+    // belonging to another route can't be deleted.
+    const { count } = await this.prisma.pickupPoint.deleteMany({
+      where: { id: pointId, transportRouteId: routeId },
+    });
+    if (count === 0) throw new NotFoundException('Pickup point not found');
+    return { id: pointId };
   }
 
   // ── Student Assignments ───────────────────────────────────

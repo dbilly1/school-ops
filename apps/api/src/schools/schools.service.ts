@@ -3,6 +3,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { PackagesService } from '../super-admin/packages/packages.service';
 import { AuthService } from '../auth/auth.service';
+import { uniqueSlug } from '../common/slug.util';
 import { RegisterSchoolDto } from './dto/register-school.dto';
 
 @Injectable()
@@ -25,9 +26,13 @@ export class SchoolsService {
 
     const passwordHash = await bcrypt.hash(dto.ownerPassword, 10);
 
+    // Subdomain identifier — used to scope login (see auth.service login methods).
+    const slug = await uniqueSlug(this.prisma, dto.schoolName);
+
     const { school, owner } = await this.prisma.$transaction(async (tx) => {
       const school = await tx.school.create({
         data: {
+          slug,
           name: dto.schoolName,
           country: dto.country,
           address: dto.address ?? null,

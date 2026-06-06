@@ -20,14 +20,8 @@ export class AuthService {
 
   // ── Staff Auth ────────────────────────────────────────────
 
-  async staffLogin(dto: LoginDto) {
-    const user = await this.prisma.user.findFirst({
-      where: { email: dto.email },
-      include: {
-        roles: true,
-        school: { select: { onboardingComplete: true } },
-      },
-    });
+  async staffLogin(dto: LoginDto, schoolSlug?: string) {
+    const user = await this.resolveStaffForLogin(dto.email, schoolSlug);
 
     if (!user || !user.isActive)
       throw new UnauthorizedException('Invalid credentials');
@@ -44,6 +38,29 @@ export class AuthService {
         onboardingComplete: user.school?.onboardingComplete ?? false,
       },
     };
+  }
+
+  // Email is unique only per school, so login must be scoped to a tenant. The
+  // subdomain slug (forwarded as the X-School-Slug header) identifies it. When
+  // no slug is supplied we fall back to a single global match but never pick
+  // arbitrarily between schools — that ambiguity was finding H2.
+  private async resolveStaffForLogin(email: string, schoolSlug?: string) {
+    const include = { roles: true, school: { select: { onboardingComplete: true } } };
+    const slug = schoolSlug?.trim().toLowerCase();
+
+    if (slug) {
+      const school = await this.prisma.school.findUnique({ where: { slug }, select: { id: true } });
+      if (!school) return null; // unknown slug → generic "Invalid credentials"
+      return this.prisma.user.findUnique({
+        where: { schoolId_email: { schoolId: school.id, email } },
+        include,
+      });
+    }
+
+    const matches = await this.prisma.user.findMany({ where: { email }, include });
+    if (matches.length > 1)
+      throw new UnauthorizedException('Multiple schools use this email — sign in from your school’s address');
+    return matches[0] ?? null;
   }
 
   async staffMe(userId: string) {
@@ -132,11 +149,8 @@ export class AuthService {
 
   // ── Student Portal Auth ───────────────────────────────────
 
-  async portalLogin(dto: StudentLoginDto) {
-    const student = await this.prisma.student.findFirst({
-      where: { studentId: dto.studentId },
-      include: { portalCredential: true },
-    });
+  async portalLogin(dto: StudentLoginDto, schoolSlug?: string) {
+    const student = await this.resolveStudentForLogin(dto.studentId, schoolSlug);
 
     if (!student || !student.portalCredential)
       throw new UnauthorizedException('Invalid credentials');
@@ -160,6 +174,27 @@ export class AuthService {
         schoolId: student.schoolId,
       },
     };
+  }
+
+  // studentId is unique only per school — scope by the subdomain slug, same as
+  // staff login (H2). No slug → single global match, never an arbitrary pick.
+  private async resolveStudentForLogin(studentId: string, schoolSlug?: string) {
+    const include = { portalCredential: true };
+    const slug = schoolSlug?.trim().toLowerCase();
+
+    if (slug) {
+      const school = await this.prisma.school.findUnique({ where: { slug }, select: { id: true } });
+      if (!school) return null;
+      return this.prisma.student.findUnique({
+        where: { schoolId_studentId: { schoolId: school.id, studentId } },
+        include,
+      });
+    }
+
+    const matches = await this.prisma.student.findMany({ where: { studentId }, include });
+    if (matches.length > 1)
+      throw new UnauthorizedException('Multiple schools use this student ID — sign in from your school’s address');
+    return matches[0] ?? null;
   }
 
   async portalRefresh(refreshToken: string) {

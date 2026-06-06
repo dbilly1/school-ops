@@ -1,5 +1,26 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
+// Root domain schools are served under, e.g. "schoolops.app" → "acme.schoolops.app".
+const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN;
+
+/**
+ * The current school's subdomain slug, sent as the X-School-Slug header so the
+ * API can scope login (email/studentId are unique only per school). Returns
+ * null on the bare root domain / platform pages.
+ */
+export function getSchoolSlug(): string | null {
+  // Dev override — localhost has no real subdomain.
+  if (process.env.NEXT_PUBLIC_DEV_SCHOOL_SLUG) return process.env.NEXT_PUBLIC_DEV_SCHOOL_SLUG;
+  if (typeof window === 'undefined') return null;
+  const host = window.location.hostname;
+  // <slug>.localhost resolves to 127.0.0.1 in Chrome/Firefox for local testing.
+  if (host.endsWith('.localhost')) return host.slice(0, -'.localhost'.length) || null;
+  if (ROOT_DOMAIN && host.endsWith(`.${ROOT_DOMAIN}`)) {
+    return host.slice(0, host.length - ROOT_DOMAIN.length - 1) || null;
+  }
+  return null;
+}
+
 // ── Token storage keys ────────────────────────────────────────────────────────
 
 const KEYS = {
@@ -90,6 +111,8 @@ async function request<T>(
     ...(options.headers as Record<string, string>),
   };
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  const slug = getSchoolSlug();
+  if (slug) headers['X-School-Slug'] = slug;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
@@ -130,9 +153,13 @@ export const adminApi  = makeClient('admin');
 // ── Unauthenticated requests ──────────────────────────────────────────────────
 
 export async function publicPost<T>(path: string, body?: unknown): Promise<T> {
+  const slug = getSchoolSlug();
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(slug ? { 'X-School-Slug': slug } : {}),
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
