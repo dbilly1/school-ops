@@ -14,7 +14,7 @@ type DashboardSummary = {
     students: number;
     staff: number;
     present: { present: number; total: number; rate: number | null };
-    outstanding: number | null;
+    outstanding: { total: number; invoiceCount: number } | null;
   };
   academics: {
     activeTerm: string | null;
@@ -124,12 +124,18 @@ export default function DashboardPage() {
           sub={present && present.total > 0 ? `${present.present} of ${present.total} marked` : 'No attendance marked'}
         />
         {/* Outstanding only for privileged roles */}
-        {(loading || c?.outstanding !== null) && (
+        {(loading || c?.outstanding != null) && (
           <StatCard
             label="Outstanding fees"
             loading={loading}
-            value={c?.outstanding != null ? fmtMoney(c.outstanding) : '—'}
-            sub={c?.outstanding != null ? 'Current term' : undefined}
+            value={c?.outstanding != null ? fmtMoney(c.outstanding.total) : '—'}
+            sub={
+              c?.outstanding != null
+                ? c.outstanding.invoiceCount === 0
+                  ? 'No invoices generated yet'
+                  : 'Current term'
+                : undefined
+            }
           />
         )}
       </div>

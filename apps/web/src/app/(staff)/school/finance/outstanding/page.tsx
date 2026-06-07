@@ -15,6 +15,14 @@ type OutstandingEntry = {
   class: { name: string } | null;
 };
 
+type OutstandingResponse = {
+  totalOutstanding: number;
+  studentsWithBalance: number;
+  invoices: OutstandingEntry[];
+};
+
+const EMPTY_OUTSTANDING: OutstandingResponse = { totalOutstanding: 0, studentsWithBalance: 0, invoices: [] };
+
 export default function OutstandingPage() {
   const router = useRouter();
   const [termId, setTermId]     = useState('');
@@ -31,15 +39,16 @@ export default function OutstandingPage() {
   const activeTermId = termId || terms?.find((t: any) => t.isActive)?.id || '';
 
   const fetchOutstanding = useCallback(() => {
-    if (!activeTermId) return Promise.resolve([]);
+    if (!activeTermId) return Promise.resolve(EMPTY_OUTSTANDING);
     const params = new URLSearchParams({ termId: activeTermId });
     if (classId) params.set('classId', classId);
-    return staffApi.get<OutstandingEntry[]>(`/school/finance/outstanding?${params}`).catch(() => []);
+    return staffApi.get<OutstandingResponse>(`/school/finance/outstanding?${params}`).catch(() => EMPTY_OUTSTANDING);
   }, [activeTermId, classId]);
 
-  const { data: entries, loading } = useApi(fetchOutstanding);
+  const { data, loading } = useApi(fetchOutstanding, `${activeTermId}|${classId}`);
 
-  const total = entries?.reduce((sum, e) => sum + e.balance, 0) ?? 0;
+  const entries = data?.invoices ?? [];
+  const total   = data?.totalOutstanding ?? 0;
 
   return (
     <div>
@@ -62,7 +71,7 @@ export default function OutstandingPage() {
       {total > 0 && (
         <div className="bg-red-50 border border-red-100 rounded-xl px-5 py-4 mb-5 flex items-center justify-between">
           <p className="text-sm text-red-600">
-            <span className="font-semibold">{entries?.length}</span> students with outstanding balance
+            <span className="font-semibold">{entries.length}</span> students with outstanding balance
           </p>
           <p className="text-lg font-bold text-red-600">
             GHS {total.toLocaleString('en-GH', { minimumFractionDigits: 2 })} total outstanding
@@ -88,7 +97,7 @@ export default function OutstandingPage() {
                 <td colSpan={6} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td>
               </tr>
             ))}
-            {!loading && entries?.sort((a,b) => b.balance - a.balance).map(entry => (
+            {!loading && entries.map(entry => (
               <tr key={entry.invoiceId} className="border-b border-slate-50 hover:bg-slate-50/40 transition">
                 <td className="px-4 py-3.5">
                   <p className="text-sm font-medium text-slate-800">
@@ -110,7 +119,7 @@ export default function OutstandingPage() {
                 </td>
               </tr>
             ))}
-            {!loading && (!entries || entries.length === 0) && (
+            {!loading && entries.length === 0 && (
               <tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
                 {activeTermId ? 'No outstanding balances for this term. 🎉' : 'Select a term to view outstanding balances.'}
               </td></tr>

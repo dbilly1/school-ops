@@ -33,7 +33,7 @@ export class DashboardService {
           select: { status: true },
         })
         .catch(() => [] as { status: string }[]),
-      privileged ? this.getOutstandingTotal(schoolId).catch(() => null) : Promise.resolve(null),
+      privileged ? this.getOutstanding(schoolId).catch(() => null) : Promise.resolve(null),
     ]);
 
     const totalMarked = attendanceToday.length;
@@ -49,11 +49,14 @@ export class DashboardService {
         total: totalMarked,
         rate: totalMarked > 0 ? Math.round((present / totalMarked) * 100) : null,
       },
-      outstanding, // GHS total, or null when not privileged / unavailable
+      outstanding, // { total, invoiceCount }, or null when not privileged / no active term
     };
   }
 
-  private async getOutstandingTotal(schoolId: string): Promise<number | null> {
+  // Outstanding reflects *generated invoices* for the active term — assigning a
+  // fee category alone bills nobody, so invoiceCount lets the UI distinguish
+  // "no invoices generated yet" from a genuine zero balance.
+  private async getOutstanding(schoolId: string): Promise<{ total: number; invoiceCount: number } | null> {
     const activeTerm = await this.prisma.term.findFirst({
       where: { schoolId, isActive: true },
       select: { id: true },
@@ -65,10 +68,12 @@ export class DashboardService {
       select: { amount: true, amountPaid: true },
     });
 
-    return invoices.reduce((sum, inv) => {
+    const total = invoices.reduce((sum, inv) => {
       const balance = Number(inv.amount) - Number(inv.amountPaid);
       return sum + (balance > 0 ? balance : 0);
     }, 0);
+
+    return { total, invoiceCount: invoices.length };
   }
 
   // ── Academics snapshot ────────────────────────────────────

@@ -26,8 +26,10 @@ export default function InvoicesPage() {
   const router = useRouter();
   const [termFilter, setTermFilter]   = useState('');
   const [classFilter, setClassFilter] = useState('');
+  const [search, setSearch]           = useState('');
   const [generating, setGenerating]   = useState(false);
   const [alert, setAlert]             = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [genErrors, setGenErrors]     = useState<string[]>([]);
 
   const fetchTerms  = useCallback(() =>
     staffApi.get<any>('/school/academic-years/active').then(y => y?.terms ?? []).catch(() => []),
@@ -43,16 +45,31 @@ export default function InvoicesPage() {
 
   const { data: terms }                       = useApi(fetchTerms);
   const { data: classes }                     = useApi(fetchClasses);
-  const { data: invoices, loading, refetch }  = useApi(fetchInvoices);
+  const { data: invoices, loading, refetch }  = useApi(fetchInvoices, `${termFilter}|${classFilter}`);
+
+  const filtered = (invoices ?? []).filter(inv =>
+    !search ||
+    `${inv.student.firstName} ${inv.student.lastName} ${inv.student.studentId}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
 
   const activeTermId = termFilter || terms?.find((t: any) => t.isActive)?.id || '';
 
   async function generateInvoices() {
     if (!activeTermId) { setAlert({ type: 'error', message: 'Select a term first.' }); return; }
-    setAlert(null); setGenerating(true);
+    setAlert(null); setGenerating(true); setGenErrors([]);
     try {
-      const result = await staffApi.post<{ count: number }>(`/school/finance/invoices/generate/${activeTermId}`);
-      setAlert({ type: 'success', message: `${result.count} invoice${result.count !== 1 ? 's' : ''} generated.` });
+      const result = await staffApi.post<{ created: number; skipped: number; errors: string[] }>(
+        `/school/finance/invoices/generate/${activeTermId}`,
+      );
+      const parts = [`${result.created} invoice${result.created !== 1 ? 's' : ''} generated`];
+      if (result.skipped) parts.push(`${result.skipped} skipped`);
+      setAlert({
+        type: result.created > 0 ? 'success' : 'error',
+        message: parts.join(', ') + '.',
+      });
+      setGenErrors(result.errors ?? []);
       refetch();
     } catch (err) {
       setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to generate invoices.' });
@@ -61,7 +78,7 @@ export default function InvoicesPage() {
     }
   }
 
-  const totals = invoices?.reduce((acc, inv) => ({
+  const totals = filtered.reduce((acc, inv) => ({
     total: acc.total + inv.amount,
     paid:  acc.paid  + inv.amountPaid,
     count: acc.count + 1,
@@ -71,7 +88,15 @@ export default function InvoicesPage() {
     <div>
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold text-slate-900">Invoices</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap justify-end">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search student name or ID…"
+            className="w-56 px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 placeholder-slate-400 outline-none"
+            onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+            onBlur={e => e.currentTarget.style.boxShadow = ''}
+          />
           <select value={termFilter} onChange={e => setTermFilter(e.target.value)}
             className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
             <option value="">All terms</option>
@@ -90,6 +115,20 @@ export default function InvoicesPage() {
       </div>
 
       {alert && <div className="mb-4"><Alert type={alert.type} message={alert.message} /></div>}
+
+      {genErrors.length > 0 && (
+        <div className="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
+          <p className="text-sm font-semibold text-amber-700 mb-1.5">
+            {genErrors.length} student{genErrors.length !== 1 ? 's' : ''} skipped — needs attention
+          </p>
+          <ul className="text-xs text-amber-700 space-y-0.5 max-h-40 overflow-y-auto list-disc list-inside">
+            {genErrors.map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
+          <p className="text-xs text-amber-600 mt-2">
+            Assign a fee category to each student (on their profile) and set a fee structure for their grade + category, then generate again.
+          </p>
+        </div>
+      )}
 
       {/* Summary */}
       {totals && totals.count > 0 && (
@@ -126,7 +165,7 @@ export default function InvoicesPage() {
                 <td colSpan={7} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td>
               </tr>
             ))}
-            {!loading && invoices?.map(inv => {
+            {!loading && filtered.map(inv => {
               const balance = inv.amount - inv.amountPaid;
               const sc      = STATUS_COLORS[inv.status];
               return (
@@ -164,9 +203,13 @@ export default function InvoicesPage() {
                 </tr>
               );
             })}
-            {!loading && (!invoices || invoices.length === 0) && (
+            {!loading && filtered.length === 0 && (
               <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-slate-400">
-                No invoices. Generate invoices for a term to get started.
+                {search
+                  ? 'No invoices match your search.'
+                  : (invoices && invoices.length > 0)
+                    ? 'No invoices match the selected filters.'
+                    : 'No invoices. Generate invoices for a term to get started.'}
               </td></tr>
             )}
           </tbody>

@@ -6,6 +6,14 @@ import {
   BulkCreateFeeStructuresDto, SaveFeeMatrixDto,
 } from './dto/finance.dto';
 
+type InvoiceStatus = 'PAID' | 'PARTIAL' | 'UNPAID';
+
+function invoiceStatus(amount: number, amountPaid: number): InvoiceStatus {
+  if (amountPaid >= amount) return 'PAID';
+  if (amountPaid > 0) return 'PARTIAL';
+  return 'UNPAID';
+}
+
 @Injectable()
 export class FinanceService {
   constructor(private prisma: PrismaService) {}
@@ -128,7 +136,7 @@ export class FinanceService {
   // ── Invoices ──────────────────────────────────────────────
 
   async findInvoices(schoolId: string, termId?: string, classId?: string) {
-    return this.prisma.invoice.findMany({
+    const invoices = await this.prisma.invoice.findMany({
       where: {
         schoolId,
         ...(termId ? { termId } : {}),
@@ -143,14 +151,31 @@ export class FinanceService {
       },
       orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
     });
+
+    return invoices.map((inv) => {
+      const amount     = Number(inv.amount);
+      const amountPaid = Number(inv.amountPaid);
+      return {
+        ...inv,
+        amount,
+        amountPaid,
+        balance: amount - amountPaid,
+        status:  invoiceStatus(amount, amountPaid),
+      };
+    });
   }
 
   async findInvoice(schoolId: string, id: string) {
     const invoice = await this.prisma.invoice.findFirst({
       where: { id, schoolId },
       include: {
-        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
-        term: { select: { id: true, name: true } },
+        student: {
+          select: {
+            id: true, studentId: true, firstName: true, lastName: true,
+            studentCategory: { select: { id: true, name: true } },
+          },
+        },
+        term: { select: { id: true, name: true, academicYearId: true } },
         payments: {
           orderBy: { paymentDate: 'desc' },
           include: { recordedByUser: { select: { firstName: true, lastName: true } } },
@@ -159,10 +184,29 @@ export class FinanceService {
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
 
+    // Grade level isn't on the invoice — resolve it via the student's class
+    // assignment for this term's academic year.
+    const assignment = await this.prisma.studentClassAssignment.findFirst({
+      where: { studentId: invoice.studentId, academicYearId: invoice.term.academicYearId },
+      select: { class: { select: { gradeLevel: { select: { id: true, name: true } } } } },
+    });
+
+    const amount     = Number(invoice.amount);
+    const amountPaid = Number(invoice.amountPaid);
     return {
       ...invoice,
-      balance: Number(invoice.amount) - Number(invoice.amountPaid),
-      isPaid: Number(invoice.amountPaid) >= Number(invoice.amount),
+      amount,
+      amountPaid,
+      balance: amount - amountPaid,
+      isPaid:  amountPaid >= amount,
+      status:  invoiceStatus(amount, amountPaid),
+      gradeLevel:      assignment?.class.gradeLevel ?? null,
+      studentCategory: invoice.student.studentCategory ?? null,
+      payments: invoice.payments.map((p) => ({
+        ...p,
+        amount: Number(p.amount),
+        recordedBy: p.recordedByUser,
+      })),
     };
   }
 
@@ -299,6 +343,11 @@ export class FinanceService {
   // ── Outstanding Balances ──────────────────────────────────
 
   async getOutstandingBalances(schoolId: string, termId: string, classId?: string) {
+    const term = await this.prisma.term.findFirst({
+      where: { id: termId, schoolId },
+      select: { academicYearId: true },
+    });
+
     const invoices = await this.prisma.invoice.findMany({
       where: {
         schoolId,
@@ -306,19 +355,42 @@ export class FinanceService {
         ...(classId ? { student: { classAssignments: { some: { classId } } } } : {}),
       },
       include: {
-        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
+        student: {
+          select: {
+            id: true, studentId: true, firstName: true, lastName: true,
+            classAssignments: {
+              ...(term ? { where: { academicYearId: term.academicYearId } } : {}),
+              select: { class: { select: { name: true } } },
+              take: 1,
+            },
+          },
+        },
       },
     });
 
+    const now = Date.now();
+
     const outstanding = invoices
-      .map((inv) => ({
-        student: inv.student,
-        invoiceId: inv.id,
-        amount: Number(inv.amount),
-        amountPaid: Number(inv.amountPaid),
-        balance: Number(inv.amount) - Number(inv.amountPaid),
-        isPaid: Number(inv.amountPaid) >= Number(inv.amount),
-      }))
+      .map((inv) => {
+        const amount     = Number(inv.amount);
+        const amountPaid = Number(inv.amountPaid);
+        const overdueMs  = inv.dueDate ? now - inv.dueDate.getTime() : 0;
+        return {
+          invoiceId: inv.id,
+          student: {
+            id: inv.student.id,
+            studentId: inv.student.studentId,
+            firstName: inv.student.firstName,
+            lastName: inv.student.lastName,
+          },
+          class: inv.student.classAssignments[0]?.class ?? null,
+          amount,
+          amountPaid,
+          balance: amount - amountPaid,
+          daysOverdue: inv.dueDate && overdueMs > 0 ? Math.floor(overdueMs / 86_400_000) : null,
+          isPaid: amountPaid >= amount,
+        };
+      })
       .filter((inv) => !inv.isPaid)
       .sort((a, b) => b.balance - a.balance);
 
