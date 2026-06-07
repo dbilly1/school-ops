@@ -1,7 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportCardsService } from '../report-cards/report-cards.service';
 import { ReportCardPdfService } from '../report-cards/report-card-pdf.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class PortalService {
@@ -10,6 +12,29 @@ export class PortalService {
     private reportCards: ReportCardsService,
     private reportCardPdf: ReportCardPdfService,
   ) {}
+
+  // First-login / self-service password change for a student portal account.
+  async changePassword(studentId: string, dto: ChangePasswordDto) {
+    const cred = await this.prisma.studentPortalCredential.findUnique({ where: { studentId } });
+    if (!cred) throw new NotFoundException('Portal account not found');
+
+    const ok = await bcrypt.compare(dto.currentPassword, cred.passwordHash);
+    if (!ok) throw new BadRequestException('Current password is incorrect');
+
+    if (!dto.newPassword || dto.newPassword.length < 6)
+      throw new BadRequestException('New password must be at least 6 characters');
+
+    await this.prisma.studentPortalCredential.update({
+      where: { studentId },
+      data: {
+        passwordHash: await bcrypt.hash(dto.newPassword, 10),
+        mustChange: false,
+        tempPassword: null,
+      },
+    });
+
+    return { success: true };
+  }
 
   async getReportCardPdf(studentId: string, schoolId: string, termId: string): Promise<Buffer> {
     const reportCard = await this.prisma.reportCard.findFirst({

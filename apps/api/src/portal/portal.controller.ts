@@ -1,7 +1,8 @@
-import { Controller, Get, Param, Query, UseGuards, Res } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Res, HttpCode, HttpStatus } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { PortalService } from './portal.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtPortalGuard } from '../auth/guards/jwt-portal.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
@@ -15,6 +16,12 @@ export class PortalController {
   @Get('me')
   getProfile(@CurrentUser() user: any) {
     return this.portalService.getStudentProfile(user.id);
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  changePassword(@CurrentUser() user: any, @Body() dto: ChangePasswordDto) {
+    return this.portalService.changePassword(user.id, dto);
   }
 
   @Get('attendance')

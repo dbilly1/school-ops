@@ -20,6 +20,7 @@ type PortalAuthState = {
   loading: boolean;
   login: (studentId: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  markPasswordChanged: () => void;
 };
 
 // ── Storage helpers ───────────────────────────────────────────────────────────
@@ -102,8 +103,19 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  // Called after a successful first-login password change so the layout guard
+  // stops redirecting back to /portal/change-password.
+  const markPasswordChanged = useCallback(() => {
+    setUser(prev => {
+      if (!prev) return prev;
+      const next = { ...prev, mustChangePassword: false };
+      writeStoredUser(next);
+      return next;
+    });
+  }, []);
+
   return (
-    <PortalAuthContext.Provider value={{ user, loading, login, logout }}>
+    <PortalAuthContext.Provider value={{ user, loading, login, logout, markPasswordChanged }}>
       {children}
     </PortalAuthContext.Provider>
   );
