@@ -402,7 +402,7 @@ function SlotEditorModal({ open, onClose, classId, day, period, termId, currentS
           </div>
         </FormField>
 
-        {slotType === 'lesson' && (
+        {slotType === 'LESSON' && (
           <>
             <FormField label="Subject">
               <select value={subjectId} onChange={e => { setSubjectId(e.target.value); setTeacherId(''); }}
