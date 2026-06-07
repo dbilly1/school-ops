@@ -36,6 +36,7 @@ type Student = {
   phone: string | null;
   address: string | null;
   medicalNotes: string | null;
+  studentCategory: { id: string; name: string } | null;
   customFields: Record<string, unknown> | null;
   enrolledAt: string;
   guardians: Guardian[];
@@ -76,6 +77,7 @@ function ProfileTab({ student, onSaved }: { student: Student; onSaved: () => voi
     phone:       student.phone       ?? '',
     address:     student.address     ?? '',
     medicalNotes: student.medicalNotes ?? '',
+    studentCategoryId: student.studentCategory?.id ?? '',
   });
   const [saving, setSaving]     = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -84,6 +86,10 @@ function ProfileTab({ student, onSaved }: { student: Student; onSaved: () => voi
   // Class assignment
   const fetchClasses = useCallback(() => staffApi.get<{ id: string; name: string }[]>('/school/grade-structure/classes'), []);
   const { data: classes } = useApi(fetchClasses);
+
+  // Fee category — determines which fee structure applies when invoices are generated
+  const fetchCategories = useCallback(() => staffApi.get<{ id: string; name: string }[]>('/school/student-categories'), []);
+  const { data: categories } = useApi(fetchCategories);
   const [newClassId, setNewClassId] = useState('');
   const [assigningClass, setAssigningClass] = useState(false);
 
@@ -103,6 +109,7 @@ function ProfileTab({ student, onSaved }: { student: Student; onSaved: () => voi
         phone:        form.phone        || null,
         address:      form.address      || null,
         medicalNotes: form.medicalNotes || null,
+        studentCategoryId: form.studentCategoryId,
       });
       setAlert({ type: 'success', message: 'Profile saved.' });
       onSaved();
@@ -169,6 +176,26 @@ function ProfileTab({ student, onSaved }: { student: Student; onSaved: () => voi
         </div>
         <FormField label="Address">
           <Input value={form.address} onChange={f('address')} />
+        </FormField>
+        <FormField label="Fee category">
+          {categories && categories.length > 0 ? (
+            <>
+              <select value={form.studentCategoryId} onChange={f('studentCategoryId')}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
+                <option value="">Not assigned</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">Determines which fee structure applies when invoices are generated.</p>
+            </>
+          ) : (
+            <p className="text-xs text-slate-400 pt-1">
+              No categories yet.{' '}
+              <a href="/school/settings/student-categories" className="underline underline-offset-2" style={{ color: 'var(--accent)' }}>
+                Set up student categories
+              </a>{' '}
+              first.
+            </p>
+          )}
         </FormField>
         <FormField label="Medical notes">
           <textarea
@@ -568,6 +595,11 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
                 style={{ backgroundColor: 'var(--accent)' }}
               >
                 {currentAssignment.class.name}
+              </span>
+            )}
+            {student.studentCategory && (
+              <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                {student.studentCategory.name}
               </span>
             )}
             {student.gender && (
