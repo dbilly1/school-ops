@@ -267,6 +267,7 @@ model SchoolFeatureGrant {
   school    School @relation(fields: [schoolId], references: [id])
   grantedByUser User @relation("GrantedByUser", fields: [grantedBy], references: [id])
 
+  @@index([schoolId])
   @@map("school_feature_grants")
 }
 
@@ -474,6 +475,7 @@ model Term {
   reportCards     ReportCard[]
 
   @@unique([academicYearId, sequence])
+  @@index([schoolId])
   @@map("terms")
 }
 
@@ -498,6 +500,7 @@ model SchoolCalendarEvent {
   school       School       @relation(fields: [schoolId], references: [id])
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
 
+  @@index([schoolId])
   @@map("school_calendar_events")
 }
 
@@ -663,6 +666,7 @@ model GradingScale {
   school School              @relation(fields: [schoolId], references: [id])
   bands  GradingScaleBand[]
 
+  @@index([schoolId])
   @@map("grading_scales")
 }
 
@@ -733,6 +737,7 @@ model TimetableSlot {
   subject         Subject?        @relation(fields: [subjectId], references: [id])
 
   @@unique([classId, timetableConfigId, day, periodNumber])
+  @@index([schoolId])
   @@map("timetable_slots")
 }
 
@@ -772,6 +777,7 @@ model AdmissionRecord {
   followUps   AdmissionFollowUp[]
   student     Student?
 
+  @@index([schoolId])
   @@map("admission_records")
 }
 
@@ -875,6 +881,7 @@ model StudentClassAssignment {
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
 
   @@unique([studentId, academicYearId])
+  @@index([schoolId])
   @@map("student_class_assignments")
 }
 
@@ -898,6 +905,7 @@ model StudentAttendanceRecord {
   class   Class   @relation(fields: [classId], references: [id])
 
   @@unique([studentId, date])
+  @@index([schoolId])
   @@map("student_attendance_records")
 }
 
@@ -913,6 +921,7 @@ model StaffAttendanceRecord {
   school School @relation(fields: [schoolId], references: [id])
 
   @@unique([userId, date])
+  @@index([schoolId])
   @@map("staff_attendance_records")
 }
 
@@ -937,6 +946,7 @@ model Assessment {
   term    Term              @relation(fields: [termId], references: [id])
   scores  AssessmentScore[]
 
+  @@index([schoolId])
   @@map("assessments")
 }
 
@@ -1029,6 +1039,8 @@ model Payment {
   invoice      Invoice @relation(fields: [invoiceId], references: [id])
   recordedByUser User  @relation("PaymentRecordedBy", fields: [recordedBy], references: [id])
 
+  @@index([schoolId])
+  @@index([invoiceId])
   @@map("payments")
 }
 
@@ -1047,6 +1059,7 @@ model FeedingConfig {
   school      School             @relation(fields: [schoolId], references: [id])
   classRates  FeedingClassRate[]
 
+  @@index([schoolId])
   @@map("feeding_configs")
 }
 
@@ -1093,6 +1106,8 @@ model FeedingPayment {
   recordedByUser User    @relation("FeedingRecordedBy", fields: [recordedBy], references: [id])
   dailyRecords   FeedingDailyRecord[]
 
+  @@index([schoolId])
+  @@index([studentId])
   @@map("feeding_payments")
 }
 
@@ -1149,6 +1164,7 @@ model TransportRoute {
   pickupPoints PickupPoint[]
   studentAssignments StudentTransportAssignment[]
 
+  @@index([schoolId])
   @@map("transport_routes")
 }
 
@@ -1164,6 +1180,7 @@ model Driver {
   school School           @relation(fields: [schoolId], references: [id])
   routes TransportRoute[]
 
+  @@index([schoolId])
   @@map("drivers")
 }
 
@@ -1208,6 +1225,8 @@ model TransportPayment {
   recordedByUser User    @relation("TransportRecordedBy", fields: [recordedBy], references: [id])
   dailyRecords   TransportDailyRecord[]
 
+  @@index([schoolId])
+  @@index([studentId])
   @@map("transport_payments")
 }
 
@@ -1293,6 +1312,7 @@ model Notice {
 
   school School @relation(fields: [schoolId], references: [id])
 
+  @@index([schoolId])
   @@map("notices")
 }
 
@@ -1308,6 +1328,7 @@ model Announcement {
 
   school School @relation(fields: [schoolId], references: [id])
 
+  @@index([schoolId])
   @@map("announcements")
 }
 
@@ -1327,6 +1348,7 @@ model Notification {
 
   school School @relation(fields: [schoolId], references: [id])
 
+  @@index([schoolId, recipientId])
   @@map("notifications")
 }
 
@@ -1337,6 +1359,7 @@ model NotificationEventLog {
   payload   Json
   createdAt DateTime @default(now())
 
+  @@index([schoolId])
   @@map("notification_event_logs")
 }
 
@@ -1359,5 +1382,6 @@ model AuditLog {
   school School? @relation(fields: [schoolId], references: [id])
   actor  User    @relation("AuditActor", fields: [actorId], references: [id])
 
+  @@index([schoolId, createdAt])
   @@map("audit_logs")
 }

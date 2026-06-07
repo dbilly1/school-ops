@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UpdateSubscriptionDto, GrantFeatureDto } from './dto/manage-school.dto';
+import { PermissionCacheService } from '../../cache/permission-cache.service';
 
 @Injectable()
 export class SuperAdminSchoolsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cache: PermissionCacheService,
+  ) {}
 
   async findAll() {
     return this.prisma.school.findMany({
@@ -49,16 +53,18 @@ export class SuperAdminSchoolsService {
     const pkg = await this.prisma.package.findUnique({ where: { id: packageId } });
     if (!pkg) throw new NotFoundException('Package not found');
 
-    return this.prisma.school.update({
+    const updated = await this.prisma.school.update({
       where: { id: schoolId },
       data: { packageId },
       select: { id: true, packageId: true },
     });
+    this.cache.invalidateSchool(schoolId);
+    return updated;
   }
 
   async grantFeature(schoolId: string, dto: GrantFeatureDto, grantedBy: string) {
     await this.findOne(schoolId);
-    return this.prisma.schoolFeatureGrant.create({
+    const grant = await this.prisma.schoolFeatureGrant.create({
       data: {
         schoolId,
         featureKey: dto.featureKey,
@@ -68,6 +74,8 @@ export class SuperAdminSchoolsService {
         grantedBy,
       },
     });
+    this.cache.invalidateSchool(schoolId);
+    return grant;
   }
 
   async revokeGrant(schoolId: string, grantId: string) {
@@ -75,6 +83,8 @@ export class SuperAdminSchoolsService {
       where: { id: grantId, schoolId },
     });
     if (!grant) throw new NotFoundException('Grant not found');
-    return this.prisma.schoolFeatureGrant.delete({ where: { id: grantId } });
+    const deleted = await this.prisma.schoolFeatureGrant.delete({ where: { id: grantId } });
+    this.cache.invalidateSchool(schoolId);
+    return deleted;
   }
 }

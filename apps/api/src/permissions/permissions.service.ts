@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FeatureFlagsService } from '../feature-flags/feature-flags.service';
+import { PermissionCacheService } from '../cache/permission-cache.service';
 import { PermissionAction, StaffRole } from '@prisma/client';
 
 interface PermissionCheckInput {
@@ -17,11 +18,31 @@ export class PermissionsService {
   constructor(
     private prisma: PrismaService,
     private featureFlags: FeatureFlagsService,
+    private cache: PermissionCacheService,
   ) {}
 
   async can(input: PermissionCheckInput): Promise<boolean> {
     const { userId, schoolId, roles, featureKey, subFeatureKey, action } = input;
     const sub = subFeatureKey ?? null;
+
+    // The full resolution below is several sequential DB round-trips over
+    // near-static data; memoize the outcome per request shape (TTL + explicit
+    // invalidation on the feature/override write paths).
+    const cacheKey = `can:${userId}:${[...roles].sort().join(',')}:${featureKey}:${sub}:${action}`;
+    return this.cache.wrap(schoolId, cacheKey, () =>
+      this.resolve({ userId, schoolId, roles, featureKey, sub, action }),
+    );
+  }
+
+  private async resolve(args: {
+    userId: string;
+    schoolId: string;
+    roles: StaffRole[];
+    featureKey: string;
+    sub: string | null;
+    action: PermissionAction;
+  }): Promise<boolean> {
+    const { userId, schoolId, roles, featureKey, sub, action } = args;
 
     // Step 1 — Package check
     const inPackage = await this.featureFlags.isAvailableInPackage(
@@ -35,12 +56,13 @@ export class PermissionsService {
     const featureActive = await this.featureFlags.isFeatureActive(schoolId, featureKey);
     if (!featureActive) return false;
 
-    // Step 3 — Sub-feature state
+    // Step 3 — Sub-feature state (parent already verified active above)
     if (sub) {
       const subActive = await this.featureFlags.isSubFeatureEnabled(
         schoolId,
         featureKey,
         sub,
+        featureActive,
       );
       if (!subActive) return false;
     }

@@ -10,6 +10,7 @@ import { StepGradeStructure }  from './steps/step-grade-structure';
 import { StepCategories }      from './steps/step-categories';
 import { StepGrading }         from './steps/step-grading';
 import { StepAcademicYear }    from './steps/step-academic-year';
+import { StepFeeding }         from './steps/step-feeding';
 import { StepDone }            from './steps/step-done';
 
 // ── Step definitions ──────────────────────────────────────────────────────────
@@ -20,6 +21,7 @@ const STEPS = [
   { id: 'categories',     label: 'Student Types'   },
   { id: 'grading',        label: 'Grading'         },
   { id: 'academic-year',  label: 'Academic Year'   },
+  { id: 'feeding',        label: 'Feeding Fees'    },
   { id: 'done',           label: 'Done'            },
 ] as const;
 
@@ -153,6 +155,7 @@ export default function OnboardingPage() {
             {currentStep.id === 'categories'      && <StepCategories onNext={next} onBack={back} onSkip={skip} />}
             {currentStep.id === 'grading'         && <StepGrading onNext={next} onBack={back} onSkip={skip} />}
             {currentStep.id === 'academic-year'   && <StepAcademicYear onNext={next} onBack={back} onSkip={skip} />}
+            {currentStep.id === 'feeding'         && <StepFeeding onNext={next} onBack={back} onSkip={skip} />}
             {currentStep.id === 'done'            && <StepDone onFinish={finish} schoolName={branding?.name ?? user?.firstName + "'s School"} />}
           </div>
         </div>

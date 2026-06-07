@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { retryOnUniqueViolation } from '../common/retry-unique';
 import { generateTempPassword } from '../common/password.util';
-import { CreateStudentDto, UpdateStudentDto, AddGuardianDto, AssignClassDto } from './dto/student.dto';
+import { CreateStudentDto, UpdateStudentDto, AddGuardianDto, AssignClassDto, BulkAssignCategoryDto } from './dto/student.dto';
 
 @Injectable()
 export class StudentsService {
@@ -19,6 +19,8 @@ export class StudentsService {
 
   async create(schoolId: string, dto: CreateStudentDto) {
     const year = new Date().getFullYear();
+
+    if (dto.studentCategoryId) await this.assertCategoryInSchool(schoolId, dto.studentCategoryId);
 
     // Generate portal credentials
     const tempPassword = this.generatePassword();
@@ -41,6 +43,7 @@ export class StudentsService {
           dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
           phone: dto.phone ?? null,
           address: dto.address ?? null,
+          studentCategoryId: dto.studentCategoryId || null,
           portalCredential: {
             create: { passwordHash, tempPassword, mustChange: true },
           },
@@ -82,10 +85,16 @@ export class StudentsService {
     );
   }
 
-  async findAll(schoolId: string, classId?: string, academicYearId?: string) {
+  async findAll(schoolId: string, classId?: string, academicYearId?: string, studentCategoryId?: string) {
     return this.prisma.student.findMany({
       where: {
         schoolId,
+        // 'none' = students with no category assigned; any other value filters to it
+        ...(studentCategoryId === 'none'
+          ? { studentCategoryId: null }
+          : studentCategoryId
+            ? { studentCategoryId }
+            : {}),
         ...(classId || academicYearId
           ? {
               classAssignments: {
@@ -99,10 +108,16 @@ export class StudentsService {
       },
       select: {
         id: true, studentId: true, firstName: true, lastName: true,
-        gender: true, enrolledAt: true,
+        gender: true, enrolledAt: true, dateOfBirth: true, address: true,
+        studentCategory: { select: { id: true, name: true } },
         classAssignments: {
           include: { class: { include: { gradeLevel: { select: { id: true, name: true } } } } },
           orderBy: { assignedAt: 'desc' },
+          take: 1,
+        },
+        guardians: {
+          where: { isPrimary: true },
+          select: { name: true, phone: true },
           take: 1,
         },
       },
@@ -115,6 +130,7 @@ export class StudentsService {
       where: { id, schoolId },
       include: {
         guardians: true,
+        studentCategory: { select: { id: true, name: true } },
         classAssignments: {
           include: {
             class: { include: { gradeLevel: { select: { id: true, name: true } } } },
@@ -136,13 +152,42 @@ export class StudentsService {
     const student = await this.prisma.student.findFirst({ where: { id, schoolId } });
     if (!student) throw new NotFoundException('Student not found');
 
+    // studentCategoryId: undefined = leave as-is, '' = clear, value = set (validated)
+    let studentCategoryId: string | null | undefined = undefined;
+    if (dto.studentCategoryId !== undefined) {
+      studentCategoryId = dto.studentCategoryId || null;
+      if (studentCategoryId) await this.assertCategoryInSchool(schoolId, studentCategoryId);
+    }
+
     return this.prisma.student.update({
       where: { id },
       data: {
         ...dto,
+        studentCategoryId,
         dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
       },
     });
+  }
+
+  async bulkAssignCategory(schoolId: string, dto: BulkAssignCategoryDto) {
+    const categoryId = dto.studentCategoryId || null;
+    if (categoryId) await this.assertCategoryInSchool(schoolId, categoryId);
+
+    // schoolId in the where clause keeps the update tenant-scoped — ids from
+    // another school are silently ignored rather than updated.
+    const { count } = await this.prisma.student.updateMany({
+      where: { id: { in: dto.studentIds }, schoolId },
+      data: { studentCategoryId: categoryId },
+    });
+    return { updated: count };
+  }
+
+  private async assertCategoryInSchool(schoolId: string, categoryId: string) {
+    const category = await this.prisma.studentCategory.findFirst({
+      where: { id: categoryId, schoolId },
+      select: { id: true },
+    });
+    if (!category) throw new NotFoundException('Student category not found');
   }
 
   async addGuardian(schoolId: string, studentId: string, dto: AddGuardianDto) {

@@ -135,7 +135,7 @@ function UserMenu({ onClose }: { onClose: () => void }) {
 
 // ── Topbar ────────────────────────────────────────────────────────────────────
 
-export function Topbar() {
+export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { user } = useStaffAuth();
   const [showNotifs, setShowNotifs] = useState(false);
   const [showMenu, setShowMenu]     = useState(false);
@@ -146,7 +146,21 @@ export function Topbar() {
   const unreadCount = notifications?.filter(n => !n.isRead).length ?? 0;
 
   return (
-    <header className="h-14 shrink-0 bg-white border-b border-slate-100 px-6 flex items-center justify-end gap-3">
+    <header className="h-14 shrink-0 bg-white border-b border-slate-100 px-4 sm:px-6 flex items-center justify-between gap-3">
+
+      {/* Mobile menu toggle */}
+      <button
+        onClick={onMenuClick}
+        className="lg:hidden w-9 h-9 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition"
+        aria-label="Open menu"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 12h18 M3 6h18 M3 18h18" />
+        </svg>
+      </button>
+
+      {/* Right cluster */}
+      <div className="flex items-center gap-3 ml-auto">
 
       {/* Notification bell */}
       <div className="relative">
@@ -185,6 +199,8 @@ export function Topbar() {
           <ChevronIcon />
         </button>
         {showMenu && <UserMenu onClose={() => setShowMenu(false)} />}
+      </div>
+
       </div>
     </header>
   );

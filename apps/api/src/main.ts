@@ -2,11 +2,15 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { TimingInterceptor } from './common/timing.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix('api');
+
+  // Per-request timing log (set TIMING_LOG=off to disable) — diagnostic for slowness.
+  app.useGlobalInterceptors(new TimingInterceptor());
 
   // Allow the configured origins plus any subdomain of the root domain
   // (schools are served at <slug>.<root>), so the X-School-Slug login flow works.
@@ -43,9 +47,10 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  const port = process.env.API_PORT ?? 4000;
-  await app.listen(port);
-  console.log(`API running on http://localhost:${port}/api`);
+  // Most hosts (Render/Railway/Fly/etc.) inject the port to bind via $PORT.
+  const port = process.env.PORT ?? process.env.API_PORT ?? 4000;
+  await app.listen(port, '0.0.0.0');
+  console.log(`API running on port ${port} (prefix /api)`);
 }
 
 bootstrap();

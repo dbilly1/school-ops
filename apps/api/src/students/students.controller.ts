@@ -1,7 +1,7 @@
 import { Controller, Get, Patch, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { StudentsService } from './students.service';
-import { CreateStudentDto, UpdateStudentDto, AddGuardianDto, AssignClassDto } from './dto/student.dto';
+import { CreateStudentDto, UpdateStudentDto, AddGuardianDto, AssignClassDto, BulkAssignCategoryDto } from './dto/student.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffRolesGuard } from '../auth/guards/staff-roles.guard';
 import { RequireStaffRole } from '../auth/decorators/staff-roles.decorator';
@@ -28,8 +28,15 @@ export class StudentsController {
     @CurrentUser() user: any,
     @Query('classId') classId?: string,
     @Query('academicYearId') academicYearId?: string,
+    @Query('studentCategoryId') studentCategoryId?: string,
   ) {
-    return this.studentsService.findAll(user.schoolId, classId, academicYearId);
+    return this.studentsService.findAll(user.schoolId, classId, academicYearId, studentCategoryId);
+  }
+
+  @Post('bulk-category')
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN)
+  bulkAssignCategory(@CurrentUser() user: any, @Body() dto: BulkAssignCategoryDto) {
+    return this.studentsService.bulkAssignCategory(user.schoolId, dto);
   }
 
   @Get(':id')

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { CacheModule } from './cache/cache.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { TenantModule } from './tenant/tenant.module';
@@ -27,6 +28,7 @@ import { ReportCardsModule } from './report-cards/report-cards.module';
 import { PortalModule } from './portal/portal.module';
 import { ReportsModule } from './reports/reports.module';
 import { AuditViewerModule } from './audit-viewer/audit-viewer.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { MailModule } from './mail/mail.module';
 
 @Module({
@@ -37,6 +39,7 @@ import { MailModule } from './mail/mail.module';
       envFilePath: ['../../.env', '.env'],
     }),
     MailModule,
+    CacheModule,
     PrismaModule,
     TenantModule,
     AuthModule,
@@ -64,6 +67,7 @@ import { MailModule } from './mail/mail.module';
     PortalModule,
     ReportsModule,
     AuditViewerModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

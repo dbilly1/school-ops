@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
@@ -24,9 +24,28 @@ type StudentListItem = {
   firstName: string;
   lastName: string;
   gender: string | null;
+  dateOfBirth: string | null;
+  address: string | null;
   enrolledAt: string;
   classAssignments: ClassAssignment[];
+  guardians: { name: string; phone: string | null }[];
+  studentCategory: { id: string; name: string } | null;
 };
+
+type Category = { id: string; name: string };
+
+function getAge(dateOfBirth: string): number {
+  const today = new Date();
+  const dob   = new Date(dateOfBirth);
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+  return age;
+}
+
+function formatDate(d: string) {
+  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
 
 type GradeLevel = { id: string; name: string; sequence: number };
 type ClassItem   = { id: string; name: string; gradeLevelId: string };
@@ -37,9 +56,10 @@ type AddForm = {
   gender: string;
   dateOfBirth: string;
   classId: string;
+  studentCategoryId: string;
 };
 
-const EMPTY_FORM: AddForm = { firstName: '', lastName: '', gender: '', dateOfBirth: '', classId: '' };
+const EMPTY_FORM: AddForm = { firstName: '', lastName: '', gender: '', dateOfBirth: '', classId: '', studentCategoryId: '' };
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
 
@@ -108,6 +128,9 @@ function AddStudentDialog({ open, onCreated, onClose, classes, classesLoading }:
   const [error, setError]   = useState<string | null>(null);
   const [created, setCreated] = useState<{ studentId: string; firstName: string; lastName: string; tempPassword: string } | null>(null);
 
+  const fetchCategories = useCallback(() => staffApi.get<{ id: string; name: string }[]>('/school/student-categories'), []);
+  const { data: categories } = useApi(fetchCategories);
+
   function set(k: keyof AddForm, v: string) {
     setForm(f => ({ ...f, [k]: v }));
   }
@@ -135,6 +158,7 @@ function AddStudentDialog({ open, onCreated, onClose, classes, classesLoading }:
           gender:      form.gender      || undefined,
           dateOfBirth: form.dateOfBirth || undefined,
           classId:     form.classId     || undefined,
+          studentCategoryId: form.studentCategoryId || undefined,
         },
       );
       setCreated(result);
@@ -199,7 +223,7 @@ function AddStudentDialog({ open, onCreated, onClose, classes, classesLoading }:
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="First name" required>
               <FocusInput
                 value={form.firstName}
@@ -246,6 +270,24 @@ function AddStudentDialog({ open, onCreated, onClose, classes, classesLoading }:
                 )}
               </Field>
             </div>
+            <div className="col-span-2">
+              <Field label="Fee category">
+                {categories && categories.length > 0 ? (
+                  <FocusSelect value={form.studentCategoryId} onChange={e => set('studentCategoryId', e.target.value)}>
+                    <option value="">Not assigned</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </FocusSelect>
+                ) : (
+                  <p className="text-xs text-slate-400 pt-1">
+                    No categories yet.{' '}
+                    <a href="/school/settings/student-categories" className="underline underline-offset-2" style={{ color: 'var(--accent)' }}>
+                      Set up student categories
+                    </a>{' '}
+                    first.
+                  </p>
+                )}
+              </Field>
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
@@ -279,12 +321,23 @@ export default function StudentsPage() {
   const [search, setSearch]           = useState('');
   const [classFilter, setClassFilter] = useState('');
   const [gradeFilter, setGradeFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [showAdd, setShowAdd]         = useState(false);
 
-  const fetchStudents = useCallback(
-    () => staffApi.get<StudentListItem[]>(`/school/students${classFilter ? `?classId=${classFilter}` : ''}`),
-    [classFilter],
-  );
+  // Bulk fee-category assignment (owner/admin only)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkCategoryId, setBulkCategoryId] = useState('');
+  const [bulkSaving, setBulkSaving]   = useState(false);
+  const [bulkMsg, setBulkMsg]         = useState<string | null>(null);
+
+  const fetchStudents = useCallback(() => {
+    const params = new URLSearchParams();
+    if (classFilter)    params.set('classId', classFilter);
+    if (categoryFilter) params.set('studentCategoryId', categoryFilter);
+    const qs = params.toString();
+    return staffApi.get<StudentListItem[]>(`/school/students${qs ? `?${qs}` : ''}`);
+  }, [classFilter, categoryFilter]);
+  const fetchCategories = useCallback(() => staffApi.get<Category[]>('/school/student-categories'), []);
   const fetchGrades  = useCallback(() => staffApi.get<GradeLevel[]>('/school/grade-structure/grade-levels'), []);
   const fetchClasses = useCallback(async () => {
     const list = await staffApi.get<ClassItem[]>('/school/grade-structure/classes');
@@ -295,9 +348,13 @@ export default function StudentsPage() {
     return list;
   }, []);
 
-  const { data: students, loading, refetch }        = useApi(fetchStudents, classFilter);
+  const { data: students, loading, refetch }        = useApi(fetchStudents, `${classFilter}|${categoryFilter}`);
+  const { data: categories }                        = useApi(fetchCategories);
   const { data: grades }                            = useApi(fetchGrades);
   const { data: classes, loading: classesLoading }  = useApi(fetchClasses);
+
+  const selectable = !scope.restricted;
+  const colCount   = 8 + (selectable ? 1 : 0);  // data cols + optional checkbox col
 
   // For restricted teachers: only show their assigned classes
   const visibleClasses = scope.restricted
@@ -315,6 +372,46 @@ export default function StudentsPage() {
   });
 
   const currentClass = (s: StudentListItem) => s.classAssignments[0]?.class;
+
+  // ── Bulk selection ──────────────────────────────────────────────────────────
+  // Clear selection whenever the visible set changes via filters/search.
+  useEffect(() => { setSelectedIds(new Set()); setBulkMsg(null); }, [classFilter, categoryFilter, gradeFilter, search]);
+
+  const visibleIds      = filtered.map(s => s.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+
+  function toggleOne(id: string) {
+    setBulkMsg(null);
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setBulkMsg(null);
+    setSelectedIds(prev => (visibleIds.every(id => prev.has(id)) ? new Set() : new Set(visibleIds)));
+  }
+
+  async function bulkAssign() {
+    if (selectedIds.size === 0) return;
+    setBulkSaving(true); setBulkMsg(null);
+    try {
+      const res = await staffApi.post<{ updated: number }>('/school/students/bulk-category', {
+        studentIds: Array.from(selectedIds),
+        studentCategoryId: bulkCategoryId,  // '' clears the category
+      });
+      const catName = categories?.find(c => c.id === bulkCategoryId)?.name;
+      setBulkMsg(`${res.updated} student${res.updated !== 1 ? 's' : ''} ${bulkCategoryId ? `set to ${catName}` : 'category cleared'}.`);
+      setSelectedIds(new Set());
+      refetch();
+    } catch (err) {
+      setBulkMsg((err as ApiError).message ?? 'Failed to update students.');
+    } finally {
+      setBulkSaving(false);
+    }
+  }
 
   return (
     <div>
@@ -386,9 +483,23 @@ export default function StudentsPage() {
             <option key={c.id} value={c.id}>{c.name}</option>
           ))}
         </select>
-        {(search || classFilter || gradeFilter) && (
+        {/* Fee category filter — hidden for restricted teachers */}
+        {!scope.restricted && (
+          <select
+            value={categoryFilter}
+            onChange={e => setCategoryFilter(e.target.value)}
+            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
+            onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+            onBlur={e => e.currentTarget.style.boxShadow = ''}
+          >
+            <option value="">All categories</option>
+            {categories?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value="none">No category</option>
+          </select>
+        )}
+        {(search || classFilter || gradeFilter || categoryFilter) && (
           <button
-            onClick={() => { setSearch(''); setClassFilter(''); setGradeFilter(''); }}
+            onClick={() => { setSearch(''); setClassFilter(''); setGradeFilter(''); setCategoryFilter(''); }}
             className="text-sm text-slate-400 hover:text-slate-700 transition"
           >
             Clear filters
@@ -396,23 +507,74 @@ export default function StudentsPage() {
         )}
       </div>
 
+      {/* Bulk fee-category assignment bar */}
+      {selectable && selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border flex-wrap"
+          style={{ borderColor: 'var(--accent)', backgroundColor: 'var(--accent-tint, #f0fdf4)' }}>
+          <span className="text-sm font-medium text-slate-700">
+            {selectedIds.size} selected
+          </span>
+          <span className="text-slate-300">·</span>
+          <span className="text-sm text-slate-500">Set fee category:</span>
+          <select
+            value={bulkCategoryId}
+            onChange={e => setBulkCategoryId(e.target.value)}
+            className="px-3 py-1.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
+          >
+            <option value="">— Remove category —</option>
+            {categories?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button
+            onClick={bulkAssign}
+            disabled={bulkSaving}
+            className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white transition disabled:opacity-50"
+            style={{ backgroundColor: 'var(--accent)' }}
+          >
+            {bulkSaving ? 'Applying…' : `Apply to ${selectedIds.size}`}
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-sm text-slate-400 hover:text-slate-700 transition ml-auto"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+      {bulkMsg && (
+        <p className="mb-4 text-sm text-emerald-600">{bulkMsg}</p>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <table className="w-full">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px]">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50">
+              {selectable && (
+                <th className="px-4 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleAll}
+                    className="w-4 h-4 rounded cursor-pointer"
+                    aria-label="Select all students"
+                  />
+                </th>
+              )}
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Student</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">ID</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Class</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Gender</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Enrolled</th>
-              <th className="px-4 py-3" />
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Category</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Date of birth</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden lg:table-cell">Guardian</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Address</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden xl:table-cell">Enrolled</th>
             </tr>
           </thead>
           <tbody>
             {loading && Array.from({ length: 8 }).map((_, i) => (
               <tr key={i} className="border-b border-slate-50">
-                <td colSpan={6} className="px-4 py-3.5">
+                <td colSpan={colCount} className="px-4 py-3.5">
                   <div className="h-8 bg-slate-100 rounded-lg animate-pulse" />
                 </td>
               </tr>
@@ -420,12 +582,28 @@ export default function StudentsPage() {
 
             {!loading && filtered?.map(student => {
               const cls = currentClass(student);
+              const guardian = student.guardians?.[0];
+              const selected = selectedIds.has(student.id);
               return (
                 <tr
                   key={student.id}
-                  className="border-b border-slate-50 hover:bg-slate-50/60 transition cursor-pointer"
+                  className={cn(
+                    'border-b border-slate-50 hover:bg-slate-50/60 transition cursor-pointer',
+                    selected && 'bg-slate-50/80',
+                  )}
                   onClick={() => router.push(`/school/students/${student.id}`)}
                 >
+                  {selectable && (
+                    <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleOne(student.id)}
+                        className="w-4 h-4 rounded cursor-pointer"
+                        aria-label={`Select ${student.firstName} ${student.lastName}`}
+                      />
+                    </td>
+                  )}
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-3">
                       <StudentAvatar student={student} />
@@ -448,15 +626,43 @@ export default function StudentsPage() {
                     )}
                   </td>
                   <td className="px-4 py-3.5">
-                    <span className="text-sm text-slate-600">{student.gender ?? '—'}</span>
+                    {student.studentCategory ? (
+                      <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                        {student.studentCategory.name}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-300 italic">None</span>
+                    )}
                   </td>
-                  <td className="px-4 py-3.5">
-                    <span className="text-sm text-slate-500">
-                      {new Date(student.enrolledAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </span>
+                  <td className="px-4 py-3.5 whitespace-nowrap">
+                    {student.dateOfBirth ? (
+                      <div>
+                        <p className="text-sm text-slate-600">{formatDate(student.dateOfBirth)}</p>
+                        <p className="text-xs text-slate-400">{getAge(student.dateOfBirth)} yrs</p>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
                   </td>
-                  <td className="px-4 py-3.5 text-right">
-                    <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>View →</span>
+                  <td className="px-4 py-3.5 hidden lg:table-cell">
+                    {guardian ? (
+                      <div>
+                        <p className="text-sm text-slate-600">{guardian.name}</p>
+                        {guardian.phone && <p className="text-xs text-slate-400">{guardian.phone}</p>}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5 hidden md:table-cell max-w-[200px]">
+                    {student.address ? (
+                      <span className="text-sm text-slate-500 block truncate" title={student.address}>{student.address}</span>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5 hidden xl:table-cell whitespace-nowrap">
+                    <span className="text-sm text-slate-500">{formatDate(student.enrolledAt)}</span>
                   </td>
                 </tr>
               );
@@ -464,7 +670,7 @@ export default function StudentsPage() {
 
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-16 text-center">
+                <td colSpan={colCount} className="px-4 py-16 text-center">
                   <p className="text-sm text-slate-400">
                     {search || classFilter || gradeFilter
                       ? 'No students match your filters.'
@@ -486,6 +692,7 @@ export default function StudentsPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsDateString, IsBoolean, IsObject, IsNotEmpty } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsBoolean, IsObject, IsNotEmpty, IsArray, ArrayNotEmpty } from 'class-validator';
 
 export class CreateStudentDto {
   @IsString()
@@ -29,6 +29,11 @@ export class CreateStudentDto {
   @IsString()
   @IsOptional()
   classId?: string;
+
+  /** Fee category (determines which fee structure applies) */
+  @IsString()
+  @IsOptional()
+  studentCategoryId?: string;
 }
 
 export class UpdateStudentDto {
@@ -55,6 +60,11 @@ export class UpdateStudentDto {
   @IsString()
   @IsOptional()
   address?: string;
+
+  /** Fee category (determines which fee structure applies). Pass empty string to clear. */
+  @IsString()
+  @IsOptional()
+  studentCategoryId?: string;
 
   @IsString()
   @IsOptional()
@@ -96,4 +106,16 @@ export class AssignClassDto {
   @IsString()
   @IsOptional()
   academicYearId?: string;
+}
+
+export class BulkAssignCategoryDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  studentIds!: string[];
+
+  /** Category to assign. Omit / empty string to clear the category. */
+  @IsString()
+  @IsOptional()
+  studentCategoryId?: string;
 }
