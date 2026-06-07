@@ -24,9 +24,25 @@ type StudentListItem = {
   firstName: string;
   lastName: string;
   gender: string | null;
+  dateOfBirth: string | null;
+  address: string | null;
   enrolledAt: string;
   classAssignments: ClassAssignment[];
+  guardians: { name: string; phone: string | null }[];
 };
+
+function getAge(dateOfBirth: string): number {
+  const today = new Date();
+  const dob   = new Date(dateOfBirth);
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+  return age;
+}
+
+function formatDate(d: string) {
+  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
 
 type GradeLevel = { id: string; name: string; sequence: number };
 type ClassItem   = { id: string; name: string; gradeLevelId: string };
@@ -199,7 +215,7 @@ function AddStudentDialog({ open, onCreated, onClose, classes, classesLoading }:
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="First name" required>
               <FocusInput
                 value={form.firstName}
@@ -398,21 +414,23 @@ export default function StudentsPage() {
 
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <table className="w-full">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px]">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50">
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Student</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">ID</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Class</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Gender</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Enrolled</th>
-              <th className="px-4 py-3" />
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Date of birth</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden lg:table-cell">Guardian</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Address</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden xl:table-cell">Enrolled</th>
             </tr>
           </thead>
           <tbody>
             {loading && Array.from({ length: 8 }).map((_, i) => (
               <tr key={i} className="border-b border-slate-50">
-                <td colSpan={6} className="px-4 py-3.5">
+                <td colSpan={7} className="px-4 py-3.5">
                   <div className="h-8 bg-slate-100 rounded-lg animate-pulse" />
                 </td>
               </tr>
@@ -420,6 +438,7 @@ export default function StudentsPage() {
 
             {!loading && filtered?.map(student => {
               const cls = currentClass(student);
+              const guardian = student.guardians?.[0];
               return (
                 <tr
                   key={student.id}
@@ -447,16 +466,35 @@ export default function StudentsPage() {
                       <span className="text-xs text-slate-300 italic">Unassigned</span>
                     )}
                   </td>
-                  <td className="px-4 py-3.5">
-                    <span className="text-sm text-slate-600">{student.gender ?? '—'}</span>
+                  <td className="px-4 py-3.5 whitespace-nowrap">
+                    {student.dateOfBirth ? (
+                      <div>
+                        <p className="text-sm text-slate-600">{formatDate(student.dateOfBirth)}</p>
+                        <p className="text-xs text-slate-400">{getAge(student.dateOfBirth)} yrs</p>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
                   </td>
-                  <td className="px-4 py-3.5">
-                    <span className="text-sm text-slate-500">
-                      {new Date(student.enrolledAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </span>
+                  <td className="px-4 py-3.5 hidden lg:table-cell">
+                    {guardian ? (
+                      <div>
+                        <p className="text-sm text-slate-600">{guardian.name}</p>
+                        {guardian.phone && <p className="text-xs text-slate-400">{guardian.phone}</p>}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
                   </td>
-                  <td className="px-4 py-3.5 text-right">
-                    <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>View →</span>
+                  <td className="px-4 py-3.5 hidden md:table-cell max-w-[200px]">
+                    {student.address ? (
+                      <span className="text-sm text-slate-500 block truncate" title={student.address}>{student.address}</span>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5 hidden xl:table-cell whitespace-nowrap">
+                    <span className="text-sm text-slate-500">{formatDate(student.enrolledAt)}</span>
                   </td>
                 </tr>
               );
@@ -464,7 +502,7 @@ export default function StudentsPage() {
 
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-16 text-center">
+                <td colSpan={7} className="px-4 py-16 text-center">
                   <p className="text-sm text-slate-400">
                     {search || classFilter || gradeFilter
                       ? 'No students match your filters.'
@@ -486,6 +524,7 @@ export default function StudentsPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

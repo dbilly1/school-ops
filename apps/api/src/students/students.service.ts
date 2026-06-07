@@ -99,10 +99,15 @@ export class StudentsService {
       },
       select: {
         id: true, studentId: true, firstName: true, lastName: true,
-        gender: true, enrolledAt: true,
+        gender: true, enrolledAt: true, dateOfBirth: true, address: true,
         classAssignments: {
           include: { class: { include: { gradeLevel: { select: { id: true, name: true } } } } },
           orderBy: { assignedAt: 'desc' },
+          take: 1,
+        },
+        guardians: {
+          where: { isPrimary: true },
+          select: { name: true, phone: true },
           take: 1,
         },
       },
