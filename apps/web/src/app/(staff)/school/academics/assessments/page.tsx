@@ -75,7 +75,7 @@ function NewAssessmentModal({ open, onClose, subjects, terms, onCreated, assigne
           <Input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Mid-term Test, Class Quiz 1" />
         </FormField>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormField label="Subject" required>
             <select value={form.subjectId} onChange={e => setForm(f => ({ ...f, subjectId: e.target.value }))}
               className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
@@ -93,7 +93,7 @@ function NewAssessmentModal({ open, onClose, subjects, terms, onCreated, assigne
           </FormField>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <FormField label="Total marks" required>
             <Input type="number" value={form.totalScore} min="1"
               onChange={e => setForm(f => ({ ...f, totalScore: e.target.value }))} />
@@ -154,6 +154,21 @@ export default function AssessmentsPage() {
     ? (assessments ?? []).filter(a => scope.assignedSubjectIds.includes(a.subject.id))
     : (assessments ?? []);
 
+  // Summary figures
+  const totalScores = visibleAssessments.reduce((sum, a) => sum + a._count.scores, 0);
+  const awaitingCount = visibleAssessments.filter(a => a._count.scores === 0).length;
+
+  // Group by term — active term first, then by first appearance
+  const activeTermId = (terms ?? []).find((t: Term) => t.isActive)?.id;
+  const termGroups: { termId: string; termName: string; items: Assessment[] }[] = [];
+  for (const a of visibleAssessments) {
+    let g = termGroups.find(x => x.termId === a.term.id);
+    if (!g) { g = { termId: a.term.id, termName: a.term.name, items: [] }; termGroups.push(g); }
+    g.items.push(a);
+  }
+  termGroups.sort((x, y) =>
+    (y.termId === activeTermId ? 1 : 0) - (x.termId === activeTermId ? 1 : 0));
+
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
@@ -169,8 +184,26 @@ export default function AssessmentsPage() {
         </button>
       </div>
 
+      {/* Summary */}
+      {!loading && visibleAssessments.length > 0 && (
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          <div className="bg-white rounded-xl border border-slate-100 px-4 py-3">
+            <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Assessments</p>
+            <p className="mt-1 text-xl font-bold text-slate-900">{visibleAssessments.length}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-100 px-4 py-3">
+            <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Scores recorded</p>
+            <p className="mt-1 text-xl font-bold text-emerald-600">{totalScores}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-100 px-4 py-3">
+            <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Awaiting scores</p>
+            <p className={`mt-1 text-xl font-bold ${awaitingCount > 0 ? 'text-amber-500' : 'text-slate-300'}`}>{awaitingCount}</p>
+          </div>
+        </div>
+      )}
+
       {/* Filters */}
-      <div className="flex gap-3 mb-5">
+      <div className="flex flex-wrap gap-3 mb-5">
         <select value={termFilter} onChange={e => setTermFilter(e.target.value)}
           className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
           <option value="">All terms</option>
@@ -183,73 +216,103 @@ export default function AssessmentsPage() {
         </select>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Title</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Subject</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Term</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Marks</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Weight</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Scores</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Date</th>
-              <th className="px-4 py-3" />
-            </tr>
-          </thead>
-          <tbody>
-            {loading && Array.from({length:5}).map((_,i) => (
-              <tr key={i} className="border-b border-slate-50">
-                <td colSpan={8} className="px-4 py-3.5"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td>
-              </tr>
-            ))}
-            {!loading && visibleAssessments.map(a => (
-              <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50/60 transition">
-                <td className="px-4 py-3.5">
-                  <p className="text-sm font-medium text-slate-800">{a.title}</p>
-                </td>
-                <td className="px-4 py-3.5">
-                  <span className="text-sm text-slate-600">{a.subject.name}</span>
-                </td>
-                <td className="px-4 py-3.5">
-                  <span className="text-xs text-slate-500">{a.term.name}</span>
-                </td>
-                <td className="px-4 py-3.5 text-center">
-                  <span className="text-sm font-medium text-slate-700">{a.totalScore}</span>
-                </td>
-                <td className="px-4 py-3.5 text-center">
-                  <span className="text-sm text-slate-500">{a.weight ? `${a.weight}%` : '—'}</span>
-                </td>
-                <td className="px-4 py-3.5 text-center">
-                  <span className={`text-sm font-medium ${a._count.scores > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>
-                    {a._count.scores}
-                  </span>
-                </td>
-                <td className="px-4 py-3.5">
-                  <span className="text-xs text-slate-400">
-                    {a.assessmentDate
-                      ? new Date(a.assessmentDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-                      : '—'}
-                  </span>
-                </td>
-                <td className="px-4 py-3.5 text-right">
-                  <button
-                    onClick={() => router.push(`/school/academics/assessments/${a.id}`)}
-                    className="text-xs font-medium transition"
-                    style={{ color: 'var(--accent)' }}
-                  >
-                    Enter scores →
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {!loading && visibleAssessments.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-400">No assessments yet.</td></tr>
+      {/* Loading */}
+      {loading && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="px-4 py-3.5 border-b border-slate-50 last:border-0">
+              <div className="h-7 bg-slate-100 rounded animate-pulse" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && visibleAssessments.length === 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-16 text-center">
+          <p className="text-sm text-slate-400">No assessments yet.</p>
+          <button
+            onClick={() => setShowNew(true)}
+            className="mt-3 text-sm font-medium underline underline-offset-2"
+            style={{ color: 'var(--accent)' }}
+          >
+            Create your first assessment
+          </button>
+        </div>
+      )}
+
+      {/* Grouped tables — one per term, active term first */}
+      {!loading && termGroups.map(group => (
+        <div key={group.termId} className="mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <h3 className="text-sm font-bold text-slate-700">{group.termName}</h3>
+            {group.termId === activeTermId && (
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: 'var(--accent)' }}>Active</span>
             )}
-          </tbody>
-        </table>
-      </div>
+            <span className="text-xs text-slate-400">· {group.items.length}</span>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px]">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Title</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Subject</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Marks</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Weight</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Date</th>
+                    <th className="px-4 py-3" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.items.map(a => (
+                    <tr
+                      key={a.id}
+                      className="border-b border-slate-50 hover:bg-slate-50/60 transition cursor-pointer"
+                      onClick={() => router.push(`/school/academics/assessments/${a.id}`)}
+                    >
+                      <td className="px-4 py-3.5">
+                        <p className="text-sm font-medium text-slate-800">{a.title}</p>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span className="text-sm text-slate-600">{a.subject.name}</span>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        <span className="text-sm font-medium text-slate-700">{a.totalScore}</span>
+                      </td>
+                      <td className="px-4 py-3.5 text-center hidden md:table-cell">
+                        <span className="text-sm text-slate-500">{a.weight ? `${a.weight}%` : '—'}</span>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {a._count.scores > 0 ? (
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">
+                            {a._count.scores} scored
+                          </span>
+                        ) : (
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-600">
+                            Awaiting scores
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 hidden md:table-cell">
+                        <span className="text-xs text-slate-400">
+                          {a.assessmentDate
+                            ? new Date(a.assessmentDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+                            : '—'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                        <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>Enter scores →</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ))}
 
       <NewAssessmentModal
         open={showNew} onClose={() => setShowNew(false)}
