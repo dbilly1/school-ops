@@ -226,8 +226,8 @@ function VehiclesTab() {
   return (
     <div className="space-y-4">
       {error && <Alert type="error" message={error} />}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <table className="w-full">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[560px]">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50">
               {['Make', 'Model', 'Plate', 'Capacity', ''].map(h => (

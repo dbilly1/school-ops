@@ -167,7 +167,8 @@ const NAV: { section: string; items: NavItem[] }[] = [
   },
 ];
 
-export function Sidebar() {
+// Shared inner content — rendered both in the desktop rail and the mobile drawer.
+function SidebarBody() {
   const pathname = usePathname();
   const { branding, hasRole } = useStaffAuth();
   const scope = useTeacherScope();
@@ -177,8 +178,7 @@ export function Sidebar() {
   const canSeeAttendance = isOwnerOrAdmin || (scope.restricted ? scope.assignedClassIds.length > 0 : true);
 
   return (
-    <aside className="w-60 shrink-0 flex flex-col h-full bg-slate-900">
-
+    <>
       {/* School identity */}
       <div className="px-4 py-5 border-b border-white/10">
         <div className="flex items-center gap-3">
@@ -228,6 +228,37 @@ export function Sidebar() {
           />
         </div>
       )}
+    </>
+  );
+}
+
+// Desktop rail — hidden below lg (the mobile drawer takes over there).
+export function Sidebar() {
+  return (
+    <aside className="w-60 shrink-0 hidden lg:flex flex-col h-full bg-slate-900">
+      <SidebarBody />
     </aside>
+  );
+}
+
+// Mobile slide-in drawer with backdrop.
+export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <div className={cn('lg:hidden fixed inset-0 z-50', open ? '' : 'pointer-events-none')} aria-hidden={!open}>
+      {/* Backdrop */}
+      <div
+        className={cn('absolute inset-0 bg-black/40 transition-opacity duration-300', open ? 'opacity-100' : 'opacity-0')}
+        onClick={onClose}
+      />
+      {/* Drawer */}
+      <aside
+        className={cn(
+          'absolute inset-y-0 left-0 w-60 flex flex-col bg-slate-900 shadow-xl transition-transform duration-300',
+          open ? 'translate-x-0' : '-translate-x-full',
+        )}
+      >
+        <SidebarBody />
+      </aside>
+    </div>
   );
 }

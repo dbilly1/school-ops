@@ -272,8 +272,8 @@ export default function UsersPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <table className="w-full">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[640px]">
           <thead>
             <tr className="border-b border-slate-100">
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Name</th>

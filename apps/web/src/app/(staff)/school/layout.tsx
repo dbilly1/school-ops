@@ -1,15 +1,19 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useStaffAuth } from '@/contexts/staff-auth';
-import { Sidebar } from '@/components/layout/sidebar';
+import { Sidebar, MobileSidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 
 export default function SchoolShellLayout({ children }: { children: React.ReactNode }) {
   const { user, branding, loading } = useStaffAuth();
   const router   = useRouter();
   const pathname = usePathname();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Close the mobile drawer whenever the route changes
+  useEffect(() => { setMobileNavOpen(false); }, [pathname]);
 
   useEffect(() => {
     if (loading) return;
@@ -59,9 +63,10 @@ export default function SchoolShellLayout({ children }: { children: React.ReactN
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
       <Sidebar />
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <Topbar />
-        <main className="flex-1 overflow-y-auto px-6 py-6">
+      <MobileSidebar open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+      <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+        <Topbar onMenuClick={() => setMobileNavOpen(true)} />
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
           {children}
         </main>
       </div>
