@@ -2,11 +2,15 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { TimingInterceptor } from './common/timing.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix('api');
+
+  // Per-request timing log (set TIMING_LOG=off to disable) — diagnostic for slowness.
+  app.useGlobalInterceptors(new TimingInterceptor());
 
   // Allow the configured origins plus any subdomain of the root domain
   // (schools are served at <slug>.<root>), so the X-School-Slug login flow works.
