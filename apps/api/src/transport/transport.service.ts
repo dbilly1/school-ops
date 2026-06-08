@@ -72,6 +72,12 @@ export class TransportService {
         vehicle: { select: { id: true, plateNumber: true, model: true } },
         driver: { select: { id: true, name: true, phone: true } },
         pickupPoints: { orderBy: { sequence: 'asc' } },
+        studentAssignments: {
+          include: {
+            student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
+          },
+          orderBy: { student: { lastName: 'asc' } },
+        },
         _count: { select: { studentAssignments: true } },
       },
       orderBy: { name: 'asc' },

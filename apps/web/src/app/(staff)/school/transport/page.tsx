@@ -12,26 +12,37 @@ import { cn } from '@/lib/cn';
 type Vehicle  = { id: string; make: string; model: string; plateNumber: string; capacity: number };
 type Driver   = { id: string; name: string; phone: string | null; licenseNumber: string | null };
 type PickupPoint = { id: string; name: string; order: number };
+type Student  = { id: string; studentId: string; firstName: string; lastName: string };
+type Assignment = { id: string; student: Student };
 type Route    = {
   id: string; name: string; dailyRate: number;
   vehicle: Vehicle | null; driver: Driver | null;
   pickupPoints: PickupPoint[];
+  studentAssignments: Assignment[];
   _count: { studentAssignments: number };
 };
-type Student  = { id: string; studentId: string; firstName: string; lastName: string };
-type DailyFeeStatus = 'paid' | 'pre_covered' | 'absent' | 'unpaid';
-type CollectionEntry = {
+
+// Daily-fee collection — shape returned by GET /school/transport-fees/daily/:routeId
+type DailyFeeStatus = 'PAID' | 'PRE_COVERED' | 'ABSENT' | 'UNPAID';
+type CollectionRow = {
   student: Student;
   status: DailyFeeStatus;
-  prePaymentBalance: number;
+  record: { id: string; status: DailyFeeStatus } | null;
+};
+type DailyCollection = {
+  date: string;
+  routeId: string;
   dailyRate: number;
+  isSchoolDay: boolean;
+  rows: CollectionRow[];
+  summary: { total: number; paid: number; preCovered: number; absent: number; unpaid: number };
 };
 
 const STATUS_CONFIG: Record<DailyFeeStatus, { label: string; color: string; bg: string }> = {
-  paid:        { label: 'Paid',        color: '#22c55e', bg: '#f0fdf4' },
-  pre_covered: { label: 'Pre-covered', color: '#3b82f6', bg: '#eff6ff' },
-  absent:      { label: 'Absent',      color: '#94a3b8', bg: '#f8fafc' },
-  unpaid:      { label: 'Unpaid',      color: '#ef4444', bg: '#fef2f2' },
+  PAID:        { label: 'Paid',        color: '#22c55e', bg: '#f0fdf4' },
+  PRE_COVERED: { label: 'Pre-covered', color: '#3b82f6', bg: '#eff6ff' },
+  ABSENT:      { label: 'Absent',      color: '#94a3b8', bg: '#f8fafc' },
+  UNPAID:      { label: 'Unpaid',      color: '#ef4444', bg: '#fef2f2' },
 };
 
 type Tab = 'routes' | 'vehicles' | 'drivers' | 'fees';
@@ -62,6 +73,8 @@ function RoutesTab() {
   const [assigningRoute, setAssigningRoute] = useState('');
   const [assignStudentId, setAssignStudentId] = useState('');
   const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
 
   async function createRoute() {
     if (!form.name || !form.dailyRate) { setError('Name and daily rate are required.'); return; }
@@ -84,12 +97,24 @@ function RoutesTab() {
 
   async function assignStudent(routeId: string) {
     if (!assignStudentId) return;
-    setAssigning(true);
+    setAssignError(null); setAssigning(true);
     try {
-      await staffApi.post('/school/transport/assignments', { studentId: assignStudentId, routeId });
-      setAssignStudentId(''); refetch();
+      await staffApi.post('/school/transport/assignments', { studentId: assignStudentId, transportRouteId: routeId });
+      setAssignStudentId(''); setAssigningRoute(''); refetch();
+    } catch (err) {
+      setAssignError((err as ApiError).message ?? 'Failed to assign student.');
     } finally {
       setAssigning(false);
+    }
+  }
+
+  async function removeAssignment(studentId: string) {
+    setRemoving(studentId);
+    try {
+      await staffApi.delete(`/school/transport/assignments/${studentId}`);
+      refetch();
+    } finally {
+      setRemoving(null);
     }
   }
 
@@ -131,11 +156,36 @@ function RoutesTab() {
               </div>
             )}
 
+            {/* Assigned students */}
+            <div className="px-5 py-3 border-b border-slate-50">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
+                Assigned students
+              </p>
+              {route.studentAssignments.length === 0 ? (
+                <p className="text-sm text-slate-400">No students assigned yet.</p>
+              ) : (
+                <ul className="divide-y divide-slate-50">
+                  {route.studentAssignments.map(({ id, student }) => (
+                    <li key={id} className="flex items-center justify-between py-1.5">
+                      <span className="text-sm text-slate-700">
+                        {student.lastName}, {student.firstName}
+                        <span className="ml-2 text-xs font-mono text-slate-400">{student.studentId}</span>
+                      </span>
+                      <button onClick={() => removeAssignment(student.id)} disabled={removing === student.id}
+                        className="text-xs text-red-400 hover:text-red-600 transition disabled:opacity-50">
+                        {removing === student.id ? '…' : 'Remove'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             {/* Assign student */}
             <div className="px-5 py-3 flex gap-2">
               <select
                 value={assigningRoute === route.id ? assignStudentId : ''}
-                onChange={e => { setAssigningRoute(route.id); setAssignStudentId(e.target.value); }}
+                onChange={e => { setAssigningRoute(route.id); setAssignStudentId(e.target.value); setAssignError(null); }}
                 className="flex-1 text-sm px-3 py-1.5 border border-slate-200 rounded-lg outline-none text-slate-700"
               >
                 <option value="">Assign student to this route…</option>
@@ -149,6 +199,11 @@ function RoutesTab() {
                 </button>
               )}
             </div>
+            {assigningRoute === route.id && assignError && (
+              <div className="px-5 pb-3 -mt-1">
+                <Alert type="error" message={assignError} />
+              </div>
+            )}
           </div>
         ))}
 
@@ -359,51 +414,82 @@ function TransportFeesTab() {
   const [routeId, setRouteId] = useState('');
   const [markingPaid, setMarkingPaid] = useState<string | null>(null);
 
-  const fetchRoutes  = useCallback(() => staffApi.get<Route[]>('/school/transport/routes'), []);
-  const fetchEntries = useCallback(
-    () => routeId ? staffApi.get<CollectionEntry[]>(`/school/transport-fees/daily/${routeId}?date=${date}`).catch(() => []) : Promise.resolve([]),
+  const fetchRoutes     = useCallback(() => staffApi.get<Route[]>('/school/transport/routes'), []);
+  const fetchCollection = useCallback(
+    () => routeId
+      ? staffApi.get<DailyCollection>(`/school/transport-fees/daily/${routeId}?date=${date}`).catch(() => null)
+      : Promise.resolve(null),
     [routeId, date],
   );
 
-  const { data: routes }                     = useApi(fetchRoutes);
-  const { data: entries, loading, refetch }  = useApi(fetchEntries);
+  const { data: routes }                          = useApi(fetchRoutes);
+  const { data: collection, loading, refetch }    = useApi(fetchCollection, `${routeId}:${date}`);
+
+  // Auto-select the first route once routes load
+  useEffect(() => {
+    if (!routeId && routes && routes.length > 0) setRouteId(routes[0].id);
+  }, [routes]);
+
+  const rows        = collection?.rows ?? [];
+  const summary     = collection?.summary;
+  const isSchoolDay = collection?.isSchoolDay ?? true;
+  const cashToday   = summary ? summary.paid * (collection?.dailyRate ?? 0) : 0;
 
   async function markPaid(studentId: string) {
     setMarkingPaid(studentId);
     try {
-      await staffApi.post('/school/transport-fees/mark-paid', { studentId, date, routeId });
+      await staffApi.post('/school/transport-fees/mark-paid', { studentId, date });
       refetch();
     } finally {
       setMarkingPaid(null);
     }
   }
 
-  const summary = entries?.reduce((acc, e) => ({
-    paid: acc.paid + (e.status === 'paid' ? 1 : 0),
-    cash: acc.cash + (e.status === 'paid' ? e.dailyRate : 0),
-    unpaid: acc.unpaid + (e.status === 'unpaid' ? 1 : 0),
-  }), { paid: 0, cash: 0, unpaid: 0 });
-
   return (
     <div>
-      <div className="flex gap-3 mb-5">
+      <div className="flex items-center gap-3 mb-4">
         <input type="date" value={date} onChange={e => setDate(e.target.value)} max={today}
           className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
           onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
           onBlur={e => e.currentTarget.style.boxShadow = ''} />
-        <select value={routeId} onChange={e => setRouteId(e.target.value)}
-          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-          <option value="">Select route…</option>
-          {routes?.map(r => <option key={r.id} value={r.id}>{r.name} (GHS {r.dailyRate}/day)</option>)}
-        </select>
       </div>
 
-      {summary && routeId && (
+      {/* Route tabs */}
+      {routes && routes.length > 0 && (
+        <div className="flex gap-1 mb-6 border-b border-slate-200 overflow-x-auto scrollbar-none">
+          {routes.map(r => {
+            const active = routeId === r.id;
+            return (
+              <button key={r.id} onClick={() => setRouteId(r.id)}
+                className="shrink-0 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap"
+                style={active
+                  ? { color: 'var(--accent)', borderColor: 'var(--accent)' }
+                  : { color: '#64748b', borderColor: 'transparent' }}>
+                {r.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {routes && routes.length === 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 px-6 py-12 text-center text-sm text-slate-400">
+          No routes yet. Create a route first.
+        </div>
+      )}
+
+      {routeId && !loading && !isSchoolDay && (
+        <div className="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+          This date is not a school day. Payments cannot be recorded.
+        </div>
+      )}
+
+      {routeId && summary && (
         <div className="flex gap-4 mb-4">
           {[
             { label: 'Paid', value: summary.paid, color: '#22c55e' },
             { label: 'Unpaid', value: summary.unpaid, color: '#ef4444' },
-            { label: 'Cash today', value: `GHS ${summary.cash.toFixed(2)}`, color: 'var(--accent)' },
+            { label: 'Cash today', value: `GHS ${cashToday.toFixed(2)}`, color: 'var(--accent)' },
           ].map(c => (
             <div key={c.label} className="bg-white rounded-xl border border-slate-100 px-4 py-3 text-center">
               <p className="text-xs text-slate-400">{c.label}</p>
@@ -413,10 +499,6 @@ function TransportFeesTab() {
         </div>
       )}
 
-      {!routeId && (
-        <div className="bg-white rounded-2xl border border-slate-100 px-6 py-12 text-center text-sm text-slate-400">Select a route.</div>
-      )}
-
       {routeId && (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <table className="w-full">
@@ -424,22 +506,21 @@ function TransportFeesTab() {
               <tr className="border-b border-slate-100 bg-slate-50">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Student</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Status</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Balance</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
               {loading && Array.from({length:6}).map((_,i) => (
-                <tr key={i}><td colSpan={4} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td></tr>
+                <tr key={i}><td colSpan={3} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td></tr>
               ))}
-              {!loading && entries?.map(entry => {
-                const cfg    = STATUS_CONFIG[entry.status];
-                const canPay = entry.status === 'unpaid';
+              {!loading && rows.map(row => {
+                const cfg    = STATUS_CONFIG[row.status];
+                const canPay = row.status === 'UNPAID' && isSchoolDay;
                 return (
-                  <tr key={entry.student.id} className={cn('border-b border-slate-50', entry.status === 'absent' ? 'opacity-50' : 'hover:bg-slate-50/40 transition')}>
+                  <tr key={row.student.id} className={cn('border-b border-slate-50', row.status === 'ABSENT' ? 'opacity-50' : 'hover:bg-slate-50/40 transition')}>
                     <td className="px-4 py-3">
-                      <p className="text-sm font-medium text-slate-800">{entry.student.lastName}, {entry.student.firstName}</p>
-                      <p className="text-xs font-mono text-slate-400">{entry.student.studentId}</p>
+                      <p className="text-sm font-medium text-slate-800">{row.student.lastName}, {row.student.firstName}</p>
+                      <p className="text-xs font-mono text-slate-400">{row.student.studentId}</p>
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span className="text-xs font-semibold px-2.5 py-1 rounded-full"
@@ -447,25 +528,20 @@ function TransportFeesTab() {
                         {cfg.label}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      {entry.prePaymentBalance > 0 ? (
-                        <span className="text-sm font-medium text-blue-600">{entry.prePaymentBalance}d</span>
-                      ) : <span className="text-slate-300 text-sm">—</span>}
-                    </td>
                     <td className="px-4 py-3 text-right">
                       {canPay && (
-                        <button onClick={() => markPaid(entry.student.id)} disabled={markingPaid === entry.student.id}
+                        <button onClick={() => markPaid(row.student.id)} disabled={markingPaid === row.student.id}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
                           style={{ backgroundColor: '#22c55e' }}>
-                          {markingPaid === entry.student.id ? '…' : 'Mark paid'}
+                          {markingPaid === row.student.id ? '…' : 'Mark paid'}
                         </button>
                       )}
                     </td>
                   </tr>
                 );
               })}
-              {!loading && (!entries || entries.length === 0) && (
-                <tr><td colSpan={4} className="px-4 py-10 text-center text-sm text-slate-400">No students on this route.</td></tr>
+              {!loading && rows.length === 0 && (
+                <tr><td colSpan={3} className="px-4 py-10 text-center text-sm text-slate-400">No students on this route.</td></tr>
               )}
             </tbody>
           </table>
