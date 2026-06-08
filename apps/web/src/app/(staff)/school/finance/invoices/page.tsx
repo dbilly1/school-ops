@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { SaveButton, Alert } from '@/components/ui/settings-card';
+import { RecordPaymentModal, type PayableInvoice } from '@/components/finance/record-payment-modal';
 
 type Invoice = {
   id: string;
@@ -30,6 +31,7 @@ export default function InvoicesPage() {
   const [generating, setGenerating]   = useState(false);
   const [alert, setAlert]             = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const [genErrors, setGenErrors]     = useState<string[]>([]);
+  const [payInvoice, setPayInvoice]   = useState<PayableInvoice | null>(null);
 
   const fetchTerms  = useCallback(() =>
     staffApi.get<any>('/school/academic-years/active').then(y => y?.terms ?? []).catch(() => []),
@@ -169,7 +171,9 @@ export default function InvoicesPage() {
               const balance = inv.amount - inv.amountPaid;
               const sc      = STATUS_COLORS[inv.status];
               return (
-                <tr key={inv.id} className="border-b border-slate-50 hover:bg-slate-50/40 transition">
+                <tr key={inv.id}
+                  onClick={() => router.push(`/school/finance/invoices/${inv.id}`)}
+                  className="border-b border-slate-50 hover:bg-slate-50/40 transition cursor-pointer">
                   <td className="px-4 py-3.5">
                     <p className="text-sm font-medium text-slate-800">
                       {inv.student.lastName}, {inv.student.firstName}
@@ -195,10 +199,23 @@ export default function InvoicesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3.5 text-right">
-                    <button onClick={() => router.push(`/school/finance/invoices/${inv.id}`)}
-                      className="text-xs font-medium transition" style={{ color: 'var(--accent)' }}>
-                      Manage →
-                    </button>
+                    {balance > 0 ? (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          setPayInvoice({
+                            id: inv.id,
+                            studentName: `${inv.student.firstName} ${inv.student.lastName}`,
+                            balance,
+                          });
+                        }}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white transition"
+                        style={{ backgroundColor: 'var(--accent)' }}>
+                        Record payment
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-300">Paid</span>
+                    )}
                   </td>
                 </tr>
               );
@@ -215,6 +232,12 @@ export default function InvoicesPage() {
           </tbody>
         </table>
       </div>
+
+      <RecordPaymentModal
+        invoice={payInvoice}
+        onClose={() => setPayInvoice(null)}
+        onRecorded={refetch}
+      />
     </div>
   );
 }

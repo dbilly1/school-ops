@@ -102,6 +102,23 @@ export class FinanceController {
     return this.financeService.recordPayment(user.schoolId, id, dto, user.id);
   }
 
+  // Recent payments (transactions feed)
+  @Get('payments/recent')
+  @RequirePermission('finance', 'VIEW')
+  findRecentPayments(
+    @CurrentUser() user: any,
+    @Query('limit') limit?: string,
+    @Query('termId') termId?: string,
+    @Query('method') method?: string,
+  ) {
+    return this.financeService.findRecentPayments(
+      user.schoolId,
+      limit ? parseInt(limit, 10) : 50,
+      termId,
+      method,
+    );
+  }
+
   // Outstanding balances
   @Get('outstanding')
   @RequirePermission('finance', 'VIEW')

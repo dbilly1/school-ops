@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { FormField, Input, SaveButton, Alert } from '@/components/ui/settings-card';
+import { ReceiptModal, type ReceiptData } from '@/components/finance/receipt-modal';
 
 type Payment = {
   id: string;
@@ -38,6 +39,23 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [form, setForm] = useState({ amount: '', method: 'Cash', reference: '', paymentDate: new Date().toISOString().split('T')[0] });
   const [saving, setSaving] = useState(false);
   const [alert, setAlert]   = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+
+  function paymentReceipt(p: Payment): ReceiptData {
+    return {
+      receiptNo:    `RCT-${p.id.slice(0, 8).toUpperCase()}`,
+      studentName:  `${invoice!.student.firstName} ${invoice!.student.lastName}`,
+      studentId:    invoice!.student.studentId,
+      description:  `School Fees — ${invoice!.term.name}`,
+      amount:       p.amount,
+      paymentDate:  p.paymentDate,
+      method:       p.method,
+      reference:    p.reference,
+      recordedBy:   `${p.recordedBy.firstName} ${p.recordedBy.lastName}`,
+      invoiceTotal: invoice!.amount,
+      invoicePaid:  invoice!.amountPaid,
+    };
+  }
 
   async function recordPayment() {
     if (!form.amount) { setAlert({ type: 'error', message: 'Enter an amount.' }); return; }
@@ -142,11 +160,14 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     <th className="pb-2 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Method</th>
                     <th className="pb-2 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Reference</th>
                     <th className="pb-2 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Recorded by</th>
+                    <th className="pb-2" />
                   </tr>
                 </thead>
                 <tbody>
                   {invoice.payments.map(p => (
-                    <tr key={p.id} className="border-b border-slate-50 last:border-0">
+                    <tr key={p.id}
+                      onClick={() => setReceipt(paymentReceipt(p))}
+                      className="border-b border-slate-50 last:border-0 hover:bg-slate-50/40 transition cursor-pointer">
                       <td className="py-2.5 text-sm text-slate-600">
                         {new Date(p.paymentDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </td>
@@ -157,6 +178,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       <td className="py-2.5 text-xs font-mono text-slate-400">{p.reference ?? '—'}</td>
                       <td className="py-2.5 text-xs text-slate-500">
                         {p.recordedBy.firstName} {p.recordedBy.lastName}
+                      </td>
+                      <td className="py-2.5 text-right">
+                        <button onClick={e => { e.stopPropagation(); setReceipt(paymentReceipt(p)); }}
+                          className="text-xs font-medium transition" style={{ color: 'var(--accent)' }}>
+                          Receipt
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -211,6 +238,8 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           </div>
         )}
       </div>
+
+      <ReceiptModal receipt={receipt} onClose={() => setReceipt(null)} />
     </div>
   );
 }

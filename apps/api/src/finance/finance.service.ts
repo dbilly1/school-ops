@@ -340,6 +340,48 @@ export class FinanceService {
     });
   }
 
+  // ── Recent Payments (transactions feed) ───────────────────
+
+  async findRecentPayments(schoolId: string, limit = 50, termId?: string, method?: string) {
+    const payments = await this.prisma.payment.findMany({
+      where: {
+        schoolId,
+        ...(method ? { method } : {}),
+        ...(termId ? { invoice: { termId } } : {}),
+      },
+      orderBy: [{ paymentDate: 'desc' }, { createdAt: 'desc' }],
+      take: Math.min(Math.max(limit, 1), 200),
+      include: {
+        recordedByUser: { select: { firstName: true, lastName: true } },
+        invoice: {
+          select: {
+            id: true,
+            amount: true,
+            amountPaid: true,
+            term: { select: { id: true, name: true } },
+            student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
+          },
+        },
+      },
+    });
+
+    return payments.map((p) => ({
+      id: p.id,
+      amount: Number(p.amount),
+      paymentDate: p.paymentDate,
+      method: p.method,
+      reference: p.reference,
+      recordedBy: p.recordedByUser,
+      invoice: {
+        id: p.invoice.id,
+        amount: Number(p.invoice.amount),
+        amountPaid: Number(p.invoice.amountPaid),
+        term: p.invoice.term,
+        student: p.invoice.student,
+      },
+    }));
+  }
+
   // ── Outstanding Balances ──────────────────────────────────
 
   async getOutstandingBalances(schoolId: string, termId: string, classId?: string) {

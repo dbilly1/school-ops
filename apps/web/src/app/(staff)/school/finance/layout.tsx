@@ -8,6 +8,7 @@ const TABS = [
   { label: 'Fee Structures', href: '/school/finance/fee-structures' },
   { label: 'Invoices',       href: '/school/finance/invoices'       },
   { label: 'Outstanding',    href: '/school/finance/outstanding'    },
+  { label: 'Transactions',   href: '/school/finance/transactions'   },
 ];
 
 export default function FinanceLayout({ children }: { children: React.ReactNode }) {

@@ -4,6 +4,8 @@ import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { cn } from '@/lib/cn';
+import { RecordPaymentModal, type PayableInvoice } from '@/components/finance/record-payment-modal';
 
 type OutstandingEntry = {
   invoiceId: string;
@@ -45,7 +47,9 @@ export default function OutstandingPage() {
     return staffApi.get<OutstandingResponse>(`/school/finance/outstanding?${params}`).catch(() => EMPTY_OUTSTANDING);
   }, [activeTermId, classId]);
 
-  const { data, loading } = useApi(fetchOutstanding, `${activeTermId}|${classId}`);
+  const { data, loading, refetch } = useApi(fetchOutstanding, `${activeTermId}|${classId}`);
+
+  const [payInvoice, setPayInvoice] = useState<PayableInvoice | null>(null);
 
   const entries = data?.invoices ?? [];
   const total   = data?.totalOutstanding ?? 0;
@@ -54,18 +58,27 @@ export default function OutstandingPage() {
     <div>
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold text-slate-900">Outstanding Balances</h2>
-        <div className="flex gap-3">
-          <select value={activeTermId} onChange={e => setTermId(e.target.value)}
-            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-            <option value="">Select term…</option>
-            {terms?.map((t: any) => <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' ✓' : ''}</option>)}
-          </select>
-          <select value={classId} onChange={e => setClassId(e.target.value)}
-            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-            <option value="">All classes</option>
-            {classes?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
+        <select value={activeTermId} onChange={e => setTermId(e.target.value)}
+          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
+          <option value="">Select term…</option>
+          {terms?.map((t: any) => <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' ✓' : ''}</option>)}
+        </select>
+      </div>
+
+      {/* Class tabs */}
+      <div className="flex gap-1 mb-5 border-b border-slate-200 overflow-x-auto scrollbar-none">
+        {[{ id: '', name: 'All Classes' }, ...(classes ?? [])].map(c => {
+          const active = classId === c.id;
+          return (
+            <button key={c.id || 'all'} onClick={() => setClassId(c.id)}
+              className="shrink-0 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap"
+              style={active
+                ? { color: 'var(--accent)', borderColor: 'var(--accent)' }
+                : { color: '#64748b', borderColor: 'transparent' }}>
+              {c.name}
+            </button>
+          );
+        })}
       </div>
 
       {total > 0 && (
@@ -98,7 +111,9 @@ export default function OutstandingPage() {
               </tr>
             ))}
             {!loading && entries.map(entry => (
-              <tr key={entry.invoiceId} className="border-b border-slate-50 hover:bg-slate-50/40 transition">
+              <tr key={entry.invoiceId}
+                onClick={() => router.push(`/school/finance/invoices/${entry.invoiceId}`)}
+                className="border-b border-slate-50 hover:bg-slate-50/40 transition cursor-pointer">
                 <td className="px-4 py-3.5">
                   <p className="text-sm font-medium text-slate-800">
                     {entry.student.lastName}, {entry.student.firstName}
@@ -112,9 +127,18 @@ export default function OutstandingPage() {
                   <span className="text-sm font-bold text-red-500">GHS {entry.balance.toFixed(2)}</span>
                 </td>
                 <td className="px-4 py-3.5 text-right">
-                  <button onClick={() => router.push(`/school/finance/invoices/${entry.invoiceId}`)}
-                    className="text-xs font-medium transition" style={{ color: 'var(--accent)' }}>
-                    Record payment →
+                  <button
+                    onClick={e => {
+                      e.stopPropagation();
+                      setPayInvoice({
+                        id: entry.invoiceId,
+                        studentName: `${entry.student.firstName} ${entry.student.lastName}`,
+                        balance: entry.balance,
+                      });
+                    }}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white transition"
+                    style={{ backgroundColor: 'var(--accent)' }}>
+                    Record payment
                   </button>
                 </td>
               </tr>
@@ -127,6 +151,12 @@ export default function OutstandingPage() {
           </tbody>
         </table>
       </div>
+
+      <RecordPaymentModal
+        invoice={payInvoice}
+        onClose={() => setPayInvoice(null)}
+        onRecorded={refetch}
+      />
     </div>
   );
 }
