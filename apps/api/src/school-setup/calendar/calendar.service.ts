@@ -129,6 +129,10 @@ export class CalendarService {
   async isSchoolDay(schoolId: string, date: Date): Promise<boolean> {
     const dateOnly = new Date(date.toDateString());
 
+    // Weekends are never school days.
+    const dow = dateOnly.getDay(); // 0 = Sunday, 6 = Saturday
+    if (dow === 0 || dow === 6) return false;
+
     const activeTerm = await this.prisma.term.findFirst({
       where: {
         schoolId,

@@ -649,9 +649,11 @@ function TransportFeesTab() {
     setMarkingPaid(studentId);
     try {
       await staffApi.post('/school/transport-fees/mark-paid', { studentId, date });
-      refetch();
+    } catch {
+      // Stale row (e.g. already prepaid) — resync below rather than throw.
     } finally {
       setMarkingPaid(null);
+      refetch();
     }
   }
 

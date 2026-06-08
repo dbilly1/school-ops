@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../school-setup/calendar/calendar.service';
@@ -156,6 +156,15 @@ export class TransportFeesService {
     const dateObj = new Date(dto.date);
     const isSchoolDay = await this.calendar.isSchoolDay(schoolId, dateObj);
     if (!isSchoolDay) throw new BadRequestException('Not a school day');
+
+    const existing = await this.prisma.transportDailyRecord.findUnique({
+      where: { schoolId_studentId_recordDate: { schoolId, studentId: dto.studentId, recordDate: dateObj } },
+    });
+    // Don't take cash for a day already covered by prepaid balance.
+    if (existing?.status === 'PRE_COVERED')
+      throw new ConflictException("This day is already covered by the student's prepaid balance");
+    // Already settled in cash — idempotent, nothing to charge again.
+    if (existing?.status === 'PAID') return existing;
 
     return this.prisma.transportDailyRecord.upsert({
       where: { schoolId_studentId_recordDate: { schoolId, studentId: dto.studentId, recordDate: dateObj } },
