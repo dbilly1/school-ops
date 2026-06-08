@@ -36,6 +36,7 @@ export class FeedingConfigService {
         rateMode: dto.rateMode,
         flatRate: dto.flatRate,
         effectiveFrom: new Date(dto.effectiveFrom),
+        optOutAllowed: dto.optOutAllowed ?? false,
         classRates: dto.classRates
           ? { create: dto.classRates.map((r) => ({ gradeLevelId: r.gradeLevelId, dailyRate: r.dailyRate })) }
           : undefined,

@@ -1054,6 +1054,9 @@ model FeedingConfig {
   rateMode    RateModeType
   flatRate    Decimal?
   effectiveFrom DateTime
+  // When true, feeding is optional: students can be exempted (FeedingEnrollment
+  // isActive=false). When false (default) every class student participates.
+  optOutAllowed Boolean    @default(false)
   createdAt   DateTime     @default(now())
 
   school      School             @relation(fields: [schoolId], references: [id])

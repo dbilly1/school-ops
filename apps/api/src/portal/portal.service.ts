@@ -146,23 +146,31 @@ export class PortalService {
   }
 
   async getFeedingBalance(studentId: string, schoolId: string) {
-    const activeYear = await this.prisma.academicYear.findFirst({
-      where: { schoolId, isActive: true },
+    // Feeding is mandatory by default; a student only opts out when the school
+    // allows it (FeedingConfig.optOutAllowed) and has been exempted.
+    const config = await this.prisma.feedingConfig.findFirst({
+      where: { schoolId }, orderBy: { effectiveFrom: 'desc' }, select: { optOutAllowed: true },
     });
+    if (config?.optOutAllowed) {
+      const activeYear = await this.prisma.academicYear.findFirst({
+        where: { schoolId, isActive: true }, select: { id: true },
+      });
+      const exempt = activeYear
+        ? await this.prisma.feedingEnrollment.findFirst({
+            where: { studentId, academicYearId: activeYear.id, isActive: false },
+          })
+        : null;
+      if (exempt) return { enrolled: false };
+    }
 
-    const enrollment = activeYear
-      ? await this.prisma.feedingEnrollment.findFirst({
-          where: { studentId, academicYearId: activeYear.id, isActive: true },
-        })
-      : null;
+    const [banked, consumed, owedDays] = await Promise.all([
+      this.prisma.feedingPayment.aggregate({ where: { schoolId, studentId }, _sum: { daysCovered: true } }),
+      this.prisma.feedingDailyRecord.count({ where: { schoolId, studentId, status: 'PRE_COVERED' } }),
+      this.prisma.feedingDailyRecord.count({ where: { schoolId, studentId, status: 'UNPAID' } }),
+    ]);
+    const daysRemaining = (banked._sum.daysCovered ?? 0) - consumed;
 
-    if (!enrollment) return { enrolled: false };
-
-    const preCoveredDays = await this.prisma.feedingDailyRecord.count({
-      where: { studentId, status: 'PRE_COVERED', recordDate: { gte: new Date() } },
-    });
-
-    return { enrolled: true, daysRemaining: preCoveredDays };
+    return { enrolled: true, daysRemaining, owedDays };
   }
 
   async getNotifications(studentId: string, schoolId: string) {

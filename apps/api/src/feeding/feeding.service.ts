@@ -1,8 +1,15 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../school-setup/calendar/calendar.service';
 import { FeedingConfigService } from '../school-setup/feeding-config/feeding-config.service';
-import { EnrollStudentDto, RecordPaymentDto, MarkPaidDto } from './dto/feeding.dto';
+import {
+  EnrollStudentDto, MarkPaidDto,
+  FeedingPrepayDto, FeedingRefundDto, FeedingSettleArrearsDto,
+} from './dto/feeding.dto';
+
+// Calendar cell states (superset of the DailyFeeStatus enum) — mirrors transport.
+type CalendarStatus = 'PAID' | 'PRE_COVERED' | 'ABSENT' | 'UNPAID' | 'NON_SCHOOL' | 'PROJECTED' | 'NONE';
 
 @Injectable()
 export class FeedingService {
@@ -12,103 +19,205 @@ export class FeedingService {
     private feedingConfig: FeedingConfigService,
   ) {}
 
-  // ── Enrollment ────────────────────────────────────────────
+  // ── Participation / exemptions ────────────────────────────
+  // Feeding is mandatory by default: every class student participates. When the
+  // school enables opt-out (FeedingConfig.optOutAllowed), a student is exempt if
+  // they have an inactive FeedingEnrollment record.
 
-  async enrollStudent(schoolId: string, dto: EnrollStudentDto) {
+  private async getParticipatingIds(schoolId: string, candidateIds: string[]): Promise<string[]> {
+    if (candidateIds.length === 0) return [];
+    const config = await this.feedingConfig.getCurrent(schoolId);
+    if (!config?.optOutAllowed) return candidateIds;
+
+    const exempt = new Set(
+      (await this.prisma.feedingEnrollment.findMany({
+        where: { schoolId, studentId: { in: candidateIds }, isActive: false },
+        select: { studentId: true },
+      })).map((e) => e.studentId),
+    );
+    return candidateIds.filter((id) => !exempt.has(id));
+  }
+
+  // Exempt a student from feeding (only meaningful when opt-out is allowed).
+  async exemptStudent(schoolId: string, studentId: string, academicYearId: string) {
     return this.prisma.feedingEnrollment.upsert({
-      where: { schoolId_studentId_academicYearId: { schoolId, studentId: dto.studentId, academicYearId: dto.academicYearId } },
-      update: { isActive: true },
-      create: { schoolId, studentId: dto.studentId, academicYearId: dto.academicYearId, isActive: true },
+      where: { schoolId_studentId_academicYearId: { schoolId, studentId, academicYearId } },
+      update: { isActive: false },
+      create: { schoolId, studentId, academicYearId, isActive: false },
     });
   }
 
-  async unenrollStudent(schoolId: string, studentId: string, academicYearId: string) {
+  // Re-include a previously exempted student.
+  async includeStudent(schoolId: string, studentId: string, academicYearId: string) {
     return this.prisma.feedingEnrollment.updateMany({
       where: { schoolId, studentId, academicYearId },
-      data: { isActive: false },
+      data: { isActive: true },
     });
   }
 
-  // ── Daily Collection Screen ───────────────────────────────
+  private async getActiveYearId(schoolId: string): Promise<string> {
+    const year = await this.prisma.academicYear.findFirst({
+      where: { schoolId, isActive: true }, select: { id: true },
+    });
+    if (!year) throw new BadRequestException('No active academic year');
+    return year.id;
+  }
+
+  async exemptStudentActiveYear(schoolId: string, studentId: string) {
+    return this.exemptStudent(schoolId, studentId, await this.getActiveYearId(schoolId));
+  }
+
+  async includeStudentActiveYear(schoolId: string, studentId: string) {
+    return this.includeStudent(schoolId, studentId, await this.getActiveYearId(schoolId));
+  }
+
+  async getExemptStudents(schoolId: string) {
+    const activeYear = await this.prisma.academicYear.findFirst({
+      where: { schoolId, isActive: true }, select: { id: true },
+    });
+    if (!activeYear) return [];
+    const rows = await this.prisma.feedingEnrollment.findMany({
+      where: { schoolId, academicYearId: activeYear.id, isActive: false },
+      include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
+    });
+    return rows.map((r) => r.student);
+  }
+
+  // Backwards-compatible aliases used by existing enroll/unenroll endpoints.
+  enrollStudent(schoolId: string, dto: EnrollStudentDto) {
+    return this.includeStudent(schoolId, dto.studentId, dto.academicYearId);
+  }
+  unenrollStudent(schoolId: string, studentId: string, academicYearId: string) {
+    return this.exemptStudent(schoolId, studentId, academicYearId);
+  }
+
+  // ── Prepaid balance ───────────────────────────────────────
+
+  private async getStudentBalance(schoolId: string, studentId: string): Promise<number> {
+    const [banked, consumed] = await Promise.all([
+      this.prisma.feedingPayment.aggregate({
+        where: { schoolId, studentId }, _sum: { daysCovered: true },
+      }),
+      this.prisma.feedingDailyRecord.count({
+        where: { schoolId, studentId, status: 'PRE_COVERED' },
+      }),
+    ]);
+    return (banked._sum.daysCovered ?? 0) - consumed;
+  }
+
+  private async getStudentArrears(schoolId: string, studentId: string): Promise<number> {
+    return this.prisma.feedingDailyRecord.count({
+      where: { schoolId, studentId, status: 'UNPAID' },
+    });
+  }
+
+  // ── Daily Collection Screen (per class) ───────────────────
+  // Same reconciliation as transport: consume a banked day for a present student,
+  // release a consumed/unpaid day for an absent one, and materialise an UNPAID
+  // record (IOU) when a present student is uncovered so arrears accrue.
 
   async getDailyCollection(schoolId: string, classId: string, date: string) {
     const dateObj = new Date(date);
     const isSchoolDay = await this.calendar.isSchoolDay(schoolId, dateObj);
 
-    // Get gradeLevel so we can look up the daily rate for this class
-    const classRecord = await this.prisma.class.findUnique({
-      where: { id: classId },
+    const classRecord = await this.prisma.class.findFirst({
+      where: { id: classId, schoolId },
       select: { gradeLevelId: true },
     });
-    const dailyRate = classRecord?.gradeLevelId
+    if (!classRecord) throw new NotFoundException('Class not found');
+
+    const dailyRate = classRecord.gradeLevelId
       ? (await this.feedingConfig.getDailyRate(schoolId, classRecord.gradeLevelId)) ?? 0
       : 0;
 
     const assignments = await this.prisma.studentClassAssignment.findMany({
       where: { classId },
-      include: {
-        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
-      },
+      include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
       orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
     });
 
-    const studentIds = assignments.map((a) => a.student.id);
+    const participatingIds = new Set(
+      await this.getParticipatingIds(schoolId, assignments.map((a) => a.student.id)),
+    );
+    const participants = assignments.filter((a) => participatingIds.has(a.student.id));
+    const studentIds = participants.map((a) => a.student.id);
 
-    const enrolledStudentIds = (
-      await this.prisma.feedingEnrollment.findMany({
-        where: { schoolId, studentId: { in: studentIds }, isActive: true },
-      })
-    ).map((e) => e.studentId);
-
-    const [records, attendanceRecords, futurePreCovered] = await Promise.all([
+    const [records, attendanceRecords, bankedGroups, consumedGroups] = await Promise.all([
       this.prisma.feedingDailyRecord.findMany({
-        where: {
-          schoolId,
-          studentId: { in: enrolledStudentIds },
-          recordDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
-        },
+        where: { schoolId, studentId: { in: studentIds }, recordDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) } },
       }),
       this.prisma.studentAttendanceRecord.findMany({
-        where: {
-          schoolId,
-          studentId: { in: enrolledStudentIds },
-          date: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
-        },
+        where: { schoolId, studentId: { in: studentIds }, date: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) } },
       }),
-      this.prisma.feedingDailyRecord.findMany({
-        where: {
-          schoolId,
-          studentId: { in: enrolledStudentIds },
-          status: 'PRE_COVERED',
-          recordDate: { gt: this.endOfDay(dateObj) },
-        },
-        select: { studentId: true },
+      this.prisma.feedingPayment.groupBy({
+        by: ['studentId'], where: { schoolId, studentId: { in: studentIds } }, _sum: { daysCovered: true },
+      }),
+      this.prisma.feedingDailyRecord.groupBy({
+        by: ['studentId'], where: { schoolId, studentId: { in: studentIds }, status: 'PRE_COVERED' }, _count: { _all: true },
       }),
     ]);
 
-    // Count future pre-covered days per student
-    const balanceMap = new Map<string, number>();
-    for (const r of futurePreCovered) {
-      balanceMap.set(r.studentId, (balanceMap.get(r.studentId) ?? 0) + 1);
-    }
-
     const recordMap = new Map(records.map((r) => [r.studentId, r]));
     const attendanceMap = new Map(attendanceRecords.map((r) => [r.studentId, r]));
+    const bankedMap = new Map(bankedGroups.map((g) => [g.studentId, g._sum.daysCovered ?? 0]));
+    const consumedMap = new Map(consumedGroups.map((g) => [g.studentId, g._count._all]));
 
-    const rows = assignments
-      .filter((a) => enrolledStudentIds.includes(a.student.id))
-      .map(({ student }) => {
-        const attendance = attendanceMap.get(student.id);
-        const isAbsent = attendance?.status === 'ABSENT';
-        const record = recordMap.get(student.id);
-        const status = isAbsent ? 'ABSENT' : (record?.status ?? 'UNPAID');
-        return {
-          student,
-          status,
-          dailyRate,
-          prePaymentBalance: balanceMap.get(student.id) ?? 0,
-        };
-      });
+    const reconcilable = isSchoolDay && dateObj <= this.endOfDay(new Date());
+    const writes: Prisma.PrismaPromise<unknown>[] = [];
+
+    const baseRows = participants.map(({ student }) => {
+      const isAbsent = attendanceMap.get(student.id)?.status === 'ABSENT';
+      const existing = recordMap.get(student.id);
+      const banked = bankedMap.get(student.id) ?? 0;
+      const consumedTotal = consumedMap.get(student.id) ?? 0;
+
+      let status: 'PAID' | 'PRE_COVERED' | 'ABSENT' | 'UNPAID';
+
+      if (existing?.status === 'PAID') {
+        status = 'PAID';
+      } else if (isAbsent) {
+        status = 'ABSENT';
+        if (reconcilable && existing) {
+          writes.push(this.prisma.feedingDailyRecord.delete({ where: { id: existing.id } }));
+        }
+      } else if (!reconcilable) {
+        status = existing?.status === 'PRE_COVERED' ? 'PRE_COVERED' : 'UNPAID';
+      } else {
+        const consumedOther = consumedTotal - (existing?.status === 'PRE_COVERED' ? 1 : 0);
+        if (consumedOther < banked) {
+          status = 'PRE_COVERED';
+          if (!existing) {
+            writes.push(this.prisma.feedingDailyRecord.create({
+              data: { schoolId, studentId: student.id, recordDate: dateObj, status: 'PRE_COVERED' },
+            }));
+          } else if (existing.status !== 'PRE_COVERED') {
+            writes.push(this.prisma.feedingDailyRecord.update({ where: { id: existing.id }, data: { status: 'PRE_COVERED' } }));
+          }
+        } else {
+          status = 'UNPAID';
+          if (!existing) {
+            writes.push(this.prisma.feedingDailyRecord.create({
+              data: { schoolId, studentId: student.id, recordDate: dateObj, status: 'UNPAID' },
+            }));
+          } else if (existing.status !== 'UNPAID') {
+            writes.push(this.prisma.feedingDailyRecord.update({ where: { id: existing.id }, data: { status: 'UNPAID' } }));
+          }
+        }
+      }
+      return { student, status };
+    });
+
+    if (writes.length) await this.prisma.$transaction(writes);
+
+    const arrearsGroups = await this.prisma.feedingDailyRecord.groupBy({
+      by: ['studentId'], where: { schoolId, studentId: { in: studentIds }, status: 'UNPAID' }, _count: { _all: true },
+    });
+    const arrearsMap = new Map(arrearsGroups.map((g) => [g.studentId, g._count._all]));
+
+    const rows = baseRows.map((r) => {
+      const owedDays = arrearsMap.get(r.student.id) ?? 0;
+      return { student: r.student, status: r.status, dailyRate, owedDays, owedAmount: owedDays * dailyRate };
+    });
 
     const summary = {
       total: rows.length,
@@ -116,139 +225,24 @@ export class FeedingService {
       preCovered: rows.filter((r) => r.status === 'PRE_COVERED').length,
       absent: rows.filter((r) => r.status === 'ABSENT').length,
       unpaid: rows.filter((r) => r.status === 'UNPAID').length,
-      cashCollected: rows.filter((r) => r.status === 'PAID').reduce((sum, r) => sum + r.dailyRate, 0),
+      cashCollected: rows.filter((r) => r.status === 'PAID').length * dailyRate,
     };
 
-    return { date, classId, isSchoolDay, rows, summary };
-  }
-
-  // ── School-wide Daily Collection (all classes) ────────────
-
-  async getSchoolDailyCollection(schoolId: string, date: string) {
-    const dateObj = new Date(date);
-    const isSchoolDay = await this.calendar.isSchoolDay(schoolId, dateObj);
-
-    const activeYear = await this.prisma.academicYear.findFirst({
-      where: { schoolId, isActive: true },
-      select: { id: true },
-    });
-
-    const classes = await this.prisma.class.findMany({
-      where: { schoolId, ...(activeYear ? { academicYearId: activeYear.id } : {}) },
-      select: { id: true, name: true, gradeLevelId: true },
-      orderBy: [{ gradeLevel: { sequence: 'asc' } }, { name: 'asc' }],
-    });
-
-    // Fetch feeding config once and build a rate lookup
-    const config = await this.feedingConfig.getCurrent(schoolId);
-    const getRateForGrade = (gradeLevelId: string): number => {
-      if (!config) return 0;
-      if (config.rateMode === 'FLAT') return Number(config.flatRate ?? 0);
-      const cr = config.classRates.find((r) => r.gradeLevelId === gradeLevelId);
-      return cr ? Number(cr.dailyRate) : 0;
-    };
-
-    if (classes.length === 0) {
-      return { date, isSchoolDay, classes: [], summary: { total: 0, paid: 0, preCovered: 0, absent: 0, unpaid: 0, cashCollected: 0 } };
-    }
-
-    const allAssignments = await this.prisma.studentClassAssignment.findMany({
-      where: { classId: { in: classes.map((c) => c.id) } },
-      include: {
-        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
-      },
-      orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
-    });
-
-    const allStudentIds = [...new Set(allAssignments.map((a) => a.student.id))];
-
-    const enrolledStudentIds = new Set(
-      (await this.prisma.feedingEnrollment.findMany({
-        where: { schoolId, studentId: { in: allStudentIds }, isActive: true },
-        select: { studentId: true },
-      })).map((e) => e.studentId),
-    );
-
-    const [records, attendanceRecords, futurePreCovered] = await Promise.all([
-      this.prisma.feedingDailyRecord.findMany({
-        where: {
-          schoolId,
-          studentId: { in: [...enrolledStudentIds] },
-          recordDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
-        },
-      }),
-      this.prisma.studentAttendanceRecord.findMany({
-        where: {
-          schoolId,
-          studentId: { in: [...enrolledStudentIds] },
-          date: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
-        },
-      }),
-      this.prisma.feedingDailyRecord.findMany({
-        where: {
-          schoolId,
-          studentId: { in: [...enrolledStudentIds] },
-          status: 'PRE_COVERED',
-          recordDate: { gt: this.endOfDay(dateObj) },
-        },
-        select: { studentId: true },
-      }),
-    ]);
-
-    const balanceMap = new Map<string, number>();
-    for (const r of futurePreCovered) {
-      balanceMap.set(r.studentId, (balanceMap.get(r.studentId) ?? 0) + 1);
-    }
-    const recordMap = new Map(records.map((r) => [r.studentId, r]));
-    const attendanceMap = new Map(attendanceRecords.map((r) => [r.studentId, r]));
-
-    // Group assignments by classId
-    const assignmentsByClass = new Map<string, typeof allAssignments>();
-    for (const a of allAssignments) {
-      const list = assignmentsByClass.get(a.classId) ?? [];
-      list.push(a);
-      assignmentsByClass.set(a.classId, list);
-    }
-
-    const classesWithRows = classes.map((cls) => {
-      const dailyRate = getRateForGrade(cls.gradeLevelId);
-      const classAssignments = (assignmentsByClass.get(cls.id) ?? [])
-        .filter((a) => enrolledStudentIds.has(a.student.id));
-
-      const rows = classAssignments.map(({ student }) => {
-        const attendance = attendanceMap.get(student.id);
-        const isAbsent = attendance?.status === 'ABSENT';
-        const record = recordMap.get(student.id);
-        const status = isAbsent ? 'ABSENT' : (record?.status ?? 'UNPAID');
-        return {
-          student,
-          status,
-          dailyRate,
-          prePaymentBalance: balanceMap.get(student.id) ?? 0,
-        };
-      });
-
-      return { classId: cls.id, className: cls.name, rows };
-    }).filter((c) => c.rows.length > 0);
-
-    const allRows = classesWithRows.flatMap((c) => c.rows);
-    const summary = {
-      total: allRows.length,
-      paid: allRows.filter((r) => r.status === 'PAID').length,
-      preCovered: allRows.filter((r) => r.status === 'PRE_COVERED').length,
-      absent: allRows.filter((r) => r.status === 'ABSENT').length,
-      unpaid: allRows.filter((r) => r.status === 'UNPAID').length,
-      cashCollected: allRows.filter((r) => r.status === 'PAID').reduce((sum, r) => sum + r.dailyRate, 0),
-    };
-
-    return { date, isSchoolDay, classes: classesWithRows, summary };
+    return { date, classId, dailyRate, isSchoolDay, rows, summary };
   }
 
   // Mark a student as paid today (cash collected now)
-  async markPaid(schoolId: string, dto: MarkPaidDto, collectedBy: string) {
+  async markPaid(schoolId: string, dto: MarkPaidDto, _collectedBy: string) {
     const dateObj = new Date(dto.date);
     const isSchoolDay = await this.calendar.isSchoolDay(schoolId, dateObj);
     if (!isSchoolDay) throw new BadRequestException('Not a school day');
+
+    const existing = await this.prisma.feedingDailyRecord.findUnique({
+      where: { schoolId_studentId_recordDate: { schoolId, studentId: dto.studentId, recordDate: dateObj } },
+    });
+    if (existing?.status === 'PRE_COVERED')
+      throw new ConflictException("This day is already covered by the student's prepaid balance");
+    if (existing?.status === 'PAID') return existing;
 
     return this.prisma.feedingDailyRecord.upsert({
       where: { schoolId_studentId_recordDate: { schoolId, studentId: dto.studentId, recordDate: dateObj } },
@@ -257,84 +251,145 @@ export class FeedingService {
     });
   }
 
-  // Record a pre-payment — cash received today, future days pre-marked
-  async recordPrePayment(schoolId: string, dto: RecordPaymentDto, collectedBy: string) {
-    const paymentDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
+  // ── Prepayment / refund ───────────────────────────────────
 
-    // Get daily rate for this student
-    const student = await this.prisma.student.findFirst({
-      where: { id: dto.studentId, schoolId },
-      include: {
-        classAssignments: {
-          include: { class: { include: { gradeLevel: true } } },
-          orderBy: { assignedAt: 'desc' },
-          take: 1,
-        },
+  async prepay(schoolId: string, dto: FeedingPrepayDto, recordedBy: string) {
+    const dailyRate = await this.getStudentDailyRate(schoolId, dto.studentId);
+    const amountPaid = dailyRate * dto.days;
+
+    const payment = await this.prisma.feedingPayment.create({
+      data: {
+        schoolId, studentId: dto.studentId, amountPaid,
+        paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : new Date(),
+        daysCovered: dto.days, recordedBy,
       },
+    });
+
+    const balance = await this.getStudentBalance(schoolId, dto.studentId);
+    return { payment, daysAdded: dto.days, amountPaid, balance };
+  }
+
+  async refundBalance(schoolId: string, dto: FeedingRefundDto, recordedBy: string) {
+    const balance = await this.getStudentBalance(schoolId, dto.studentId);
+    if (dto.days > balance)
+      throw new BadRequestException(
+        balance <= 0 ? 'No unused prepaid days to refund' : `Only ${balance} unused prepaid day(s) can be refunded`,
+      );
+
+    const dailyRate = await this.getStudentDailyRate(schoolId, dto.studentId);
+    await this.prisma.feedingPayment.create({
+      data: {
+        schoolId, studentId: dto.studentId, amountPaid: -(dailyRate * dto.days),
+        paymentDate: new Date(), daysCovered: -dto.days, recordedBy,
+      },
+    });
+
+    return { daysRefunded: dto.days, amountRefunded: dailyRate * dto.days, balance: balance - dto.days };
+  }
+
+  // ── Arrears ───────────────────────────────────────────────
+
+  async settleArrears(schoolId: string, dto: FeedingSettleArrearsDto, recordedBy: string) {
+    const unpaid = await this.prisma.feedingDailyRecord.findMany({
+      where: { schoolId, studentId: dto.studentId, status: 'UNPAID' },
+      orderBy: { recordDate: 'asc' },
+      ...(dto.days ? { take: dto.days } : {}),
+    });
+    if (unpaid.length === 0) throw new BadRequestException('No arrears to settle');
+
+    const dailyRate = await this.getStudentDailyRate(schoolId, dto.studentId);
+    const amountSettled = unpaid.length * dailyRate;
+
+    const payment = await this.prisma.feedingPayment.create({
+      data: {
+        schoolId, studentId: dto.studentId, amountPaid: amountSettled,
+        paymentDate: new Date(), daysCovered: 0, recordedBy,
+      },
+    });
+
+    await this.prisma.feedingDailyRecord.updateMany({
+      where: { id: { in: unpaid.map((r) => r.id) } },
+      data: { status: 'PAID', feedingPaymentId: payment.id },
+    });
+
+    const owedDays = await this.getStudentArrears(schoolId, dto.studentId);
+    return { daysSettled: unpaid.length, amountSettled, owedDays, owedAmount: owedDays * dailyRate };
+  }
+
+  // ── Per-student payment calendar ──────────────────────────
+
+  async getStudentCalendar(schoolId: string, studentId: string, month: string) {
+    const student = await this.prisma.student.findFirst({
+      where: { id: studentId, schoolId },
+      select: { id: true, studentId: true, firstName: true, lastName: true },
     });
     if (!student) throw new NotFoundException('Student not found');
 
-    const gradeLevelId = student.classAssignments[0]?.class.gradeLevelId;
-    const dailyRate = gradeLevelId
-      ? await this.feedingConfig.getDailyRate(schoolId, gradeLevelId)
-      : null;
+    const match = /^(\d{4})-(\d{2})$/.exec(month);
+    if (!match) throw new BadRequestException('month must be in YYYY-MM format');
+    const year = Number(match[1]);
+    const mon = Number(match[2]);
 
-    if (!dailyRate) throw new BadRequestException('No feeding rate configured');
+    const first = new Date(year, mon - 1, 1);
+    const last = new Date(year, mon, 0);
 
-    const daysCovered = Math.floor(dto.amount / dailyRate);
-    if (daysCovered < 1) throw new BadRequestException('Amount is less than one day\'s rate');
+    const [dailyRate, balance, owedDays, records, attendanceRecords] = await Promise.all([
+      this.getStudentDailyRate(schoolId, studentId).catch(() => 0),
+      this.getStudentBalance(schoolId, studentId),
+      this.getStudentArrears(schoolId, studentId),
+      this.prisma.feedingDailyRecord.findMany({
+        where: { schoolId, studentId, recordDate: { gte: this.startOfDay(first), lte: this.endOfDay(last) } },
+      }),
+      this.prisma.studentAttendanceRecord.findMany({
+        where: { schoolId, studentId, date: { gte: this.startOfDay(first), lte: this.endOfDay(last) } },
+      }),
+    ]);
 
-    // Create the payment record
-    const payment = await this.prisma.feedingPayment.create({
-      data: {
-        schoolId,
-        studentId: dto.studentId,
-        amountPaid: dto.amount,
-        paymentDate,
-        daysCovered,
-        recordedBy: collectedBy,
-      },
+    const recordMap = new Map(records.map((r) => [this.dayKey(r.recordDate), r]));
+    const attendanceMap = new Map(attendanceRecords.map((r) => [this.dayKey(r.date), r]));
+
+    const dayList: Date[] = [];
+    for (let d = 1; d <= last.getDate(); d++) dayList.push(new Date(year, mon - 1, d));
+
+    const schoolDayFlags = await Promise.all(dayList.map((d) => this.calendar.isSchoolDay(schoolId, d)));
+
+    const todayKey = this.dayKey(new Date());
+    let projectionRemaining = Math.max(balance, 0);
+
+    const days = dayList.map((d, i) => {
+      const key = this.dayKey(d);
+      const isSchoolDay = schoolDayFlags[i];
+      const record = recordMap.get(key);
+      const isAbsent = attendanceMap.get(key)?.status === 'ABSENT';
+
+      let status: CalendarStatus;
+      if (!isSchoolDay) status = 'NON_SCHOOL';
+      else if (isAbsent) status = 'ABSENT';
+      else if (record?.status === 'PAID') status = 'PAID';
+      else if (record?.status === 'PRE_COVERED') status = 'PRE_COVERED';
+      else if (key < todayKey) status = 'UNPAID';
+      else if (projectionRemaining > 0) { projectionRemaining--; status = 'PROJECTED'; }
+      else status = key === todayKey ? 'UNPAID' : 'NONE';
+
+      return { date: key, isSchoolDay, status };
     });
 
-    // Pre-mark future school days
-    const schoolDays = await this.getNextSchoolDays(schoolId, paymentDate, daysCovered);
-
-    await this.prisma.$transaction(
-      schoolDays.map((day) =>
-        this.prisma.feedingDailyRecord.upsert({
-          where: { schoolId_studentId_recordDate: { schoolId, studentId: dto.studentId, recordDate: day } },
-          update: { status: 'PRE_COVERED', feedingPaymentId: payment.id },
-          create: { schoolId, studentId: dto.studentId, recordDate: day, status: 'PRE_COVERED', feedingPaymentId: payment.id },
-        }),
-      ),
-    );
-
-    return { payment, daysCovered, daysMarked: schoolDays.length };
+    return { studentId, student, month, dailyRate, balance, owedDays, owedAmount: owedDays * dailyRate, days };
   }
 
-  // Daily reconciliation — how much cash was collected today
+  // ── Daily reconciliation — how much cash was collected today ──
+
   async getDailyReconciliation(schoolId: string, date: string) {
     const dateObj = new Date(date);
 
     const payments = await this.prisma.feedingPayment.findMany({
-      where: {
-        schoolId,
-        paymentDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
-      },
-      include: {
-        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
-      },
+      where: { schoolId, paymentDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) } },
+      include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
     });
 
     const dailyPaid = await this.prisma.feedingDailyRecord.findMany({
-      where: {
-        schoolId,
-        status: 'PAID',
-        recordDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
-      },
-      include: {
-        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
-      },
+      where: { schoolId, status: 'PAID', recordDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) } },
+      include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
     });
 
     const totalCashCollected = payments.reduce((sum, p) => sum + Number(p.amountPaid), 0);
@@ -348,25 +403,33 @@ export class FeedingService {
     };
   }
 
-  private async getNextSchoolDays(schoolId: string, fromDate: Date, count: number): Promise<Date[]> {
-    const days: Date[] = [];
-    const current = new Date(fromDate);
+  // ── Helpers ───────────────────────────────────────────────
 
-    while (days.length < count) {
-      current.setDate(current.getDate() + 1);
-      const isSchool = await this.calendar.isSchoolDay(schoolId, new Date(current));
-      if (isSchool) days.push(new Date(current));
-      if (current > new Date(fromDate.getTime() + 365 * 24 * 60 * 60 * 1000)) break; // Safety
-    }
+  private async getStudentDailyRate(schoolId: string, studentId: string): Promise<number> {
+    const student = await this.prisma.student.findFirst({
+      where: { id: studentId, schoolId },
+      include: {
+        classAssignments: {
+          include: { class: { select: { gradeLevelId: true } } },
+          orderBy: { assignedAt: 'desc' }, take: 1,
+        },
+      },
+    });
+    if (!student) throw new NotFoundException('Student not found');
 
-    return days;
+    const gradeLevelId = student.classAssignments[0]?.class.gradeLevelId;
+    const rate = gradeLevelId ? await this.feedingConfig.getDailyRate(schoolId, gradeLevelId) : null;
+    if (!rate || rate <= 0) throw new BadRequestException('No feeding rate configured for this student');
+    return rate;
   }
 
-  private startOfDay(date: Date): Date {
-    const d = new Date(date); d.setHours(0, 0, 0, 0); return d;
+  private dayKey(date: Date): string {
+    const d = new Date(date);
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${m}-${day}`;
   }
 
-  private endOfDay(date: Date): Date {
-    const d = new Date(date); d.setHours(23, 59, 59, 999); return d;
-  }
+  private startOfDay(date: Date): Date { const d = new Date(date); d.setHours(0, 0, 0, 0); return d; }
+  private endOfDay(date: Date): Date { const d = new Date(date); d.setHours(23, 59, 59, 999); return d; }
 }

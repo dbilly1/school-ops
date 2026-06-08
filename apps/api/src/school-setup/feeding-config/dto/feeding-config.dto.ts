@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsOptional, IsArray, ValidateNested, IsString, IsDateString } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsArray, ValidateNested, IsString, IsDateString, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 import { RateModeType } from '@prisma/client';
 
@@ -20,6 +20,11 @@ export class CreateFeedingConfigDto {
 
   @IsDateString()
   effectiveFrom!: string;
+
+  // When true, feeding is optional and students can be exempted.
+  @IsBoolean()
+  @IsOptional()
+  optOutAllowed?: boolean;
 
   @IsArray()
   @ValidateNested({ each: true })

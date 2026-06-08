@@ -21,6 +21,7 @@ export function StepFeeding({
   const [flatRate, setFlatRate]   = useState('');
   const [classRates, setClassRates] = useState<Record<string, string>>({});
   const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().split('T')[0]);
+  const [optOutAllowed, setOptOutAllowed] = useState(false);
   const [saving, setSaving]       = useState(false);
   const [error, setError]         = useState<string | null>(null);
 
@@ -37,6 +38,7 @@ export function StepFeeding({
         rateMode,
         flatRate:   rateMode === 'FLAT' ? parseFloat(flatRate) : null,
         effectiveFrom,
+        optOutAllowed,
         classRates: rateMode === 'PER_CLASS'
           ? grades?.map(g => ({ gradeLevelId: g.id, dailyRate: parseFloat(classRates[g.id] ?? '0') })) ?? []
           : [],
@@ -126,6 +128,21 @@ export function StepFeeding({
             )}
           </div>
         )}
+
+        {/* Participation policy */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-slate-700">Allow feeding exemptions</p>
+            <p className="text-xs text-slate-500 mt-0.5">By default every student pays feeding. Turn this on to exempt specific students later.</p>
+          </div>
+          <button type="button" role="switch" aria-checked={optOutAllowed}
+            onClick={() => setOptOutAllowed(v => !v)}
+            className="relative shrink-0 w-11 h-6 rounded-full transition-colors"
+            style={{ backgroundColor: optOutAllowed ? 'var(--accent)' : '#cbd5e1' }}>
+            <span className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform"
+              style={{ transform: optOutAllowed ? 'translateX(20px)' : 'translateX(0)' }} />
+          </button>
+        </div>
 
         {/* Effective from */}
         <div>

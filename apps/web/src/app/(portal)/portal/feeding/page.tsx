@@ -6,7 +6,7 @@ import { useApi } from '@/hooks/use-api';
 
 type FeedingBalance =
   | { enrolled: false }
-  | { enrolled: true; daysRemaining: number };
+  | { enrolled: true; daysRemaining: number; owedDays: number };
 
 export default function PortalFeedingPage() {
   const fetchBalance = useCallback(
@@ -50,6 +50,19 @@ export default function PortalFeedingPage() {
             </p>
             <p className="text-sm opacity-70 mt-2">pre-paid school days covered</p>
           </div>
+
+          {/* Outstanding arrears */}
+          {(data as { enrolled: true; owedDays: number }).owedDays > 0 && (
+            <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 flex items-start gap-3">
+              <span className="text-amber-500 text-lg leading-none mt-0.5">●</span>
+              <div>
+                <p className="text-sm font-semibold text-amber-700">
+                  {(data as { enrolled: true; owedDays: number }).owedDays} unpaid day{(data as { enrolled: true; owedDays: number }).owedDays !== 1 ? 's' : ''} outstanding
+                </p>
+                <p className="text-xs text-amber-600 mt-0.5">Please settle with your school’s accountant.</p>
+              </div>
+            </div>
+          )}
 
           {/* Status info */}
           {(() => {
