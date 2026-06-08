@@ -2,7 +2,7 @@ import { Injectable, BadRequestException, ConflictException, NotFoundException }
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../school-setup/calendar/calendar.service';
-import { TransportPrepayDto, TransportRefundDto, TransportMarkPaidDto } from './dto/transport-fees.dto';
+import { TransportPrepayDto, TransportRefundDto, TransportSettleArrearsDto, TransportMarkPaidDto } from './dto/transport-fees.dto';
 
 // Calendar cell states (superset of the DailyFeeStatus enum).
 //   NON_SCHOOL — weekend/holiday/out-of-term, not payable
@@ -89,56 +89,78 @@ export class TransportFeesService {
     const bankedMap = new Map(bankedGroups.map((g) => [g.studentId, g._sum.daysCovered ?? 0]));
     const consumedMap = new Map(consumedGroups.map((g) => [g.studentId, g._count._all]));
 
-    // Only reconcile (consume/release) for real, settled school days (≤ today).
+    // Only reconcile (consume/release/record-debt) for real, settled school days (≤ today).
     const reconcilable = isSchoolDay && dateObj <= this.endOfDay(new Date());
     const writes: Prisma.PrismaPromise<unknown>[] = [];
+    const dailyRate = Number(route.dailyRate);
 
-    const rows = assignments
-      .map(({ student }) => {
-        const attendance = attendanceMap.get(student.id);
-        const isAbsent = attendance?.status === 'ABSENT';
-        const existing = recordMap.get(student.id);
-        const banked = bankedMap.get(student.id) ?? 0;
-        const consumedTotal = consumedMap.get(student.id) ?? 0;
+    const baseRows = assignments.map(({ student }) => {
+      const attendance = attendanceMap.get(student.id);
+      const isAbsent = attendance?.status === 'ABSENT';
+      const existing = recordMap.get(student.id);
+      const banked = bankedMap.get(student.id) ?? 0;
+      const consumedTotal = consumedMap.get(student.id) ?? 0;
 
-        let status: 'PAID' | 'PRE_COVERED' | 'ABSENT' | 'UNPAID';
+      let status: 'PAID' | 'PRE_COVERED' | 'ABSENT' | 'UNPAID';
 
-        if (isAbsent) {
-          status = 'ABSENT';
-          // Release a day wrongly consumed before the absence was recorded.
-          if (reconcilable && existing?.status === 'PRE_COVERED') {
-            writes.push(this.prisma.transportDailyRecord.delete({ where: { id: existing.id } }));
+      if (existing?.status === 'PAID') {
+        // Cash already collected for this day — always wins.
+        status = 'PAID';
+      } else if (isAbsent) {
+        status = 'ABSENT';
+        // Absent day owes nothing: release any prepaid/unpaid record for it.
+        if (reconcilable && existing) {
+          writes.push(this.prisma.transportDailyRecord.delete({ where: { id: existing.id } }));
+        }
+      } else if (!reconcilable) {
+        status = existing?.status === 'PRE_COVERED' ? 'PRE_COVERED' : 'UNPAID';
+      } else {
+        // Days consumed on *other* dates — this date may already hold one.
+        const consumedOther = consumedTotal - (existing?.status === 'PRE_COVERED' ? 1 : 0);
+        if (consumedOther < banked) {
+          status = 'PRE_COVERED';
+          if (!existing) {
+            writes.push(this.prisma.transportDailyRecord.create({
+              data: { schoolId, studentId: student.id, recordDate: dateObj, status: 'PRE_COVERED' },
+            }));
+          } else if (existing.status !== 'PRE_COVERED') {
+            writes.push(this.prisma.transportDailyRecord.update({
+              where: { id: existing.id }, data: { status: 'PRE_COVERED' },
+            }));
           }
-        } else if (existing?.status === 'PAID') {
-          status = 'PAID';
-        } else if (!reconcilable) {
-          status = existing?.status === 'PRE_COVERED' ? 'PRE_COVERED' : 'UNPAID';
         } else {
-          // Days consumed on *other* dates — this date may already hold one.
-          const consumedOther = consumedTotal - (existing?.status === 'PRE_COVERED' ? 1 : 0);
-          if (consumedOther < banked) {
-            status = 'PRE_COVERED';
-            if (!existing) {
-              writes.push(this.prisma.transportDailyRecord.create({
-                data: { schoolId, studentId: student.id, recordDate: dateObj, status: 'PRE_COVERED' },
-              }));
-            } else if (existing.status !== 'PRE_COVERED') {
-              writes.push(this.prisma.transportDailyRecord.update({
-                where: { id: existing.id }, data: { status: 'PRE_COVERED' },
-              }));
-            }
-          } else {
-            status = 'UNPAID';
-            if (existing?.status === 'PRE_COVERED') {
-              writes.push(this.prisma.transportDailyRecord.delete({ where: { id: existing.id } }));
-            }
+          // Rode but uncovered → record the debt (IOU) so arrears accrue.
+          status = 'UNPAID';
+          if (!existing) {
+            writes.push(this.prisma.transportDailyRecord.create({
+              data: { schoolId, studentId: student.id, recordDate: dateObj, status: 'UNPAID' },
+            }));
+          } else if (existing.status !== 'UNPAID') {
+            writes.push(this.prisma.transportDailyRecord.update({
+              where: { id: existing.id }, data: { status: 'UNPAID' },
+            }));
           }
         }
-        return { student, status, record: existing ?? null };
-      })
-      .sort((a, b) => a.student.lastName.localeCompare(b.student.lastName));
+      }
+      return { student, status };
+    });
 
     if (writes.length) await this.prisma.$transaction(writes);
+
+    // Total outstanding per student (across all days), computed after reconciliation.
+    const arrearsGroups = await this.prisma.transportDailyRecord.groupBy({
+      by: ['studentId'],
+      where: { schoolId, studentId: { in: studentIds }, status: 'UNPAID' },
+      _count: { _all: true },
+    });
+    const arrearsMap = new Map(arrearsGroups.map((g) => [g.studentId, g._count._all]));
+
+    const rows = baseRows
+      .map((r) => {
+        const owedDays = arrearsMap.get(r.student.id) ?? 0;
+        return { ...r, owedDays, owedAmount: owedDays * dailyRate };
+      })
+      .sort((a, b) => a.student.lastName.localeCompare(b.student.lastName));
 
     const summary = {
       total: rows.length,
@@ -148,7 +170,7 @@ export class TransportFeesService {
       unpaid: rows.filter((r) => r.status === 'UNPAID').length,
     };
 
-    return { date, routeId, dailyRate: Number(route.dailyRate), isSchoolDay, rows, summary };
+    return { date, routeId, dailyRate, isSchoolDay, rows, summary };
   }
 
   // Mark a student as paid today (cash collected now)
@@ -224,6 +246,49 @@ export class TransportFeesService {
     return { daysRefunded: dto.days, amountRefunded: dailyRate * dto.days, balance: balance - dto.days };
   }
 
+  // ── Arrears ───────────────────────────────────────────────
+  // Outstanding = days the student rode but never covered (materialised UNPAID
+  // records). Settling clears the oldest debts first and books the cash as a
+  // zero-day payment (so it shows in today's reconciliation without touching the
+  // prepaid-balance math).
+
+  private async getStudentArrears(schoolId: string, studentId: string): Promise<number> {
+    return this.prisma.transportDailyRecord.count({
+      where: { schoolId, studentId, status: 'UNPAID' },
+    });
+  }
+
+  async settleArrears(schoolId: string, dto: TransportSettleArrearsDto, recordedBy: string) {
+    const unpaid = await this.prisma.transportDailyRecord.findMany({
+      where: { schoolId, studentId: dto.studentId, status: 'UNPAID' },
+      orderBy: { recordDate: 'asc' },
+      ...(dto.days ? { take: dto.days } : {}),
+    });
+    if (unpaid.length === 0) throw new BadRequestException('No arrears to settle');
+
+    const dailyRate = await this.getStudentDailyRate(schoolId, dto.studentId);
+    const amountSettled = unpaid.length * dailyRate;
+
+    const payment = await this.prisma.transportPayment.create({
+      data: {
+        schoolId,
+        studentId: dto.studentId,
+        amountPaid: amountSettled,
+        paymentDate: new Date(),
+        daysCovered: 0, // settles past debt, not prepaid days — leaves balance untouched
+        recordedBy,
+      },
+    });
+
+    await this.prisma.transportDailyRecord.updateMany({
+      where: { id: { in: unpaid.map((r) => r.id) } },
+      data: { status: 'PAID', transportPaymentId: payment.id },
+    });
+
+    const owedDays = await this.getStudentArrears(schoolId, dto.studentId);
+    return { daysSettled: unpaid.length, amountSettled, owedDays, owedAmount: owedDays * dailyRate };
+  }
+
   // ── Per-student payment calendar ──────────────────────────
   // Read-only view for the prepay modal: past/today reflect materialised records,
   // future school days are a soft projection from the remaining balance.
@@ -243,9 +308,10 @@ export class TransportFeesService {
     const first = new Date(year, mon - 1, 1);
     const last = new Date(year, mon, 0); // day 0 of next month = last day of this month
 
-    const [dailyRate, balance, records, attendanceRecords] = await Promise.all([
+    const [dailyRate, balance, owedDays, records, attendanceRecords] = await Promise.all([
       this.getStudentDailyRate(schoolId, studentId).catch(() => 0),
       this.getStudentBalance(schoolId, studentId),
+      this.getStudentArrears(schoolId, studentId),
       this.prisma.transportDailyRecord.findMany({
         where: { schoolId, studentId, recordDate: { gte: this.startOfDay(first), lte: this.endOfDay(last) } },
       }),
@@ -284,7 +350,7 @@ export class TransportFeesService {
       return { date: key, isSchoolDay, status };
     });
 
-    return { studentId, student, month, dailyRate, balance, days };
+    return { studentId, student, month, dailyRate, balance, owedDays, owedAmount: owedDays * dailyRate, days };
   }
 
   // ── Daily reconciliation — how much cash was collected today ──

@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { TransportFeesService } from './transport-fees.service';
-import { TransportPrepayDto, TransportRefundDto, TransportMarkPaidDto } from './dto/transport-fees.dto';
+import { TransportPrepayDto, TransportRefundDto, TransportSettleArrearsDto, TransportMarkPaidDto } from './dto/transport-fees.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffRolesGuard } from '../auth/guards/staff-roles.guard';
 import { RequireStaffRole } from '../auth/decorators/staff-roles.decorator';
@@ -51,6 +51,12 @@ export class TransportFeesController {
   @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.ACCOUNTANT)
   refundBalance(@CurrentUser() user: any, @Body() dto: TransportRefundDto) {
     return this.transportFeesService.refundBalance(user.schoolId, dto, user.id);
+  }
+
+  @Post('settle-arrears')
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.ACCOUNTANT)
+  settleArrears(@CurrentUser() user: any, @Body() dto: TransportSettleArrearsDto) {
+    return this.transportFeesService.settleArrears(user.schoolId, dto, user.id);
   }
 
   @Get('reconciliation')

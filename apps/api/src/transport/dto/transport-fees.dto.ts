@@ -32,3 +32,15 @@ export class TransportRefundDto {
   @Min(1)
   days!: number;
 }
+
+// Settle outstanding (UNPAID) ride days. Omit `days` to clear all arrears;
+// pass it to part-settle the oldest N days.
+export class TransportSettleArrearsDto {
+  @IsString()
+  studentId!: string;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  days?: number;
+}

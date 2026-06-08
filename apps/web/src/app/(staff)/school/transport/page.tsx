@@ -27,7 +27,8 @@ type DailyFeeStatus = 'PAID' | 'PRE_COVERED' | 'ABSENT' | 'UNPAID';
 type CollectionRow = {
   student: Student;
   status: DailyFeeStatus;
-  record: { id: string; status: DailyFeeStatus } | null;
+  owedDays: number;
+  owedAmount: number;
 };
 type DailyCollection = {
   date: string;
@@ -54,6 +55,8 @@ type StudentCalendar = {
   month: string;
   dailyRate: number;
   balance: number;
+  owedDays: number;
+  owedAmount: number;
   days: CalendarDay[];
 };
 
@@ -484,6 +487,8 @@ function PrepayCalendarModal({ studentId, studentName, onClose, onChanged }: {
 
   const rate    = cal?.dailyRate ?? 0;
   const balance = cal?.balance ?? 0;
+  const owedDays   = cal?.owedDays ?? 0;
+  const owedAmount = cal?.owedAmount ?? 0;
   const monthLabel = new Date(`${month}-01T00:00:00`).toLocaleString('en', { month: 'long', year: 'numeric' });
   const shownWeeks = view === 'week' ? weeks.slice(weekIdx, weekIdx + 1) : weeks;
 
@@ -525,8 +530,15 @@ function PrepayCalendarModal({ studentId, studentName, onClose, onChanged }: {
     <Modal open onClose={onClose} title={`Transport payments — ${studentName}`} width="max-w-xl">
       <div className="space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="px-3 py-1.5 rounded-lg text-sm font-semibold" style={{ backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
-            Prepaid balance: {balance} day{balance === 1 ? '' : 's'}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="px-3 py-1.5 rounded-lg text-sm font-semibold" style={{ backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
+              Prepaid balance: {balance} day{balance === 1 ? '' : 's'}
+            </div>
+            {owedAmount > 0 && (
+              <div className="px-3 py-1.5 rounded-lg text-sm font-semibold" style={{ backgroundColor: '#fffbeb', color: '#b45309' }}>
+                Owes: GHS {owedAmount.toFixed(2)}
+              </div>
+            )}
           </div>
           <div className="flex bg-slate-100 rounded-lg p-0.5">
             {(['month', 'week'] as const).map(v => (
@@ -569,6 +581,19 @@ function PrepayCalendarModal({ studentId, studentName, onClose, onChanged }: {
         </div>
 
         {alert && <Alert type={alert.type} message={alert.message} />}
+
+        {owedAmount > 0 && (
+          <div className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-xl bg-amber-50 border border-amber-200">
+            <span className="text-sm text-amber-800">
+              Outstanding arrears: <span className="font-semibold">GHS {owedAmount.toFixed(2)}</span> ({owedDays} day{owedDays === 1 ? '' : 's'})
+            </span>
+            <button onClick={() => act(() => staffApi.post('/school/transport-fees/settle-arrears', { studentId }), `Settled GHS ${owedAmount.toFixed(2)} of arrears.`)}
+              disabled={busy}
+              className="shrink-0 px-3.5 py-2 rounded-lg text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 transition disabled:opacity-50">
+              {busy ? '…' : 'Settle all'}
+            </button>
+          </div>
+        )}
 
         <div className="border-t border-slate-100 pt-4 space-y-3">
           <p className="text-sm font-semibold text-slate-700">Add prepaid days</p>
@@ -644,6 +669,7 @@ function TransportFeesTab() {
   const summary     = collection?.summary;
   const isSchoolDay = collection?.isSchoolDay ?? true;
   const cashToday   = summary ? summary.paid * (collection?.dailyRate ?? 0) : 0;
+  const totalOwed   = rows.reduce((s, r) => s + r.owedAmount, 0);
 
   async function markPaid(studentId: string) {
     setMarkingPaid(studentId);
@@ -700,8 +726,9 @@ function TransportFeesTab() {
         <div className="flex gap-4 mb-4">
           {[
             { label: 'Paid', value: summary.paid, color: '#22c55e' },
-            { label: 'Unpaid', value: summary.unpaid, color: '#ef4444' },
+            { label: 'Unpaid today', value: summary.unpaid, color: '#ef4444' },
             { label: 'Cash today', value: `GHS ${cashToday.toFixed(2)}`, color: 'var(--accent)' },
+            { label: 'Outstanding', value: `GHS ${totalOwed.toFixed(2)}`, color: '#b45309' },
           ].map(c => (
             <div key={c.label} className="bg-white rounded-xl border border-slate-100 px-4 py-3 text-center">
               <p className="text-xs text-slate-400">{c.label}</p>
@@ -718,12 +745,13 @@ function TransportFeesTab() {
               <tr className="border-b border-slate-100 bg-slate-50">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Student</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Status</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-400 uppercase tracking-wide">Owes</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
               {loading && Array.from({length:6}).map((_,i) => (
-                <tr key={i}><td colSpan={3} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td></tr>
+                <tr key={i}><td colSpan={4} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td></tr>
               ))}
               {!loading && rows.map(row => {
                 const cfg    = STATUS_CONFIG[row.status];
@@ -741,6 +769,11 @@ function TransportFeesTab() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {row.owedAmount > 0
+                        ? <span className="text-sm font-semibold text-amber-700" title={`${row.owedDays} unpaid day(s)`}>GHS {row.owedAmount.toFixed(2)}</span>
+                        : <span className="text-slate-300 text-sm">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
                       {canPay && (
                         <button onClick={() => markPaid(row.student.id)} disabled={markingPaid === row.student.id}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
@@ -750,14 +783,14 @@ function TransportFeesTab() {
                       )}
                       <button onClick={() => setCalendarStudent(row.student)}
                         className="ml-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition">
-                        Prepay
+                        Payments
                       </button>
                     </td>
                   </tr>
                 );
               })}
               {!loading && rows.length === 0 && (
-                <tr><td colSpan={3} className="px-4 py-10 text-center text-sm text-slate-400">No students on this route.</td></tr>
+                <tr><td colSpan={4} className="px-4 py-10 text-center text-sm text-slate-400">No students on this route.</td></tr>
               )}
             </tbody>
           </table>
