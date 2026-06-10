@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { useStaffAuth } from '@/contexts/staff-auth';
@@ -216,6 +217,7 @@ function FeatureSection({ feature, overrides, defaults, onChange, disabled }: {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function RolePermissionsPage() {
+  const router = useRouter();
   const { isOwner, isAdmin } = useStaffAuth();
   const [selectedRole, setSelectedRole] = useState(ROLES[0].value);
   const [overrides, setOverrides]           = useState<OverrideMap>(new Map());
@@ -311,6 +313,12 @@ export default function RolePermissionsPage() {
 
   return (
     <div>
+      {/* Back */}
+      <button onClick={() => router.push('/school/staff')}
+        className="text-sm text-slate-400 hover:text-slate-700 transition mb-5 flex items-center gap-1">
+        ← Back to staff
+      </button>
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
