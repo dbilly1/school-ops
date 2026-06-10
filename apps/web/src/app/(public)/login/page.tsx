@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { storeTokens, publicPost, type ApiError } from '@/lib/api';
+import { PasswordInput } from '@/components/ui/password-input';
 
 export default function StaffLoginPage() {
   const router = useRouter();
@@ -117,8 +118,7 @@ export default function StaffLoginPage() {
                   Forgot password?
                 </button>
               </div>
-              <input
-                type="password"
+              <PasswordInput
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required

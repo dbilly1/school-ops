@@ -2,6 +2,7 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -9,6 +10,8 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { StudentLoginDto } from './dto/student-login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 
 @Injectable()
 export class AuthService {
@@ -69,13 +72,72 @@ export class AuthService {
       include: {
         roles: true,
         school: { select: { onboardingComplete: true } },
+        staffProfile: { select: { phone: true } },
       },
     });
     if (!user || !user.isActive) throw new UnauthorizedException('User not found');
     return {
       ...this.sanitizeUser(user),
       onboardingComplete: user.school?.onboardingComplete ?? false,
+      phone: user.staffProfile?.phone ?? null,
     };
+  }
+
+  // Self-service profile update for the signed-in staff user. Email is left
+  // immutable — it's the per-school login identity. Phone lives on StaffProfile,
+  // which not every user has (e.g. the owner), so it's updated only when present.
+  async updateStaffProfile(userId: string, dto: UpdateMeDto) {
+    const data: { firstName?: string; lastName?: string } = {};
+    if (dto.firstName !== undefined) data.firstName = dto.firstName;
+    if (dto.lastName !== undefined) data.lastName = dto.lastName;
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data,
+      include: {
+        roles: true,
+        school: { select: { onboardingComplete: true } },
+        staffProfile: { select: { phone: true } },
+      },
+    });
+
+    let phone = user.staffProfile?.phone ?? null;
+    if (dto.phone !== undefined) {
+      const updated = await this.prisma.staffProfile.updateMany({
+        where: { userId },
+        data: { phone: dto.phone },
+      });
+      if (updated.count > 0) phone = dto.phone ?? null;
+    }
+
+    return {
+      ...this.sanitizeUser(user),
+      onboardingComplete: user.school?.onboardingComplete ?? false,
+      phone,
+    };
+  }
+
+  // Self-service password change for the signed-in staff user.
+  async changeStaffPassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const ok = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!ok) throw new BadRequestException('Current password is incorrect');
+
+    if (!dto.newPassword || dto.newPassword.length < 6)
+      throw new BadRequestException('New password must be at least 6 characters');
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: await bcrypt.hash(dto.newPassword, 10),
+        mustChange: false,
+        tempPassword: null,
+      },
+    });
+
+    return { success: true };
   }
 
   async portalMe(studentId: string) {

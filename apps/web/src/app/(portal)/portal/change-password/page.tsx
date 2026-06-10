@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePortalAuth } from '@/contexts/portal-auth';
 import { portalApi, type ApiError } from '@/lib/api';
+import { PasswordInput } from '@/components/ui/password-input';
 
 export default function ChangePasswordPage() {
   const { user, markPasswordChanged } = usePortalAuth();
@@ -60,8 +61,7 @@ export default function ChangePasswordPage() {
           <label className="block text-xs font-medium text-slate-600 mb-1.5">
             {firstLogin ? 'Temporary password' : 'Current password'}
           </label>
-          <input
-            type="password"
+          <PasswordInput
             value={currentPassword}
             onChange={e => setCurrentPassword(e.target.value)}
             className={inputCls}
@@ -73,8 +73,7 @@ export default function ChangePasswordPage() {
 
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1.5">New password</label>
-          <input
-            type="password"
+          <PasswordInput
             value={newPassword}
             onChange={e => setNewPassword(e.target.value)}
             className={inputCls}
@@ -87,8 +86,7 @@ export default function ChangePasswordPage() {
 
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1.5">Confirm new password</label>
-          <input
-            type="password"
+          <PasswordInput
             value={confirm}
             onChange={e => setConfirm(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && submit()}

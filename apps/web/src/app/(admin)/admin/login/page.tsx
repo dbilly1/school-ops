@@ -4,6 +4,7 @@ import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAdminAuth } from '@/contexts/admin-auth';
 import type { ApiError } from '@/lib/api';
+import { PasswordInput } from '@/components/ui/password-input';
 
 export default function AdminLoginPage() {
   const { login }                 = useAdminAuth();
@@ -56,8 +57,7 @@ export default function AdminLoginPage() {
 
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required

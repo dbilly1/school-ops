@@ -1,9 +1,11 @@
-import { Controller, Get, Post, Body, Headers, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Headers, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { StudentLoginDto } from './dto/student-login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtPortalGuard } from './guards/jwt-portal.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -28,6 +30,23 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current staff user' })
   staffMe(@CurrentUser() user: any) {
     return this.authService.staffMe(user.id);
+  }
+
+  @Patch('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update own staff profile' })
+  updateMe(@CurrentUser() user: any, @Body() dto: UpdateMeDto) {
+    return this.authService.updateStaffProfile(user.id, dto);
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change own staff password' })
+  changePassword(@CurrentUser() user: any, @Body() dto: ChangePasswordDto) {
+    return this.authService.changeStaffPassword(user.id, dto);
   }
 
   @Post('refresh')

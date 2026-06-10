@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { publicPost, storeTokens, type ApiError } from '@/lib/api';
+import { PasswordInput } from '@/components/ui/password-input';
 
 const COUNTRIES = [
   'Ghana', 'Nigeria', 'Kenya', 'South Africa', 'Uganda', 'Tanzania',
@@ -216,23 +217,27 @@ export default function RegisterPage() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="Password" required>
-                      <Input
-                        type="password"
+                      <PasswordInput
                         value={form.ownerPassword}
                         onChange={set('ownerPassword')}
                         placeholder="Min. 8 characters"
                         required
                         autoComplete="new-password"
+                        className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 placeholder-slate-400 outline-none transition"
+                        onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+                        onBlur={e => e.currentTarget.style.boxShadow = ''}
                       />
                     </Field>
                     <Field label="Confirm password" required>
-                      <Input
-                        type="password"
+                      <PasswordInput
                         value={form.confirmPassword}
                         onChange={set('confirmPassword')}
                         placeholder="Repeat password"
                         required
                         autoComplete="new-password"
+                        className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 placeholder-slate-400 outline-none transition"
+                        onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+                        onBlur={e => e.currentTarget.style.boxShadow = ''}
                       />
                     </Field>
                   </div>

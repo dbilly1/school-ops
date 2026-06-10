@@ -117,10 +117,10 @@ function UserMenu({ onClose }: { onClose: () => void }) {
       </div>
       <div className="py-1">
         <button
-          onClick={() => { router.push('/school/settings/profile'); onClose(); }}
+          onClick={() => { router.push('/school/account'); onClose(); }}
           className="w-full text-left px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50 transition"
         >
-          Profile settings
+          My account
         </button>
         <button
           onClick={handleLogout}

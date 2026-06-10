@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { publicPost, storeTokens, type ApiError } from '@/lib/api';
+import { PasswordInput } from '@/components/ui/password-input';
 
 export default function PortalLoginPage() {
   const router = useRouter();
@@ -63,8 +64,7 @@ export default function PortalLoginPage() {
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Password</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
