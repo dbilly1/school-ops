@@ -1,13 +1,18 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GradingService } from '../school-setup/grading/grading.service';
+import { TeacherScopeService } from '../staff/teacher-scope.service';
+import { StaffRole } from '@prisma/client';
 import { CreateAssessmentDto, BulkRecordScoresDto } from './dto/assessment.dto';
+
+type Caller = { id: string; roles: StaffRole[] };
 
 @Injectable()
 export class AssessmentsService {
   constructor(
     private prisma: PrismaService,
     private gradingService: GradingService,
+    private teacherScope: TeacherScopeService,
   ) {}
 
   async findAll(schoolId: string, termId?: string, subjectId?: string) {
@@ -51,7 +56,9 @@ export class AssessmentsService {
     return { ...assessment, scores: scoresWithGrades };
   }
 
-  async create(schoolId: string, dto: CreateAssessmentDto) {
+  async create(schoolId: string, dto: CreateAssessmentDto, caller: Caller) {
+    await this.teacherScope.assertCanManageAssessment(caller.id, caller.roles, dto.subjectId);
+
     const term = await this.prisma.term.findFirst({ where: { id: dto.termId, schoolId } });
     if (!term) throw new NotFoundException('Term not found');
 
@@ -75,19 +82,27 @@ export class AssessmentsService {
     });
   }
 
-  async delete(schoolId: string, id: string) {
+  async delete(schoolId: string, id: string, caller: Caller) {
     const assessment = await this.prisma.assessment.findFirst({ where: { id, schoolId } });
     if (!assessment) throw new NotFoundException('Assessment not found');
+    await this.teacherScope.assertCanManageAssessment(caller.id, caller.roles, assessment.subjectId);
     return this.prisma.assessment.delete({ where: { id } });
   }
 
-  async recordScores(schoolId: string, assessmentId: string, dto: BulkRecordScoresDto) {
-    const assessment = await this.prisma.assessment.findFirst({ where: { id: assessmentId, schoolId } });
+  async recordScores(schoolId: string, assessmentId: string, dto: BulkRecordScoresDto, caller: Caller) {
+    const assessment = await this.prisma.assessment.findFirst({
+      where: { id: assessmentId, schoolId },
+      include: { term: { select: { academicYearId: true } } },
+    });
     if (!assessment) throw new NotFoundException('Assessment not found');
 
     const studentIds = [...new Set(dto.scores.map((s) => s.studentId))];
     const validStudents = await this.prisma.student.count({ where: { id: { in: studentIds }, schoolId } });
     if (validStudents !== studentIds.length) throw new NotFoundException('One or more students not found');
+
+    await this.teacherScope.assertCanRecordScores(
+      caller.id, caller.roles, schoolId, assessment.subjectId, assessment.term.academicYearId, studentIds,
+    );
 
     // Scores must fall within 0..totalScore (M1) — otherwise percentages/grades break.
     const max = Number(assessment.totalScore);

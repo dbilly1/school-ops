@@ -58,6 +58,8 @@ async function main() {
     { featureKey: 'transport', subFeatureKey: 'drivers', defaultEnabled: true },
     { featureKey: 'transport', subFeatureKey: 'student_assignment', defaultEnabled: true },
     { featureKey: 'transport', subFeatureKey: 'pickup_points', defaultEnabled: false },
+    { featureKey: 'transport', subFeatureKey: 'fee_collection', defaultEnabled: true },
+    { featureKey: 'feeding_fees', subFeatureKey: 'fee_collection', defaultEnabled: true },
     { featureKey: 'communication', subFeatureKey: 'notices', defaultEnabled: true },
     { featureKey: 'communication', subFeatureKey: 'announcements', defaultEnabled: true },
     { featureKey: 'communication', subFeatureKey: 'internal_messaging', defaultEnabled: false },
@@ -71,6 +73,35 @@ async function main() {
     });
   }
   console.log(`✓ ${defaults.length} sub-feature defaults seeded`);
+
+  // Backfill: make the new 'fee_collection' sub-features package-available
+  // wherever their parent feature is already part of a package. The permission
+  // resolver checks package availability BEFORE the owner/admin bypass, so
+  // without this a gated fee-collection route would deny everyone.
+  const packages = await prisma.package.findMany({ include: { features: true } });
+  let backfilled = 0;
+  async function ensurePkgFeature(packageId: string, featureKey: string, subFeatureKey: string | null) {
+    const exists = await prisma.packageFeature.findFirst({ where: { packageId, featureKey, subFeatureKey } });
+    if (!exists) {
+      await prisma.packageFeature.create({ data: { packageId, featureKey, subFeatureKey } });
+      backfilled++;
+    }
+  }
+  for (const pkg of packages) {
+    const keys = new Set(pkg.features.map((f) => `${f.featureKey}:${f.subFeatureKey ?? ''}`));
+    // Transport fee collection — where transport is in the package.
+    if (keys.has('transport:')) {
+      await ensurePkgFeature(pkg.id, 'transport', 'fee_collection');
+    }
+    // Feeding fee collection — where feeding is in the package (top-level
+    // feeding_fees or the legacy finance:feeding_fees sub-feature). Ensure the
+    // top-level feeding_fees parent exists too.
+    if (keys.has('feeding_fees:') || keys.has('finance:feeding_fees')) {
+      await ensurePkgFeature(pkg.id, 'feeding_fees', null);
+      await ensurePkgFeature(pkg.id, 'feeding_fees', 'fee_collection');
+    }
+  }
+  console.log(`✓ fee_collection package backfill: ${backfilled} row(s) added`);
 
   console.log('Done.');
 }

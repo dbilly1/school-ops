@@ -53,13 +53,13 @@ export class AssessmentsController {
   @Post()
   @RequirePermission('academics', 'CREATE', 'assessments')
   create(@CurrentUser() user: any, @Body() dto: CreateAssessmentDto) {
-    return this.assessmentsService.create(user.schoolId, dto);
+    return this.assessmentsService.create(user.schoolId, dto, { id: user.id, roles: user.roles });
   }
 
   @Delete(':id')
   @RequirePermission('academics', 'DELETE', 'assessments')
   delete(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.assessmentsService.delete(user.schoolId, id);
+    return this.assessmentsService.delete(user.schoolId, id, { id: user.id, roles: user.roles });
   }
 
   @Post(':id/scores')
@@ -69,6 +69,6 @@ export class AssessmentsController {
     @Param('id') id: string,
     @Body() dto: BulkRecordScoresDto,
   ) {
-    return this.assessmentsService.recordScores(user.schoolId, id, dto);
+    return this.assessmentsService.recordScores(user.schoolId, id, dto, { id: user.id, roles: user.roles });
   }
 }

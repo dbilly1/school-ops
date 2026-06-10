@@ -144,14 +144,15 @@ export default function AssessmentsPage() {
   const { data: subjects } = useApi(fetchSubjects);
   const { data: terms }    = useApi(fetchTerms);
 
-  // For restricted teachers: only show subjects they are assigned to teach
+  // For restricted teachers: show subjects they may record for — subject-teacher
+  // subjects plus every subject of their class-teacher classes.
   const visibleSubjects = scope.restricted
-    ? (subjects ?? []).filter(s => scope.assignedSubjectIds.includes(s.id))
+    ? (subjects ?? []).filter(s => scope.recordableSubjectIds.includes(s.id))
     : (subjects ?? []);
 
-  // For restricted teachers: further filter the list to their assigned subjects
+  // For restricted teachers: further filter the list to those recordable subjects
   const visibleAssessments = scope.restricted
-    ? (assessments ?? []).filter(a => scope.assignedSubjectIds.includes(a.subject.id))
+    ? (assessments ?? []).filter(a => scope.recordableSubjectIds.includes(a.subject.id))
     : (assessments ?? []);
 
   // Summary figures
@@ -317,7 +318,7 @@ export default function AssessmentsPage() {
       <NewAssessmentModal
         open={showNew} onClose={() => setShowNew(false)}
         subjects={subjects ?? []} terms={terms ?? []} onCreated={refetch}
-        assignedSubjectIds={scope.restricted ? scope.assignedSubjectIds : null}
+        assignedSubjectIds={scope.restricted ? scope.recordableSubjectIds : null}
       />
     </div>
   );

@@ -1,18 +1,24 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../school-setup/calendar/calendar.service';
+import { TeacherScopeService } from '../staff/teacher-scope.service';
+import { StaffRole } from '@prisma/client';
 import { BulkMarkAttendanceDto, MarkStaffAttendanceDto } from './dto/attendance.dto';
+
+type Caller = { id: string; roles: StaffRole[] };
 
 @Injectable()
 export class AttendanceService {
   constructor(
     private prisma: PrismaService,
     private calendar: CalendarService,
+    private teacherScope: TeacherScopeService,
   ) {}
 
   // ── Student Attendance ────────────────────────────────────
 
-  async getClassAttendance(schoolId: string, classId: string, date: string) {
+  async getClassAttendance(schoolId: string, classId: string, date: string, caller: Caller) {
+    await this.teacherScope.assertClassTeacher(caller.id, caller.roles, classId);
     const dateObj = new Date(date);
     const students = await this.prisma.studentClassAssignment.findMany({
       where: { classId },
@@ -43,7 +49,9 @@ export class AttendanceService {
     };
   }
 
-  async bulkMark(schoolId: string, dto: BulkMarkAttendanceDto, markedBy: string) {
+  async bulkMark(schoolId: string, dto: BulkMarkAttendanceDto, caller: Caller) {
+    await this.teacherScope.assertClassTeacher(caller.id, caller.roles, dto.classId);
+
     const dateObj = new Date(dto.date);
     const isSchoolDay = await this.calendar.isSchoolDay(schoolId, dateObj);
     if (!isSchoolDay)
@@ -51,6 +59,8 @@ export class AttendanceService {
 
     const cls = await this.prisma.class.findFirst({ where: { id: dto.classId, schoolId } });
     if (!cls) throw new NotFoundException('Class not found');
+
+    const markedBy = caller.id;
 
     await this.prisma.$transaction(
       dto.entries.map((entry) =>
@@ -91,7 +101,8 @@ export class AttendanceService {
     return { records, summary: { total, present, absent, rate } };
   }
 
-  async getClassAttendanceSummary(schoolId: string, classId: string, startDate: string, endDate: string) {
+  async getClassAttendanceSummary(schoolId: string, classId: string, startDate: string, endDate: string, caller: Caller) {
+    await this.teacherScope.assertClassTeacher(caller.id, caller.roles, classId);
     const students = await this.prisma.studentClassAssignment.findMany({
       where: { classId },
       include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },

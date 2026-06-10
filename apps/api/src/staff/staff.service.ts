@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { TeacherScopeService } from './teacher-scope.service';
 import { UpdateStaffProfileDto, AssignClassDto, AssignSubjectDto } from './dto/staff.dto';
 
 @Injectable()
 export class StaffService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private teacherScope: TeacherScopeService,
+  ) {}
 
   async getProfile(schoolId: string, userId: string) {
     const profile = await this.prisma.staffProfile.findFirst({
@@ -157,12 +161,19 @@ export class StaffService {
       : [];
     const classMap = new Map(classes.map(c => [c.id, c]));
 
+    const recordableSubjectIds = await this.teacherScope.recordableSubjectIds(userId);
+
     return {
       classAssignments: profile.classAssignments,
       subjectAssignments: profile.subjectAssignments.map(sa => ({
         ...sa,
         class: classMap.get(sa.classId) ?? { id: sa.classId, name: 'Unknown' },
       })),
+      // Classes the user is the class teacher of (attendance scope).
+      classTeacherClassIds: profile.classAssignments.map(a => a.classId),
+      // Subjects the user may record assessments for (subject-teacher subjects ∪
+      // every subject of their class-teacher classes).
+      recordableSubjectIds,
     };
   }
 

@@ -24,6 +24,8 @@ export type MySubjectAssignment = {
 type RawAssignments = {
   classAssignments: MyClassAssignment[];
   subjectAssignments: MySubjectAssignment[];
+  classTeacherClassIds?: string[];
+  recordableSubjectIds?: string[];
 };
 
 export type TeacherScope = {
@@ -38,6 +40,11 @@ export type TeacherScope = {
   subjectAssignments: MySubjectAssignment[];
   /** All unique class IDs this teacher is involved with (class teacher + subject teacher) */
   assignedClassIds: string[];
+  /** Class IDs this teacher is the CLASS TEACHER of — the scope for attendance */
+  classTeacherClassIds: string[];
+  /** Subject IDs this teacher may record assessments for (subject-teacher subjects
+   *  plus every subject of their class-teacher classes) */
+  recordableSubjectIds: string[];
   /** All unique subject IDs this teacher is assigned to teach */
   assignedSubjectIds: string[];
   /** Subject IDs this teacher is assigned to teach in a specific class */
@@ -75,7 +82,15 @@ export function useTeacherScope(): TeacherScope {
     ]),
   ];
 
+  // Class-teacher classes (attendance scope). Prefer the server-computed list;
+  // fall back to deriving from classAssignments.
+  const classTeacherClassIds = data?.classTeacherClassIds
+    ?? classAssignments.map(a => a.classId);
+
+  // Subjects the teacher may record (server computes the class-teacher union);
+  // fall back to subject-teacher subjects only.
   const assignedSubjectIds = [...new Set(subjectAssignments.map(a => a.subjectId))];
+  const recordableSubjectIds = data?.recordableSubjectIds ?? assignedSubjectIds;
 
   function subjectsForClass(classId: string): string[] {
     return subjectAssignments
@@ -93,6 +108,8 @@ export function useTeacherScope(): TeacherScope {
     classAssignments,
     subjectAssignments,
     assignedClassIds,
+    classTeacherClassIds,
+    recordableSubjectIds,
     assignedSubjectIds,
     subjectsForClass,
     isClassTeacherOf,

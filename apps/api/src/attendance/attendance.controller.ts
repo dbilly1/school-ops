@@ -22,13 +22,13 @@ export class AttendanceController {
     @Param('classId') classId: string,
     @Query('date') date: string,
   ) {
-    return this.attendanceService.getClassAttendance(user.schoolId, classId, date);
+    return this.attendanceService.getClassAttendance(user.schoolId, classId, date, { id: user.id, roles: user.roles });
   }
 
   @Post('students/bulk')
   @RequirePermission('attendance', 'CREATE', 'student_attendance')
   bulkMark(@CurrentUser() user: any, @Body() dto: BulkMarkAttendanceDto) {
-    return this.attendanceService.bulkMark(user.schoolId, dto, user.id);
+    return this.attendanceService.bulkMark(user.schoolId, dto, { id: user.id, roles: user.roles });
   }
 
   @Get('students/:studentId')
@@ -50,7 +50,7 @@ export class AttendanceController {
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
   ) {
-    return this.attendanceService.getClassAttendanceSummary(user.schoolId, classId, startDate, endDate);
+    return this.attendanceService.getClassAttendanceSummary(user.schoolId, classId, startDate, endDate, { id: user.id, roles: user.roles });
   }
 
   // Staff

@@ -8,15 +8,19 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffRolesGuard } from '../auth/guards/staff-roles.guard';
 import { RequireStaffRole } from '../auth/decorators/staff-roles.decorator';
+import { PermissionsGuard } from '../permissions/permissions.guard';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { StaffRole } from '@prisma/client';
 
-// Feeding's feature-key mapping is inconsistent across package/role-defaults
-// (see review notes), so access is enforced by role rather than the feature
-// guard: enrollment/exemptions are Owner/Admin; payments also allow Accountant.
+// Two access models on this controller (both guards run; each no-ops when its
+// decorator is absent): enrollment/exemptions stay Owner/Admin only, while
+// daily fee collection (view + record) is its own grantable permission
+// (feeding_fees / fee_collection) so a school can let someone collect feeding
+// fees without any other access. Owner/Admin bypass the permission engine.
 @ApiTags('Feeding Fees')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, StaffRolesGuard)
+@UseGuards(JwtAuthGuard, StaffRolesGuard, PermissionsGuard)
 @Controller('school/feeding')
 export class FeedingController {
   constructor(private feedingService: FeedingService) {}
@@ -57,6 +61,7 @@ export class FeedingController {
 
   // ── Daily collection ──
   @Get('daily/:classId')
+  @RequirePermission('feeding_fees', 'VIEW', 'fee_collection')
   getDailyCollection(
     @CurrentUser() user: any,
     @Param('classId') classId: string,
@@ -66,6 +71,7 @@ export class FeedingController {
   }
 
   @Get('student/:studentId/calendar')
+  @RequirePermission('feeding_fees', 'VIEW', 'fee_collection')
   getStudentCalendar(
     @CurrentUser() user: any,
     @Param('studentId') studentId: string,
@@ -76,30 +82,31 @@ export class FeedingController {
 
   // ── Payments ──
   @Post('mark-paid')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.ACCOUNTANT)
+  @RequirePermission('feeding_fees', 'CREATE', 'fee_collection')
   markPaid(@CurrentUser() user: any, @Body() dto: MarkPaidDto) {
     return this.feedingService.markPaid(user.schoolId, dto, user.id);
   }
 
   @Post('prepay')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.ACCOUNTANT)
+  @RequirePermission('feeding_fees', 'CREATE', 'fee_collection')
   prepay(@CurrentUser() user: any, @Body() dto: FeedingPrepayDto) {
     return this.feedingService.prepay(user.schoolId, dto, user.id);
   }
 
   @Post('refund-balance')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.ACCOUNTANT)
+  @RequirePermission('feeding_fees', 'CREATE', 'fee_collection')
   refundBalance(@CurrentUser() user: any, @Body() dto: FeedingRefundDto) {
     return this.feedingService.refundBalance(user.schoolId, dto, user.id);
   }
 
   @Post('settle-arrears')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.ACCOUNTANT)
+  @RequirePermission('feeding_fees', 'CREATE', 'fee_collection')
   settleArrears(@CurrentUser() user: any, @Body() dto: FeedingSettleArrearsDto) {
     return this.feedingService.settleArrears(user.schoolId, dto, user.id);
   }
 
   @Get('reconciliation')
+  @RequirePermission('feeding_fees', 'VIEW', 'fee_collection')
   getDailyReconciliation(@CurrentUser() user: any, @Query('date') date: string) {
     return this.feedingService.getDailyReconciliation(user.schoolId, date);
   }

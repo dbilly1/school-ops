@@ -206,7 +206,9 @@ function StudentAttendanceTab({ assignedClassIds, restricted }: {
 
       {!classId && classes && classes.length === 0 && (
         <div className="bg-white rounded-2xl border border-slate-100 px-6 py-16 text-center text-sm text-slate-400">
-          No classes found. Set up your grade structure first.
+          {restricted
+            ? 'You are not the class teacher of any class, so there is no attendance for you to take.'
+            : 'No classes found. Set up your grade structure first.'}
         </div>
       )}
 
@@ -443,7 +445,7 @@ export default function AttendancePage() {
 
       {(tab === 'students' || scope.restricted) && (
         <StudentAttendanceTab
-          assignedClassIds={scope.assignedClassIds}
+          assignedClassIds={scope.classTeacherClassIds}
           restricted={scope.restricted}
         />
       )}

@@ -3,21 +3,22 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { TransportFeesService } from './transport-fees.service';
 import { TransportPrepayDto, TransportRefundDto, TransportSettleArrearsDto, TransportMarkPaidDto } from './dto/transport-fees.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { StaffRolesGuard } from '../auth/guards/staff-roles.guard';
-import { RequireStaffRole } from '../auth/decorators/staff-roles.decorator';
+import { PermissionsGuard } from '../permissions/permissions.guard';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { StaffRole } from '@prisma/client';
 
-// transport_fees has the same inconsistent feature-key mapping as feeding, so
-// access is enforced by role: reads open; payment recording allows Accountant.
+// Recording daily transport fees is its own grantable permission
+// (transport / fee_collection) so a school can let someone collect fees without
+// any other transport access. Owner/Admin bypass the engine as usual.
 @ApiTags('Transport Fees')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, StaffRolesGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('school/transport-fees')
 export class TransportFeesController {
   constructor(private transportFeesService: TransportFeesService) {}
 
   @Get('daily/:routeId')
+  @RequirePermission('transport', 'VIEW', 'fee_collection')
   getDailyCollection(
     @CurrentUser() user: any,
     @Param('routeId') routeId: string,
@@ -27,6 +28,7 @@ export class TransportFeesController {
   }
 
   @Get('student/:studentId/calendar')
+  @RequirePermission('transport', 'VIEW', 'fee_collection')
   getStudentCalendar(
     @CurrentUser() user: any,
     @Param('studentId') studentId: string,
@@ -36,30 +38,31 @@ export class TransportFeesController {
   }
 
   @Post('mark-paid')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.ACCOUNTANT)
+  @RequirePermission('transport', 'CREATE', 'fee_collection')
   markPaid(@CurrentUser() user: any, @Body() dto: TransportMarkPaidDto) {
     return this.transportFeesService.markPaid(user.schoolId, dto, user.id);
   }
 
   @Post('prepay')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.ACCOUNTANT)
+  @RequirePermission('transport', 'CREATE', 'fee_collection')
   prepay(@CurrentUser() user: any, @Body() dto: TransportPrepayDto) {
     return this.transportFeesService.prepay(user.schoolId, dto, user.id);
   }
 
   @Post('refund-balance')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.ACCOUNTANT)
+  @RequirePermission('transport', 'CREATE', 'fee_collection')
   refundBalance(@CurrentUser() user: any, @Body() dto: TransportRefundDto) {
     return this.transportFeesService.refundBalance(user.schoolId, dto, user.id);
   }
 
   @Post('settle-arrears')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.ACCOUNTANT)
+  @RequirePermission('transport', 'CREATE', 'fee_collection')
   settleArrears(@CurrentUser() user: any, @Body() dto: TransportSettleArrearsDto) {
     return this.transportFeesService.settleArrears(user.schoolId, dto, user.id);
   }
 
   @Get('reconciliation')
+  @RequirePermission('transport', 'VIEW', 'fee_collection')
   getDailyReconciliation(@CurrentUser() user: any, @Query('date') date: string) {
     return this.transportFeesService.getDailyReconciliation(user.schoolId, date);
   }

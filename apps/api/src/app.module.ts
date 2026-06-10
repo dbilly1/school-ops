@@ -12,6 +12,7 @@ import { SchoolsModule } from './schools/schools.module';
 import { SchoolSetupModule } from './school-setup/school-setup.module';
 import { UsersModule } from './users/users.module';
 import { StaffModule } from './staff/staff.module';
+import { TeacherScopeModule } from './staff/teacher-scope.module';
 import { AdmissionsModule } from './admissions/admissions.module';
 import { StudentsModule } from './students/students.module';
 import { SubjectsModule } from './subjects/subjects.module';
@@ -45,6 +46,7 @@ import { MailModule } from './mail/mail.module';
     AuthModule,
     FeatureFlagsModule,
     PermissionsModule,
+    TeacherScopeModule,
     AuditModule,
     SuperAdminModule,
     SchoolsModule,
