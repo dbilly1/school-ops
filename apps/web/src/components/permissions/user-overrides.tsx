@@ -40,13 +40,16 @@ const FEATURES = [
     { key: 'outstanding_balance_tracking', label: 'Outstanding balance tracking' },
     { key: 'discount_management', label: 'Discount management' },
   ]},
-  { key: 'feeding_fees', label: 'Feeding Fees', subFeatures: [] },
+  { key: 'feeding_fees', label: 'Feeding Fees', subFeatures: [
+    { key: 'fee_collection', label: 'Daily fee collection' },
+  ]},
   { key: 'transport', label: 'Transport', subFeatures: [
     { key: 'vehicles', label: 'Vehicles' },
     { key: 'routes', label: 'Routes' },
     { key: 'drivers', label: 'Drivers' },
     { key: 'student_assignment', label: 'Student assignment' },
     { key: 'pickup_points', label: 'Pickup points' },
+    { key: 'fee_collection', label: 'Daily fee collection' },
   ]},
   { key: 'communication', label: 'Communication', subFeatures: [
     { key: 'notices', label: 'Notices' },
