@@ -6,6 +6,7 @@ import { useStaffAuth } from '@/contexts/staff-auth';
 import { useTeacherScope } from '@/hooks/use-teacher-scope';
 import { useFeature } from '@/hooks/use-feature';
 import { cn } from '@/lib/cn';
+import { OWNER_ADMIN, OWNER_ADMIN_TEACHER, OWNER_ADMIN_ACCOUNTANT, OWNER_ADMIN_TRANSPORT } from '@/lib/staff-roles';
 
 // ── Icons (inline SVG — no icon library dependency) ───────────────────────────
 
@@ -114,12 +115,6 @@ function NavSection({ label, items, pathname, hasRole, hiddenIds }: {
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
-
-// Shorthand role sets
-const OWNER_ADMIN            = ['SCHOOL_OWNER', 'SCHOOL_ADMIN'];
-const OWNER_ADMIN_TEACHER    = ['SCHOOL_OWNER', 'SCHOOL_ADMIN', 'TEACHER'];
-const OWNER_ADMIN_ACCOUNTANT = ['SCHOOL_OWNER', 'SCHOOL_ADMIN', 'ACCOUNTANT'];
-const OWNER_ADMIN_TRANSPORT  = ['SCHOOL_OWNER', 'SCHOOL_ADMIN', 'TRANSPORT_OFFICER'];
 
 const NAV: { section: string; items: NavItem[] }[] = [
   {

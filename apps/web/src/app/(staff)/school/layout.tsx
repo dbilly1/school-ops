@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useStaffAuth } from '@/contexts/staff-auth';
 import { Sidebar, MobileSidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
+import { RouteGuard } from '@/components/guards/route-guard';
 
 export default function SchoolShellLayout({ children }: { children: React.ReactNode }) {
   const { user, branding, loading } = useStaffAuth();
@@ -67,7 +68,7 @@ export default function SchoolShellLayout({ children }: { children: React.ReactN
       <div className="flex flex-col flex-1 overflow-hidden min-w-0">
         <Topbar onMenuClick={() => setMobileNavOpen(true)} />
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
-          {children}
+          <RouteGuard>{children}</RouteGuard>
         </main>
       </div>
     </div>
