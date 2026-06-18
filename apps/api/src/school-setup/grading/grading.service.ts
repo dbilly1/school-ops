@@ -6,11 +6,23 @@ import { CreateGradingScaleDto, UpdateGradingBandsDto } from './dto/grading.dto'
 export class GradingService {
   constructor(private prisma: PrismaService) {}
 
-  async getActiveScale(schoolId: string) {
-    return this.prisma.gradingScale.findFirst({
+  // Returns the grading scale to use. When a gradeLevelId is given, prefer a
+  // scale that targets that grade level (e.g. JHS 1–9), otherwise fall back to
+  // a school-wide default scale (no grade-level targeting).
+  async getActiveScale(schoolId: string, gradeLevelId?: string) {
+    const active = await this.prisma.gradingScale.findMany({
       where: { schoolId, isActive: true },
       include: { bands: { orderBy: { minScore: 'desc' } } },
+      orderBy: { createdAt: 'desc' },
     });
+    if (active.length === 0) return null;
+
+    if (gradeLevelId) {
+      const targeted = active.find((s) => s.appliesToGradeLevelIds.includes(gradeLevelId));
+      if (targeted) return targeted;
+    }
+    // Default scale = one with no grade-level targeting; else first active.
+    return active.find((s) => s.appliesToGradeLevelIds.length === 0) ?? active[0];
   }
 
   async findAll(schoolId: string) {
@@ -21,13 +33,27 @@ export class GradingService {
     });
   }
 
+  // Two scales conflict if they'd ever apply to the same student: both are
+  // school-wide defaults (no targeting), or their grade-level sets intersect.
+  private conflicts(a: string[], b: string[]): boolean {
+    if (a.length === 0 && b.length === 0) return true;
+    return a.some((id) => b.includes(id));
+  }
+
   async create(schoolId: string, dto: CreateGradingScaleDto) {
+    const targets = dto.appliesToGradeLevelIds ?? [];
+
     return this.prisma.$transaction(async (tx) => {
-      // Deactivate existing active scale
-      await tx.gradingScale.updateMany({
+      // Deactivate only the active scales this one would conflict with, so a
+      // Primary scale and a JHS scale can both stay active at once.
+      const active = await tx.gradingScale.findMany({
         where: { schoolId, isActive: true },
-        data: { isActive: false },
+        select: { id: true, appliesToGradeLevelIds: true },
       });
+      const toDeactivate = active.filter((s) => this.conflicts(s.appliesToGradeLevelIds, targets)).map((s) => s.id);
+      if (toDeactivate.length > 0) {
+        await tx.gradingScale.updateMany({ where: { id: { in: toDeactivate } }, data: { isActive: false } });
+      }
 
       return tx.gradingScale.create({
         data: {
@@ -35,6 +61,7 @@ export class GradingService {
           scaleType: dto.scaleType,
           passmark: dto.passmark,
           gpaMax: dto.gpaMax,
+          appliesToGradeLevelIds: targets,
           isActive: true,
           bands: { create: dto.bands },
         },
@@ -66,10 +93,17 @@ export class GradingService {
     });
     if (!scale) throw new NotFoundException('Grading scale not found');
 
-    await this.prisma.gradingScale.updateMany({
-      where: { schoolId, isActive: true },
-      data: { isActive: false },
+    // Deactivate only conflicting active scales (same grade-level coverage).
+    const active = await this.prisma.gradingScale.findMany({
+      where: { schoolId, isActive: true, id: { not: scaleId } },
+      select: { id: true, appliesToGradeLevelIds: true },
     });
+    const toDeactivate = active
+      .filter((s) => this.conflicts(s.appliesToGradeLevelIds, scale.appliesToGradeLevelIds))
+      .map((s) => s.id);
+    if (toDeactivate.length > 0) {
+      await this.prisma.gradingScale.updateMany({ where: { id: { in: toDeactivate } }, data: { isActive: false } });
+    }
 
     return this.prisma.gradingScale.update({
       where: { id: scaleId },
@@ -77,15 +111,21 @@ export class GradingService {
     });
   }
 
-  // Derive the display grade for a raw score
-  async deriveGrade(schoolId: string, rawScore: number): Promise<string | null> {
-    const scale = await this.getActiveScale(schoolId);
-    if (!scale) return null;
-
-    const band = scale.bands.find(
-      (b) => rawScore >= Number(b.minScore) && rawScore <= Number(b.maxScore),
-    );
-
+  // Derive the display grade/band for a percentage (0–100). Pass gradeLevelId to
+  // pick the level-appropriate scale (e.g. Primary A–F vs JHS 1–9).
+  async deriveGrade(schoolId: string, percentage: number, gradeLevelId?: string): Promise<string | null> {
+    const band = await this.deriveBand(schoolId, percentage, gradeLevelId);
     return band?.label ?? null;
+  }
+
+  // Returns the full matching band (label + remark) for a percentage.
+  async deriveBand(schoolId: string, percentage: number, gradeLevelId?: string) {
+    const scale = await this.getActiveScale(schoolId, gradeLevelId);
+    if (!scale) return null;
+    return (
+      scale.bands.find(
+        (b) => percentage >= Number(b.minScore) && percentage <= Number(b.maxScore),
+      ) ?? null
+    );
   }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, use } from 'react';
+import { useState, useCallback, use, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
@@ -13,9 +13,16 @@ type Assessment = {
   title: string;
   totalScore: number;
   weight: number | null;
+  category: string;
   assessmentDate: string | null;
   subject: { id: string; name: string };
+  class: { id: string; name: string } | null;
   term: { id: string; name: string };
+};
+
+const CATEGORY_LABEL: Record<string, string> = {
+  CLASS_EXERCISE: 'Class Exercise', CLASS_TEST: 'Class Test', GROUP_WORK: 'Group Work',
+  PROJECT: 'Project Work', HOMEWORK: 'Homework', MID_TERM: 'Mid-Term', END_OF_TERM_EXAM: 'End-of-Term Exam',
 };
 
 type ScoreRecord = {
@@ -67,19 +74,23 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
   const { data: classes } = useApi(fetchClasses);
   const [selectedClass, setSelectedClass] = useState('');
 
+  // Default to the assessment's own class until the user picks another.
+  const effectiveClass = selectedClass || assessment?.class?.id || '';
+
   const fetchStudents = useCallback(
-    () => selectedClass
-      ? staffApi.get<Student[]>(`/school/students?classId=${selectedClass}`)
+    () => effectiveClass
+      ? staffApi.get<Student[]>(`/school/students?classId=${effectiveClass}`)
       : staffApi.get<Student[]>('/school/students'),
-    [selectedClass],
+    [effectiveClass],
   );
   const { data: students, loading: studLoading } = useApi(fetchStudents);
 
-  // Score state — keyed by studentId
+  // Score state — keyed by studentId. Re-seed whenever the visible class (and
+  // therefore the student set) changes, mapping any already-recorded scores.
   const [scores, setScores] = useState<Record<string, { rawScore: string; remarks: string }>>({});
-  const [initialised, setInitialised] = useState(false);
+  const initialisedFor = useRef<string | null>(null);
 
-  if (!sLoading && !initialised && existingScores && students) {
+  if (!sLoading && existingScores && students && initialisedFor.current !== effectiveClass) {
     const init: typeof scores = {};
     students.forEach(s => {
       const existing = existingScores.find(e => e.studentId === s.id);
@@ -89,7 +100,7 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
       };
     });
     setScores(init);
-    setInitialised(true);
+    initialisedFor.current = effectiveClass;
   }
 
   const [saving, setSaving] = useState(false);
@@ -150,8 +161,10 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
         <div>
           <h2 className="text-lg font-bold text-slate-900">{assessment.title}</h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            {assessment.subject.name} · {assessment.term.name}
-            {assessment.weight && ` · Weight: ${assessment.weight}%`}
+            {assessment.subject.name}
+            {assessment.class && ` · ${assessment.class.name}`}
+            {` · ${CATEGORY_LABEL[assessment.category] ?? assessment.category}`}
+            {` · ${assessment.term.name}`}
           </p>
         </div>
         <div className="text-right">
@@ -180,7 +193,7 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
 
       {/* Class filter + Save */}
       <div className="flex items-center justify-between mb-4">
-        <select value={selectedClass} onChange={e => { setSelectedClass(e.target.value); setInitialised(false); }}
+        <select value={effectiveClass} onChange={e => setSelectedClass(e.target.value)}
           className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
           <option value="">All classes</option>
           {classes?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}

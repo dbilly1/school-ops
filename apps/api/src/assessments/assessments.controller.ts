@@ -20,8 +20,9 @@ export class AssessmentsController {
     @CurrentUser() user: any,
     @Query('termId') termId?: string,
     @Query('subjectId') subjectId?: string,
+    @Query('classId') classId?: string,
   ) {
-    return this.assessmentsService.findAll(user.schoolId, termId, subjectId);
+    return this.assessmentsService.findAll(user.schoolId, termId, subjectId, classId);
   }
 
   @Get('grade-book/:classId')

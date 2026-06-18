@@ -1,9 +1,9 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, Res } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ReportCardsService } from './report-cards.service';
 import { ReportCardPdfService } from './report-card-pdf.service';
-import { GenerateReportCardsDto, PublishReportCardsDto } from './dto/report-card.dto';
+import { GenerateReportCardsDto, PublishReportCardsDto, UpdateReportCardDto } from './dto/report-card.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../permissions/permissions.guard';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
@@ -66,5 +66,16 @@ export class ReportCardsController {
   @RequirePermission('academics', 'EDIT', 'report_cards')
   publish(@CurrentUser() user: any, @Body() dto: PublishReportCardsDto) {
     return this.reportCardsService.publish(user.schoolId, dto, user.id);
+  }
+
+  @Patch('student/:studentId')
+  @RequirePermission('academics', 'EDIT', 'report_cards')
+  updateReportCard(
+    @CurrentUser() user: any,
+    @Param('studentId') studentId: string,
+    @Query('termId') termId: string,
+    @Body() dto: UpdateReportCardDto,
+  ) {
+    return this.reportCardsService.updateReportCard(user.schoolId, studentId, termId, dto);
   }
 }

@@ -15,24 +15,40 @@ type Assessment = {
   title: string;
   totalScore: number;
   weight: number | null;
+  category: string;
   assessmentDate: string | null;
   subject: { id: string; name: string };
+  class: { id: string; name: string } | null;
   term: { id: string; name: string };
   _count: { scores: number };
 };
 
 type Subject = { id: string; name: string };
+type ClassRow = { id: string; name: string };
 type Term    = { id: string; name: string; isActive: boolean };
+
+// Assessment categories (mirror of the API enum). Everything except the
+// end-of-term exam rolls up into the class score (SBA) on report cards.
+const CATEGORIES: { value: string; label: string }[] = [
+  { value: 'CLASS_EXERCISE',   label: 'Class Exercise' },
+  { value: 'CLASS_TEST',       label: 'Class Test' },
+  { value: 'GROUP_WORK',       label: 'Group Work' },
+  { value: 'PROJECT',          label: 'Project Work' },
+  { value: 'HOMEWORK',         label: 'Homework' },
+  { value: 'MID_TERM',         label: 'Mid-Term' },
+  { value: 'END_OF_TERM_EXAM', label: 'End-of-Term Exam' },
+];
+const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(CATEGORIES.map(c => [c.value, c.label]));
 
 // ── New assessment modal ──────────────────────────────────────────────────────
 
-function NewAssessmentModal({ open, onClose, subjects, terms, onCreated, assignedSubjectIds }: {
+function NewAssessmentModal({ open, onClose, subjects, classes, terms, onCreated, assignedSubjectIds }: {
   open: boolean; onClose: () => void;
-  subjects: Subject[]; terms: Term[]; onCreated: () => void;
+  subjects: Subject[]; classes: ClassRow[]; terms: Term[]; onCreated: () => void;
   assignedSubjectIds: string[] | null; // null = no restriction
 }) {
   const [form, setForm] = useState({
-    title: '', subjectId: '', termId: '',
+    title: '', subjectId: '', classId: '', termId: '', category: 'CLASS_TEST',
     totalScore: '100', weight: '', assessmentDate: '',
   });
   const [saving, setSaving] = useState(false);
@@ -44,20 +60,22 @@ function NewAssessmentModal({ open, onClose, subjects, terms, onCreated, assigne
     : subjects;
 
   async function create() {
-    if (!form.title || !form.subjectId || !form.termId) {
-      setError('Title, subject, and term are required.'); return;
+    if (!form.title || !form.subjectId || !form.classId || !form.termId) {
+      setError('Title, subject, class, and term are required.'); return;
     }
     setError(null); setSaving(true);
     try {
       await staffApi.post('/school/assessments', {
         title:          form.title,
         subjectId:      form.subjectId,
+        classId:        form.classId,
+        category:       form.category,
         termId:         form.termId,
         totalScore:     parseFloat(form.totalScore),
         weight:         form.weight ? parseFloat(form.weight) : null,
         assessmentDate: form.assessmentDate || null,
       });
-      setForm({ title:'', subjectId:'', termId:'', totalScore:'100', weight:'', assessmentDate:'' });
+      setForm({ title:'', subjectId:'', classId:'', termId:'', category:'CLASS_TEST', totalScore:'100', weight:'', assessmentDate:'' });
       onCreated(); onClose();
     } catch (err) {
       setError((err as ApiError).message ?? 'Failed to create assessment.');
@@ -81,6 +99,21 @@ function NewAssessmentModal({ open, onClose, subjects, terms, onCreated, assigne
               className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
               <option value="">Select subject…</option>
               {visibleSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </FormField>
+
+          <FormField label="Class" required>
+            <select value={form.classId} onChange={e => setForm(f => ({ ...f, classId: e.target.value }))}
+              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
+              <option value="">Select class…</option>
+              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </FormField>
+
+          <FormField label="Category" required hint="Determines whether it counts as class score or exam">
+            <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
+              {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
           </FormField>
 
@@ -125,15 +158,18 @@ export default function AssessmentsPage() {
   const [showNew, setShowNew]             = useState(false);
   const [termFilter, setTermFilter]       = useState('');
   const [subjectFilter, setSubjectFilter] = useState('');
+  const [classFilter, setClassFilter]     = useState('');
 
   const fetchAssessments = useCallback(() => {
     const params = new URLSearchParams();
     if (termFilter)    params.set('termId',    termFilter);
     if (subjectFilter) params.set('subjectId', subjectFilter);
+    if (classFilter)   params.set('classId',   classFilter);
     return staffApi.get<Assessment[]>(`/school/assessments?${params}`);
-  }, [termFilter, subjectFilter]);
+  }, [termFilter, subjectFilter, classFilter]);
 
   const fetchSubjects = useCallback(() => staffApi.get<Subject[]>('/school/subjects'), []);
+  const fetchClasses  = useCallback(() => staffApi.get<ClassRow[]>('/school/grade-structure/classes'), []);
   const fetchTerms    = useCallback(() =>
     staffApi.get<any>('/school/academic-years/active')
       .then(year => year?.terms ?? []).catch(() => []),
@@ -142,6 +178,7 @@ export default function AssessmentsPage() {
 
   const { data: assessments, loading, refetch } = useApi(fetchAssessments);
   const { data: subjects } = useApi(fetchSubjects);
+  const { data: classes }  = useApi(fetchClasses);
   const { data: terms }    = useApi(fetchTerms);
 
   // For restricted teachers: show subjects they may record for — subject-teacher
@@ -215,6 +252,11 @@ export default function AssessmentsPage() {
           <option value="">{scope.restricted ? 'All my subjects' : 'All subjects'}</option>
           {visibleSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
+        <select value={classFilter} onChange={e => setClassFilter(e.target.value)}
+          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
+          <option value="">All classes</option>
+          {classes?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
       </div>
 
       {/* Loading */}
@@ -259,8 +301,9 @@ export default function AssessmentsPage() {
                   <tr className="border-b border-slate-100 bg-slate-50">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Title</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Subject</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden sm:table-cell">Class</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden lg:table-cell">Category</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Marks</th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Weight</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Date</th>
                     <th className="px-4 py-3" />
@@ -279,11 +322,16 @@ export default function AssessmentsPage() {
                       <td className="px-4 py-3.5">
                         <span className="text-sm text-slate-600">{a.subject.name}</span>
                       </td>
+                      <td className="px-4 py-3.5 hidden sm:table-cell">
+                        <span className="text-sm text-slate-600">{a.class?.name ?? '—'}</span>
+                      </td>
+                      <td className="px-4 py-3.5 hidden lg:table-cell">
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                          {CATEGORY_LABEL[a.category] ?? a.category}
+                        </span>
+                      </td>
                       <td className="px-4 py-3.5 text-center">
                         <span className="text-sm font-medium text-slate-700">{a.totalScore}</span>
-                      </td>
-                      <td className="px-4 py-3.5 text-center hidden md:table-cell">
-                        <span className="text-sm text-slate-500">{a.weight ? `${a.weight}%` : '—'}</span>
                       </td>
                       <td className="px-4 py-3.5">
                         {a._count.scores > 0 ? (
@@ -317,7 +365,7 @@ export default function AssessmentsPage() {
 
       <NewAssessmentModal
         open={showNew} onClose={() => setShowNew(false)}
-        subjects={subjects ?? []} terms={terms ?? []} onCreated={refetch}
+        subjects={subjects ?? []} classes={classes ?? []} terms={terms ?? []} onCreated={refetch}
         assignedSubjectIds={scope.restricted ? scope.recordableSubjectIds : null}
       />
     </div>

@@ -15,15 +15,17 @@ export class AssessmentsService {
     private teacherScope: TeacherScopeService,
   ) {}
 
-  async findAll(schoolId: string, termId?: string, subjectId?: string) {
+  async findAll(schoolId: string, termId?: string, subjectId?: string, classId?: string) {
     return this.prisma.assessment.findMany({
       where: {
         schoolId,
         ...(termId ? { termId } : {}),
         ...(subjectId ? { subjectId } : {}),
+        ...(classId ? { classId } : {}),
       },
       include: {
         subject: { select: { id: true, name: true } },
+        class: { select: { id: true, name: true } },
         term: { select: { id: true, name: true } },
         _count: { select: { scores: true } },
       },
@@ -36,6 +38,7 @@ export class AssessmentsService {
       where: { id, schoolId },
       include: {
         subject: { select: { id: true, name: true } },
+        class: { select: { id: true, name: true } },
         term: { select: { id: true, name: true } },
         scores: {
           include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
@@ -65,10 +68,17 @@ export class AssessmentsService {
     const subject = await this.prisma.subject.findFirst({ where: { id: dto.subjectId, schoolId } });
     if (!subject) throw new NotFoundException('Subject not found');
 
+    if (dto.classId) {
+      const cls = await this.prisma.class.findFirst({ where: { id: dto.classId, schoolId } });
+      if (!cls) throw new NotFoundException('Class not found');
+    }
+
     return this.prisma.assessment.create({
       data: {
         schoolId,
         subjectId: dto.subjectId,
+        classId: dto.classId ?? null,
+        category: dto.category,
         termId: dto.termId,
         title: dto.title,
         totalScore: dto.totalScore,
@@ -77,6 +87,7 @@ export class AssessmentsService {
       },
       include: {
         subject: { select: { id: true, name: true } },
+        class: { select: { id: true, name: true } },
         term: { select: { id: true, name: true } },
       },
     });
@@ -163,11 +174,7 @@ export class AssessmentsService {
     });
 
     const assessments = await this.prisma.assessment.findMany({
-      where: {
-        schoolId,
-        termId,
-        subject: { gradeLevels: { some: { gradeLevel: { classes: { some: { id: classId } } } } } },
-      },
+      where: { schoolId, termId, classId },
       include: {
         subject: { select: { id: true, name: true } },
         scores: true,
@@ -181,6 +188,7 @@ export class AssessmentsService {
         return {
           assessmentId: a.id,
           title: a.title,
+          category: a.category,
           subject: a.subject.name,
           totalScore: a.totalScore,
           rawScore: score?.rawScore ?? null,
@@ -190,6 +198,6 @@ export class AssessmentsService {
       return { student, scores };
     });
 
-    return { assessments: assessments.map((a) => ({ id: a.id, title: a.title, subject: a.subject.name, totalScore: a.totalScore })), rows };
+    return { assessments: assessments.map((a) => ({ id: a.id, title: a.title, category: a.category, subject: a.subject.name, totalScore: a.totalScore })), rows };
   }
 }

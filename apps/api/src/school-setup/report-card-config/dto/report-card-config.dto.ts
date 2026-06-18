@@ -1,5 +1,6 @@
-import { IsBoolean, IsString, IsOptional, IsArray, ValidateNested, IsInt } from 'class-validator';
+import { IsBoolean, IsString, IsOptional, IsArray, ValidateNested, IsInt, IsNumber, Min, Max, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
+import { AssessmentCategory } from '@prisma/client';
 
 export class CustomSectionDto {
   @IsString()
@@ -7,6 +8,22 @@ export class CustomSectionDto {
 
   @IsInt()
   position!: number;
+}
+
+export class CategoryWeightDto {
+  @IsEnum(AssessmentCategory)
+  category!: AssessmentCategory;
+
+  @IsNumber()
+  @Min(0)
+  weight!: number;
+}
+
+export class UpdateCategoryWeightsDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CategoryWeightDto)
+  weights!: CategoryWeightDto[];
 }
 
 export class UpdateReportCardConfigDto {
@@ -37,6 +54,23 @@ export class UpdateReportCardConfigDto {
   @IsBoolean()
   @IsOptional()
   showNextTermInfo?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  showPosition?: boolean;
+
+  // Class-score (SBA) vs end-of-term-exam split. Should sum to 100.
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  @IsOptional()
+  sbaWeight?: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  @IsOptional()
+  examWeight?: number;
 
   @IsString()
   @IsOptional()

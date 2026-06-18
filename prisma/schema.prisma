@@ -83,6 +83,19 @@ enum GradeScaleType {
   CUSTOM
 }
 
+// Assessment categories. Everything except END_OF_TERM_EXAM rolls up into the
+// continuous-assessment ("class score" / SBA) bucket; END_OF_TERM_EXAM is the
+// exam bucket. Mid-term is just an SBA category — it gets no separate tab.
+enum AssessmentCategory {
+  CLASS_EXERCISE
+  CLASS_TEST
+  GROUP_WORK
+  PROJECT
+  HOMEWORK
+  MID_TERM
+  END_OF_TERM_EXAM
+}
+
 enum CalendarEventType {
   HOLIDAY
   VACATION
@@ -222,6 +235,7 @@ model School {
   rolePermissionOverrides  RolePermissionOverride[]
   userPermissionOverrides  UserPermissionOverride[]
   gradingScales            GradingScale[]
+  assessmentCategoryWeights AssessmentCategoryWeight[]
 
   @@map("schools")
 }
@@ -540,6 +554,7 @@ model Class {
   classTeachers      TeacherClassAssignment[]
   timetableSlots     TimetableSlot[]
   attendanceRecords  StudentAttendanceRecord[]
+  assessments        Assessment[]
 
   @@unique([schoolId, name])
   @@map("classes")
@@ -654,14 +669,17 @@ model GradeLevelSubject {
 // ============================================================
 
 model GradingScale {
-  id        String         @id @default(uuid())
-  schoolId  String
-  scaleType GradeScaleType
-  passmark  Decimal?
-  gpaMax    Decimal?
-  isActive  Boolean        @default(true)
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  id                   String         @id @default(uuid())
+  schoolId             String
+  scaleType            GradeScaleType
+  passmark             Decimal?
+  gpaMax               Decimal?
+  isActive             Boolean        @default(true)
+  // Grade levels this scale applies to. Empty = school-wide default/fallback
+  // (e.g. Primary uses an A–F scale, JHS uses a 1–9 scale, simultaneously).
+  appliesToGradeLevelIds String[]     @default([])
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   school School              @relation(fields: [schoolId], references: [id])
   bands  GradingScaleBand[]
@@ -930,10 +948,12 @@ model StaffAttendanceRecord {
 // ============================================================
 
 model Assessment {
-  id           String   @id @default(uuid())
+  id           String             @id @default(uuid())
   schoolId     String
   subjectId    String
+  classId      String?
   termId       String
+  category     AssessmentCategory @default(CLASS_TEST)
   title        String
   totalScore   Decimal
   weight       Decimal?
@@ -943,10 +963,12 @@ model Assessment {
 
   school  School            @relation(fields: [schoolId], references: [id])
   subject Subject           @relation(fields: [subjectId], references: [id])
+  class   Class?            @relation(fields: [classId], references: [id])
   term    Term              @relation(fields: [termId], references: [id])
   scores  AssessmentScore[]
 
   @@index([schoolId])
+  @@index([classId])
   @@map("assessments")
 }
 
@@ -1264,6 +1286,11 @@ model ReportCardConfig {
   showTeacherComments   Boolean  @default(true)
   showPrincipalComments Boolean  @default(true)
   showNextTermInfo      Boolean  @default(false)
+  showPosition          Boolean  @default(true)
+  // Terminal-grade weighting: class score (SBA) vs end-of-term exam. GES
+  // standards-based default is 50/50; schools may change it (e.g. 30/70).
+  sbaWeight             Decimal  @default(50)
+  examWeight            Decimal  @default(50)
   footerText            String?
   updatedAt             DateTime @updatedAt
 
@@ -1271,6 +1298,20 @@ model ReportCardConfig {
   customSections ReportCardCustomSection[]
 
   @@map("report_card_configs")
+}
+
+// Optional per-category weighting WITHIN the class-score (SBA) bucket. When no
+// rows exist for a school, SBA categories are weighted equally.
+model AssessmentCategoryWeight {
+  id       String             @id @default(uuid())
+  schoolId String
+  category AssessmentCategory
+  weight   Decimal
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@unique([schoolId, category])
+  @@map("assessment_category_weights")
 }
 
 model ReportCardCustomSection {
@@ -1285,12 +1326,24 @@ model ReportCardCustomSection {
 }
 
 model ReportCard {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   studentId   String
   termId      String
   pdfUrl      String?
   publishedAt DateTime?
-  createdAt   DateTime @default(now())
+  // Computed snapshot at generation time: per-subject SBA/exam/total/grade.
+  data        Json?
+  aggregate   Decimal?
+  position    Int?
+  classSize   Int?
+  // GES "Attitudes, Interests & Conduct" section + remarks.
+  attitudes        String?
+  interests        String?
+  conduct          String?
+  teacherRemarks   String?
+  headTeacherRemarks String?
+  promotedTo       String?
+  createdAt   DateTime  @default(now())
 
   student Student @relation(fields: [studentId], references: [id])
   term    Term    @relation(fields: [termId], references: [id])

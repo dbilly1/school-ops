@@ -14,6 +14,9 @@ type ReportCard = {
   termId: string;
   publishedAt: string | null;
   generatedAt: string;
+  aggregate: number | null;
+  position: number | null;
+  classSize: number | null;
 };
 
 // ── Report card row ───────────────────────────────────────────────────────────
@@ -48,7 +51,13 @@ function ReportCardRow({ card, apiBase }: { card: ReportCard; apiBase: string })
         </p>
         <p className="text-xs font-mono text-slate-400">{card.student.studentId}</p>
       </td>
-      <td className="px-4 py-3.5">
+      <td className="px-4 py-3.5 text-center">
+        <span className="text-sm font-medium text-slate-700">{card.aggregate != null ? `${card.aggregate}%` : '—'}</span>
+      </td>
+      <td className="px-4 py-3.5 text-center">
+        <span className="text-sm text-slate-600">{card.position != null ? `${card.position}${card.classSize ? ` / ${card.classSize}` : ''}` : '—'}</span>
+      </td>
+      <td className="px-4 py-3.5 hidden md:table-cell">
         <span className="text-xs text-slate-500">
           {new Date(card.generatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
         </span>
@@ -132,13 +141,13 @@ export default function ReportCardsPage() {
   }
 
   async function publishAll() {
-    if (!activeTermId || !cards) return;
-    const ids = cards.filter(c => !c.publishedAt).map(c => c.id);
-    if (!ids.length) return;
+    if (!activeTermId || !activeClassId || !cards) return;
+    const draftCount = cards.filter(c => !c.publishedAt).length;
+    if (!draftCount) return;
     setAlert(null); setPublishing(true);
     try {
-      await staffApi.post('/school/report-cards/publish', { reportCardIds: ids });
-      setAlert({ type: 'success', message: `${ids.length} report card${ids.length !== 1 ? 's' : ''} published. Students and parents will be notified.` });
+      await staffApi.post('/school/report-cards/publish', { classId: activeClassId, termId: activeTermId });
+      setAlert({ type: 'success', message: `${draftCount} report card${draftCount !== 1 ? 's' : ''} published. Students and parents will be notified.` });
       refetch();
     } catch (err) {
       setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to publish.' });
@@ -222,7 +231,9 @@ export default function ReportCardsPage() {
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Student</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Generated</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Aggregate</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Position</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Generated</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Status</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -230,14 +241,14 @@ export default function ReportCardsPage() {
             <tbody>
               {loading && Array.from({length:6}).map((_,i) => (
                 <tr key={i} className="border-b border-slate-50">
-                  <td colSpan={4} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td>
+                  <td colSpan={6} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td>
                 </tr>
               ))}
               {!loading && cards?.map(card => (
                 <ReportCardRow key={card.id} card={card} apiBase={API_BASE} />
               ))}
               {!loading && (!cards || cards.length === 0) && (
-                <tr><td colSpan={4} className="px-4 py-12 text-center text-sm text-slate-400">
+                <tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
                   No report cards. Click "Generate report cards" to create them.
                 </td></tr>
               )}

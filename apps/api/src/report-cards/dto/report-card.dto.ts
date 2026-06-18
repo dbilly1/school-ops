@@ -20,3 +20,29 @@ export class PublishReportCardsDto {
   @IsOptional()
   studentIds?: string[];
 }
+
+export class UpdateReportCardDto {
+  @IsString()
+  @IsOptional()
+  attitudes?: string;
+
+  @IsString()
+  @IsOptional()
+  interests?: string;
+
+  @IsString()
+  @IsOptional()
+  conduct?: string;
+
+  @IsString()
+  @IsOptional()
+  teacherRemarks?: string;
+
+  @IsString()
+  @IsOptional()
+  headTeacherRemarks?: string;
+
+  @IsString()
+  @IsOptional()
+  promotedTo?: string;
+}

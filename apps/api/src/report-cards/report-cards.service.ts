@@ -1,8 +1,27 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, AssessmentCategory } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GradingService } from '../school-setup/grading/grading.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { GenerateReportCardsDto, PublishReportCardsDto } from './dto/report-card.dto';
+import { isExamCategory } from '../assessments/assessment-category.util';
+import { GenerateReportCardsDto, PublishReportCardsDto, UpdateReportCardDto } from './dto/report-card.dto';
+
+// Per-subject computed terminal result.
+type SubjectResult = {
+  subjectId: string;
+  subject: string;
+  sbaRaw: number;
+  sbaTotal: number;
+  sbaPercent: number | null;
+  examRaw: number;
+  examTotal: number;
+  examPercent: number | null;
+  sbaScore: number; // sbaPercent scaled to the SBA weight (e.g. 0–50)
+  examScore: number; // examPercent scaled to the exam weight (e.g. 0–50)
+  total: number; // 0–100
+  gradeLabel: string | null;
+  remark: string | null;
+};
 
 @Injectable()
 export class ReportCardsService {
@@ -12,7 +31,133 @@ export class ReportCardsService {
     private notifications: NotificationsService,
   ) {}
 
-  // Compile and store report card data for all students in a class for a term
+  // ── Computation ───────────────────────────────────────────
+
+  private round(n: number, dp = 1): number {
+    const f = 10 ** dp;
+    return Math.round(n * f) / f;
+  }
+
+  // Compute every subject's terminal result for one student in one term.
+  private async computeSubjects(
+    schoolId: string,
+    studentId: string,
+    termId: string,
+    gradeLevelId: string | undefined,
+    categoryWeights: Map<AssessmentCategory, number>,
+    sbaWeight: number,
+    examWeight: number,
+  ): Promise<SubjectResult[]> {
+    const scores = await this.prisma.assessmentScore.findMany({
+      where: { studentId, assessment: { schoolId, termId } },
+      include: { assessment: { include: { subject: { select: { id: true, name: true } } } } },
+    });
+
+    type Acc = {
+      name: string;
+      sbaByCat: Map<AssessmentCategory, { raw: number; total: number }>;
+      exam: { raw: number; total: number };
+    };
+    const bySubject = new Map<string, Acc>();
+
+    for (const s of scores) {
+      const a = s.assessment;
+      const subjectId = a.subjectId;
+      if (!bySubject.has(subjectId)) {
+        bySubject.set(subjectId, { name: a.subject.name, sbaByCat: new Map(), exam: { raw: 0, total: 0 } });
+      }
+      const acc = bySubject.get(subjectId)!;
+      const raw = Number(s.rawScore);
+      const total = Number(a.totalScore);
+
+      if (isExamCategory(a.category)) {
+        acc.exam.raw += raw;
+        acc.exam.total += total;
+      } else {
+        const cur = acc.sbaByCat.get(a.category) ?? { raw: 0, total: 0 };
+        cur.raw += raw;
+        cur.total += total;
+        acc.sbaByCat.set(a.category, cur);
+      }
+    }
+
+    const hasConfiguredWeights = categoryWeights.size > 0;
+    const results: SubjectResult[] = [];
+
+    for (const [subjectId, acc] of bySubject) {
+      // SBA percent = weighted average of each contributing category's percent.
+      // Default (no config): every present category weighted equally. With
+      // config: only categories that have a weight contribute.
+      let sbaWeightedSum = 0;
+      let sbaWeightTotal = 0;
+      let sbaRaw = 0;
+      let sbaTotal = 0;
+      for (const [cat, agg] of acc.sbaByCat) {
+        if (agg.total <= 0) continue;
+        const w = hasConfiguredWeights ? (categoryWeights.get(cat) ?? 0) : 1;
+        if (w <= 0) continue;
+        const catPercent = (agg.raw / agg.total) * 100;
+        sbaWeightedSum += catPercent * w;
+        sbaWeightTotal += w;
+        sbaRaw += agg.raw;
+        sbaTotal += agg.total;
+      }
+      const sbaPercent = sbaWeightTotal > 0 ? sbaWeightedSum / sbaWeightTotal : null;
+      const examPercent = acc.exam.total > 0 ? (acc.exam.raw / acc.exam.total) * 100 : null;
+
+      // Combine. If a subject only has one side recorded so far, use it at full
+      // weight so mid-term reports aren't dragged down by a missing exam.
+      let total: number;
+      let sbaScore = 0;
+      let examScore = 0;
+      if (sbaPercent !== null && examPercent !== null) {
+        sbaScore = (sbaPercent * sbaWeight) / 100;
+        examScore = (examPercent * examWeight) / 100;
+        total = sbaScore + examScore;
+      } else if (sbaPercent !== null) {
+        sbaScore = sbaPercent;
+        total = sbaPercent;
+      } else if (examPercent !== null) {
+        examScore = examPercent;
+        total = examPercent;
+      } else {
+        continue; // no usable data
+      }
+
+      const band = await this.grading.deriveBand(schoolId, Math.round(total), gradeLevelId);
+
+      results.push({
+        subjectId,
+        subject: acc.name,
+        sbaRaw: this.round(sbaRaw),
+        sbaTotal: this.round(sbaTotal),
+        sbaPercent: sbaPercent !== null ? this.round(sbaPercent) : null,
+        examRaw: this.round(acc.exam.raw),
+        examTotal: this.round(acc.exam.total),
+        examPercent: examPercent !== null ? this.round(examPercent) : null,
+        sbaScore: this.round(sbaScore),
+        examScore: this.round(examScore),
+        total: this.round(total),
+        gradeLabel: band?.label ?? null,
+        remark: band?.remark ?? null,
+      });
+    }
+
+    results.sort((a, b) => a.subject.localeCompare(b.subject));
+    return results;
+  }
+
+  private async loadWeights(schoolId: string) {
+    const config = await this.prisma.reportCardConfig.findUnique({ where: { schoolId } });
+    const sbaWeight = config ? Number(config.sbaWeight) : 50;
+    const examWeight = config ? Number(config.examWeight) : 50;
+    const rows = await this.prisma.assessmentCategoryWeight.findMany({ where: { schoolId } });
+    const categoryWeights = new Map<AssessmentCategory, number>(rows.map((r) => [r.category, Number(r.weight)]));
+    return { sbaWeight, examWeight, categoryWeights };
+  }
+
+  // ── Generate (compile + persist snapshot for a whole class) ──
+
   async generate(schoolId: string, dto: GenerateReportCardsDto) {
     const term = await this.prisma.term.findFirst({
       where: { id: dto.termId, schoolId },
@@ -20,81 +165,63 @@ export class ReportCardsService {
     });
     if (!term) throw new NotFoundException('Term not found');
 
-    const config = await this.prisma.reportCardConfig.findUnique({
-      where: { schoolId },
-      include: { customSections: { orderBy: { position: 'asc' } } },
-    });
+    const cls = await this.prisma.class.findFirst({ where: { id: dto.classId, schoolId } });
+    if (!cls) throw new NotFoundException('Class not found');
 
-    const gradingScale = await this.grading.getActiveScale(schoolId);
+    const { sbaWeight, examWeight, categoryWeights } = await this.loadWeights(schoolId);
 
     const assignments = await this.prisma.studentClassAssignment.findMany({
       where: { classId: dto.classId, academicYearId: term.academicYearId },
-      include: {
-        student: { select: { id: true, studentId: true, firstName: true, lastName: true } },
-      },
+      include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
     });
 
-    const generated: string[] = [];
+    // First pass: compute every student's subjects + aggregate.
+    const computed = await Promise.all(
+      assignments.map(async ({ student }) => {
+        const subjects = await this.computeSubjects(
+          schoolId, student.id, dto.termId, cls.gradeLevelId, categoryWeights, sbaWeight, examWeight,
+        );
+        const aggregate = subjects.length > 0
+          ? this.round(subjects.reduce((s, r) => s + r.total, 0) / subjects.length)
+          : 0;
+        return { studentId: student.id, subjects, aggregate };
+      }),
+    );
 
-    for (const { student } of assignments) {
-      // Scores for this term
-      const scores = await this.prisma.assessmentScore.findMany({
-        where: {
-          studentId: student.id,
-          assessment: { schoolId, termId: dto.termId },
-        },
-        include: {
-          assessment: {
-            include: { subject: { select: { id: true, name: true } } },
-          },
-        },
-      });
-
-      // Attendance summary
-      const attendance = await this.prisma.studentAttendanceRecord.findMany({
-        where: {
-          schoolId, studentId: student.id,
-          ...(term.startDate && term.endDate ? { date: { gte: term.startDate, lte: term.endDate } } : {}),
-        },
-      });
-      const totalDays = attendance.length;
-      const presentDays = attendance.filter((a) => a.status === 'PRESENT' || a.status === 'LATE').length;
-
-      // Group by subject and compute totals
-      const subjectMap = new Map<string, { name: string; scores: typeof scores }>();
-      for (const score of scores) {
-        const subjectId = score.assessment.subjectId;
-        if (!subjectMap.has(subjectId)) {
-          subjectMap.set(subjectId, { name: score.assessment.subject.name, scores: [] });
-        }
-        subjectMap.get(subjectId)!.scores.push(score);
+    // Rank by aggregate (desc); ties share a position.
+    const ranked = [...computed].sort((a, b) => b.aggregate - a.aggregate);
+    const positionByStudent = new Map<string, number>();
+    ranked.forEach((c, i) => {
+      if (i > 0 && c.aggregate === ranked[i - 1].aggregate) {
+        positionByStudent.set(c.studentId, positionByStudent.get(ranked[i - 1].studentId)!);
+      } else {
+        positionByStudent.set(c.studentId, i + 1);
       }
+    });
+    const classSize = computed.length;
 
-      const subjects = await Promise.all(
-        Array.from(subjectMap.entries()).map(async ([, { name, scores: subjectScores }]) => {
-          const totalRaw = subjectScores.reduce((s, r) => s + Number(r.rawScore), 0);
-          const totalPossible = subjectScores.reduce((s, r) => s + Number(r.assessment.totalScore), 0);
-          const percentage = totalPossible > 0 ? Math.round((totalRaw / totalPossible) * 100) : 0;
-          const gradeLabel = await this.grading.deriveGrade(schoolId, percentage);
-          return { subject: name, totalRaw, totalPossible, percentage, gradeLabel };
-        }),
-      );
-
-      // Upsert report card record
+    for (const c of computed) {
+      const overallGrade = await this.grading.deriveGrade(schoolId, Math.round(c.aggregate), cls.gradeLevelId);
       await this.prisma.reportCard.upsert({
-        where: { studentId_termId: { studentId: student.id, termId: dto.termId } },
-        update: {}, // Data stored in a future PDF field; for now mark as generated
-        create: { studentId: student.id, termId: dto.termId },
+        where: { studentId_termId: { studentId: c.studentId, termId: dto.termId } },
+        update: {
+          data: { subjects: c.subjects, overallGrade } as unknown as Prisma.InputJsonValue,
+          aggregate: c.aggregate,
+          position: positionByStudent.get(c.studentId) ?? null,
+          classSize,
+        },
+        create: {
+          studentId: c.studentId,
+          termId: dto.termId,
+          data: { subjects: c.subjects, overallGrade } as unknown as Prisma.InputJsonValue,
+          aggregate: c.aggregate,
+          position: positionByStudent.get(c.studentId) ?? null,
+          classSize,
+        },
       });
-
-      generated.push(student.id);
     }
 
-    return {
-      generated: generated.length,
-      termId: dto.termId,
-      classId: dto.classId,
-    };
+    return { generated: computed.length, termId: dto.termId, classId: dto.classId };
   }
 
   async findForClass(schoolId: string, classId: string, termId: string) {
@@ -105,17 +232,32 @@ export class ReportCardsService {
       where: { classId, academicYearId: term.academicYearId },
       include: {
         student: {
-          select: { id: true, studentId: true, firstName: true, lastName: true },
-          include: { reportCards: { where: { termId } } },
+          select: {
+            id: true, studentId: true, firstName: true, lastName: true,
+            reportCards: { where: { termId } },
+          },
         },
       },
       orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
     });
 
-    return assignments.map(({ student }) => ({
-      student: { id: student.id, studentId: student.studentId, firstName: student.firstName, lastName: student.lastName },
-      reportCard: student.reportCards[0] ?? null,
-    }));
+    // Only return generated cards, flattened to the shape the UI expects.
+    return assignments
+      .filter(({ student }) => student.reportCards.length > 0)
+      .map(({ student }) => {
+        const rc = student.reportCards[0];
+        return {
+          id: rc.id,
+          studentId: student.id,
+          student: { firstName: student.firstName, lastName: student.lastName, studentId: student.studentId },
+          termId: rc.termId,
+          publishedAt: rc.publishedAt,
+          generatedAt: rc.createdAt,
+          aggregate: rc.aggregate ? Number(rc.aggregate) : null,
+          position: rc.position,
+          classSize: rc.classSize,
+        };
+      });
   }
 
   async getStudentReportCard(schoolId: string, studentId: string, termId: string) {
@@ -133,41 +275,77 @@ export class ReportCardsService {
       include: { customSections: { orderBy: { position: 'asc' } } },
     });
 
-    const scores = await this.prisma.assessmentScore.findMany({
-      where: { studentId, assessment: { schoolId, termId } },
-      include: { assessment: { include: { subject: { select: { id: true, name: true } } } } },
+    // Resolve the student's grade level for this academic year (for grading scale).
+    const assignment = await this.prisma.studentClassAssignment.findFirst({
+      where: { studentId, academicYearId: term.academicYearId },
+      include: { class: { select: { gradeLevelId: true, name: true } } },
     });
+    const gradeLevelId = assignment?.class.gradeLevelId;
+
+    const reportCard = await this.prisma.reportCard.findUnique({
+      where: { studentId_termId: { studentId, termId } },
+    });
+
+    // Prefer the persisted snapshot (stable once generated); otherwise compute
+    // a live preview so unsaved scores are still visible.
+    let subjects: SubjectResult[];
+    let overallGrade: string | null;
+    if (reportCard?.data) {
+      const data = reportCard.data as unknown as { subjects: SubjectResult[]; overallGrade: string | null };
+      subjects = data.subjects ?? [];
+      overallGrade = data.overallGrade ?? null;
+    } else {
+      const { sbaWeight, examWeight, categoryWeights } = await this.loadWeights(schoolId);
+      subjects = await this.computeSubjects(schoolId, studentId, termId, gradeLevelId, categoryWeights, sbaWeight, examWeight);
+      const agg = subjects.length > 0 ? subjects.reduce((s, r) => s + r.total, 0) / subjects.length : 0;
+      overallGrade = await this.grading.deriveGrade(schoolId, Math.round(agg), gradeLevelId);
+    }
+
+    const aggregate = reportCard?.aggregate != null
+      ? Number(reportCard.aggregate)
+      : subjects.length > 0 ? this.round(subjects.reduce((s, r) => s + r.total, 0) / subjects.length) : 0;
 
     const attendance = await this.prisma.studentAttendanceRecord.findMany({
       where: { schoolId, studentId, ...(term.startDate && term.endDate ? { date: { gte: term.startDate, lte: term.endDate } } : {}) },
     });
-
-    const subjectMap = new Map<string, { name: string; scores: typeof scores }>();
-    for (const score of scores) {
-      const sid = score.assessment.subjectId;
-      if (!subjectMap.has(sid)) subjectMap.set(sid, { name: score.assessment.subject.name, scores: [] });
-      subjectMap.get(sid)!.scores.push(score);
-    }
-
-    const subjects = await Promise.all(
-      Array.from(subjectMap.entries()).map(async ([, { name, scores: ss }]) => {
-        const totalRaw = ss.reduce((s, r) => s + Number(r.rawScore), 0);
-        const totalPossible = ss.reduce((s, r) => s + Number(r.assessment.totalScore), 0);
-        const percentage = totalPossible > 0 ? Math.round((totalRaw / totalPossible) * 100) : 0;
-        return { subject: name, totalRaw, totalPossible, percentage, gradeLabel: await this.grading.deriveGrade(schoolId, percentage) };
-      }),
-    );
-
     const totalDays = attendance.length;
     const presentDays = attendance.filter((a) => a.status === 'PRESENT' || a.status === 'LATE').length;
 
     return {
       student: { id: student.id, studentId: student.studentId, firstName: student.firstName, lastName: student.lastName },
       term: { id: term.id, name: term.name, academicYear: term.academicYear },
+      className: assignment?.class.name ?? null,
       config,
       subjects,
+      overallGrade,
+      aggregate,
+      position: reportCard?.position ?? null,
+      classSize: reportCard?.classSize ?? null,
+      conduct: reportCard
+        ? {
+            attitudes: reportCard.attitudes,
+            interests: reportCard.interests,
+            conduct: reportCard.conduct,
+            teacherRemarks: reportCard.teacherRemarks,
+            headTeacherRemarks: reportCard.headTeacherRemarks,
+            promotedTo: reportCard.promotedTo,
+          }
+        : null,
+      publishedAt: reportCard?.publishedAt ?? null,
       attendance: { totalDays, presentDays, absentDays: totalDays - presentDays, rate: totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0 },
     };
+  }
+
+  // Update the conduct / remarks section of a generated report card.
+  async updateReportCard(schoolId: string, studentId: string, termId: string, dto: UpdateReportCardDto) {
+    const student = await this.prisma.student.findFirst({ where: { id: studentId, schoolId } });
+    if (!student) throw new NotFoundException('Student not found');
+
+    return this.prisma.reportCard.upsert({
+      where: { studentId_termId: { studentId, termId } },
+      update: { ...dto },
+      create: { studentId, termId, ...dto },
+    });
   }
 
   async publish(schoolId: string, dto: PublishReportCardsDto, actorId: string) {

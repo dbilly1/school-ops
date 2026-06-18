@@ -16,8 +16,40 @@ type GradingScale = {
   passmark: number | null;
   gpaMax: number | null;
   isActive: boolean;
+  appliesToGradeLevelIds: string[];
   bands: (Band & { id: string })[];
 };
+
+type GradeLevel = { id: string; name: string };
+
+// GES-approved presets for Ghanaian basic schools.
+const GES_PRESETS: { key: string; label: string; scaleType: ScaleType; bands: Band[] }[] = [
+  {
+    key: 'GES_PRIMARY', label: 'GES Primary (A–F)', scaleType: 'LETTER',
+    bands: [
+      { label: 'A', minScore: '80', maxScore: '100', remark: 'Excellent' },
+      { label: 'B', minScore: '70', maxScore: '79',  remark: 'Very Good' },
+      { label: 'C', minScore: '60', maxScore: '69',  remark: 'Good'      },
+      { label: 'D', minScore: '45', maxScore: '59',  remark: 'Pass'      },
+      { label: 'E', minScore: '35', maxScore: '44',  remark: 'Weak'      },
+      { label: 'F', minScore: '0',  maxScore: '34',  remark: 'Fail'      },
+    ],
+  },
+  {
+    key: 'GES_JHS', label: 'GES JHS (1–9)', scaleType: 'CUSTOM',
+    bands: [
+      { label: '1', minScore: '90', maxScore: '100', remark: 'Highest'      },
+      { label: '2', minScore: '80', maxScore: '89',  remark: 'Higher'       },
+      { label: '3', minScore: '70', maxScore: '79',  remark: 'High'         },
+      { label: '4', minScore: '60', maxScore: '69',  remark: 'High Average' },
+      { label: '5', minScore: '55', maxScore: '59',  remark: 'Average'      },
+      { label: '6', minScore: '50', maxScore: '54',  remark: 'Low Average'  },
+      { label: '7', minScore: '40', maxScore: '49',  remark: 'Low'          },
+      { label: '8', minScore: '35', maxScore: '39',  remark: 'Lower'        },
+      { label: '9', minScore: '0',  maxScore: '34',  remark: 'Lowest'       },
+    ],
+  },
+];
 
 const SCALE_OPTIONS: { value: ScaleType; label: string; description: string }[] = [
   { value: 'PERCENTAGE', label: 'Percentage',    description: 'Scores 0–100, with a configurable pass mark.' },
@@ -102,7 +134,10 @@ function BandsTable({ bands, onChange }: { bands: Band[]; onChange: (bands: Band
 
 // ── Existing scale card ────────────────────────────────────────────────────────
 
-function ScaleCard({ scale, onRefetch }: { scale: GradingScale; onRefetch: () => void }) {
+function ScaleCard({ scale, onRefetch, gradeLevels }: { scale: GradingScale; onRefetch: () => void; gradeLevels: GradeLevel[] }) {
+  const targetNames = (scale.appliesToGradeLevelIds ?? [])
+    .map(id => gradeLevels.find(g => g.id === id)?.name)
+    .filter(Boolean) as string[];
   const [bands, setBands]       = useState<Band[]>(
     scale.bands.map(b => ({ ...b, minScore: String(b.minScore), maxScore: String(b.maxScore) })),
   );
@@ -159,6 +194,9 @@ function ScaleCard({ scale, onRefetch }: { scale: GradingScale; onRefetch: () =>
               Active
             </span>
           )}
+          <span className="text-xs text-slate-400">
+            {targetNames.length > 0 ? targetNames.join(', ') : 'All grade levels'}
+          </span>
         </div>
         <div className="flex items-center gap-3" onClick={e => e.stopPropagation()}>
           {!scale.isActive && (
@@ -199,18 +237,30 @@ function ScaleCard({ scale, onRefetch }: { scale: GradingScale; onRefetch: () =>
 
 // ── New scale form ─────────────────────────────────────────────────────────────
 
-function NewScaleForm({ onCreated }: { onCreated: () => void }) {
+function NewScaleForm({ onCreated, gradeLevels }: { onCreated: () => void; gradeLevels: GradeLevel[] }) {
   const [open, setOpen]           = useState(false);
   const [scaleType, setScaleType] = useState<ScaleType>('PERCENTAGE');
   const [passmark, setPassmark]   = useState('50');
   const [gpaMax, setGpaMax]       = useState('4.0');
   const [bands, setBands]         = useState<Band[]>(DEFAULT_BANDS.PERCENTAGE);
+  const [targetIds, setTargetIds] = useState<string[]>([]);
   const [saving, setSaving]       = useState(false);
   const [error, setError]         = useState<string | null>(null);
 
   function selectScale(type: ScaleType) {
     setScaleType(type);
     setBands(DEFAULT_BANDS[type]);
+  }
+
+  function applyPreset(key: string) {
+    const preset = GES_PRESETS.find(p => p.key === key);
+    if (!preset) return;
+    setScaleType(preset.scaleType);
+    setBands(preset.bands);
+  }
+
+  function toggleTarget(id: string) {
+    setTargetIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
   }
 
   async function create() {
@@ -221,6 +271,7 @@ function NewScaleForm({ onCreated }: { onCreated: () => void }) {
         scaleType,
         passmark:  scaleType === 'PERCENTAGE' ? parseFloat(passmark) : undefined,
         gpaMax:    scaleType === 'GPA'        ? parseFloat(gpaMax)   : undefined,
+        appliesToGradeLevelIds: targetIds,
         bands: bands.map(b => ({
           label:    b.label,
           minScore: parseFloat(b.minScore) || 0,
@@ -229,6 +280,7 @@ function NewScaleForm({ onCreated }: { onCreated: () => void }) {
         })),
       });
       setOpen(false);
+      setTargetIds([]);
       onCreated();
     } catch (err) {
       setError((err as ApiError).message ?? 'Failed to create grading scale.');
@@ -256,6 +308,21 @@ function NewScaleForm({ onCreated }: { onCreated: () => void }) {
       </div>
 
       {error && <p className="mb-3 text-sm text-red-500">{error}</p>}
+
+      {/* GES presets */}
+      <div className="mb-4">
+        <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">Quick start — GES presets</p>
+        <div className="flex flex-wrap gap-2">
+          {GES_PRESETS.map(p => (
+            <button
+              key={p.key} type="button" onClick={() => applyPreset(p.key)}
+              className="px-3 py-1.5 rounded-lg text-sm border border-slate-200 text-slate-700 hover:border-slate-300 transition"
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Scale type selector */}
       <div className="grid grid-cols-2 gap-2 mb-5">
@@ -307,6 +374,25 @@ function NewScaleForm({ onCreated }: { onCreated: () => void }) {
         </div>
       )}
 
+      {/* Grade-level targeting */}
+      {gradeLevels.length > 0 && (
+        <div className="mb-5">
+          <p className="text-sm font-medium text-slate-600 mb-1">Applies to</p>
+          <p className="text-xs text-slate-400 mb-2">Pick the grade levels that use this scale (e.g. JHS classes). Leave all unselected to make it the school-wide default.</p>
+          <div className="flex flex-wrap gap-2">
+            {gradeLevels.map(gl => (
+              <button
+                key={gl.id} type="button" onClick={() => toggleTarget(gl.id)}
+                className={`px-3 py-1.5 rounded-lg text-sm border transition ${targetIds.includes(gl.id) ? 'border-transparent text-white' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}
+                style={targetIds.includes(gl.id) ? { backgroundColor: 'var(--accent)' } : {}}
+              >
+                {gl.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Bands */}
       <BandsTable bands={bands} onChange={setBands} />
 
@@ -331,7 +417,9 @@ function NewScaleForm({ onCreated }: { onCreated: () => void }) {
 
 export default function GradingPage() {
   const fetchScales = useCallback(() => staffApi.get<GradingScale[]>('/school/grading'), []);
+  const fetchGradeLevels = useCallback(() => staffApi.get<GradeLevel[]>('/school/grade-structure/grade-levels'), []);
   const { data: scales, loading, error, refetch } = useApi(fetchScales);
+  const { data: gradeLevels } = useApi(fetchGradeLevels);
 
   return (
     <div>
@@ -356,7 +444,7 @@ export default function GradingPage() {
 
       {!loading && scales && (
         <>
-          {scales.map(scale => <ScaleCard key={scale.id} scale={scale} onRefetch={refetch} />)}
+          {scales.map(scale => <ScaleCard key={scale.id} scale={scale} onRefetch={refetch} gradeLevels={gradeLevels ?? []} />)}
           {scales.length === 0 && (
             <p className="text-sm text-slate-400 text-center py-6">
               No grading scales configured yet. Add one below.
@@ -365,7 +453,7 @@ export default function GradingPage() {
         </>
       )}
 
-      {!loading && <NewScaleForm onCreated={refetch} />}
+      {!loading && <NewScaleForm onCreated={refetch} gradeLevels={gradeLevels ?? []} />}
     </div>
   );
 }

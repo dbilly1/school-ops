@@ -41,6 +41,12 @@ export class CreateGradingScaleDto {
   @IsOptional()
   gpaMax?: number;
 
+  // Grade levels this scale applies to. Empty/omitted = school-wide default.
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  appliesToGradeLevelIds?: string[];
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => GradingBandDto)
