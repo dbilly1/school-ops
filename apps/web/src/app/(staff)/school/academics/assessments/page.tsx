@@ -7,6 +7,7 @@ import { useApi } from '@/hooks/use-api';
 import { useTeacherScope } from '@/hooks/use-teacher-scope';
 import { Modal } from '@/components/ui/modal';
 import { FormField, Input, SaveButton, Alert } from '@/components/ui/settings-card';
+import { ClassTabs } from '@/components/ui/class-tabs';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -195,6 +196,11 @@ export default function AssessmentsPage() {
     ? (subjects ?? []).filter(s => scope.recordableSubjectIds.includes(s.id))
     : (subjects ?? []);
 
+  // Class tabs — scoped to a teacher's assigned classes when restricted.
+  const visibleClasses = scope.restricted
+    ? (classes ?? []).filter(c => scope.assignedClassIds.includes(c.id))
+    : (classes ?? []);
+
   // For restricted teachers: further filter the list to those recordable subjects
   const visibleAssessments = scope.restricted
     ? (assessments ?? []).filter(a => scope.recordableSubjectIds.includes(a.subject.id))
@@ -248,6 +254,15 @@ export default function AssessmentsPage() {
         </div>
       )}
 
+      {/* Class tabs */}
+      <ClassTabs
+        classes={visibleClasses}
+        value={classFilter}
+        onChange={setClassFilter}
+        includeAll
+        allLabel={scope.restricted ? 'All my classes' : 'All Classes'}
+      />
+
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-5">
         <select value={termFilter} onChange={e => setTermFilter(e.target.value)}
@@ -259,11 +274,6 @@ export default function AssessmentsPage() {
           className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
           <option value="">{scope.restricted ? 'All my subjects' : 'All subjects'}</option>
           {visibleSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <select value={classFilter} onChange={e => setClassFilter(e.target.value)}
-          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-          <option value="">All classes</option>
-          {classes?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </div>
 
