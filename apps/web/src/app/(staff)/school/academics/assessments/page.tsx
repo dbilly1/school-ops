@@ -183,7 +183,8 @@ export default function AssessmentsPage() {
     [],
   );
 
-  const { data: assessments, loading, refetch } = useApi(fetchAssessments);
+  // Key on the filters so the list re-queries when any of them changes.
+  const { data: assessments, loading, refetch } = useApi(fetchAssessments, `${termFilter}|${subjectFilter}|${classFilter}`);
   const { data: subjects } = useApi(fetchSubjects);
   const { data: classes }  = useApi(fetchClasses);
   const { data: terms }    = useApi(fetchTerms);

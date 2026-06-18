@@ -83,7 +83,10 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
       : staffApi.get<Student[]>('/school/students'),
     [effectiveClass],
   );
-  const { data: students, loading: studLoading } = useApi(fetchStudents);
+  // Pass effectiveClass as the key so the list re-fetches once the assessment's
+  // class resolves (and when the user switches class) — otherwise useApi only
+  // runs on mount, before the class is known, and shows every student.
+  const { data: students, loading: studLoading } = useApi(fetchStudents, effectiveClass);
 
   // Score state — keyed by studentId. Re-seed whenever the visible class (and
   // therefore the student set) changes, mapping any already-recorded scores.
