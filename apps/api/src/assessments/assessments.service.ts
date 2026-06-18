@@ -15,13 +15,15 @@ export class AssessmentsService {
     private teacherScope: TeacherScopeService,
   ) {}
 
-  async findAll(schoolId: string, termId?: string, subjectId?: string, classId?: string) {
+  async findAll(schoolId: string, caller: Caller, termId?: string, subjectId?: string, classId?: string) {
+    const scope = await this.teacherScope.assessmentScopeFilter(caller.id, caller.roles);
     return this.prisma.assessment.findMany({
       where: {
         schoolId,
         ...(termId ? { termId } : {}),
         ...(subjectId ? { subjectId } : {}),
         ...(classId ? { classId } : {}),
+        ...(scope ?? {}),
       },
       include: {
         subject: { select: { id: true, name: true } },
@@ -60,7 +62,7 @@ export class AssessmentsService {
   }
 
   async create(schoolId: string, dto: CreateAssessmentDto, caller: Caller) {
-    await this.teacherScope.assertCanManageAssessment(caller.id, caller.roles, dto.subjectId);
+    await this.teacherScope.assertCanManageAssessment(caller.id, caller.roles, dto.subjectId, dto.classId ?? null);
 
     const term = await this.prisma.term.findFirst({ where: { id: dto.termId, schoolId } });
     if (!term) throw new NotFoundException('Term not found');
@@ -96,7 +98,7 @@ export class AssessmentsService {
   async delete(schoolId: string, id: string, caller: Caller) {
     const assessment = await this.prisma.assessment.findFirst({ where: { id, schoolId } });
     if (!assessment) throw new NotFoundException('Assessment not found');
-    await this.teacherScope.assertCanManageAssessment(caller.id, caller.roles, assessment.subjectId);
+    await this.teacherScope.assertCanManageAssessment(caller.id, caller.roles, assessment.subjectId, assessment.classId);
     return this.prisma.assessment.delete({ where: { id } });
   }
 

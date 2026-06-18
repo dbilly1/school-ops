@@ -1,6 +1,6 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { StaffRole } from '@prisma/client';
+import { Prisma, StaffRole } from '@prisma/client';
 
 // Centralizes "which classes/subjects may this teacher act on" so attendance and
 // assessments enforce the same rules:
@@ -58,28 +58,59 @@ export class TeacherScopeService {
     if (!assignment) throw new ForbiddenException('You are not the class teacher of this class');
   }
 
-  // ── Assessment create/delete: teaches the subject, or class-teaches a class
-  //    whose grade level includes the subject ──────────────────────────────────
-  async assertCanManageAssessment(userId: string, roles: StaffRole[], subjectId: string): Promise<void> {
+  // ── Assessment create/delete: subject-teaches the subject IN that class, or
+  //    class-teaches the class and the subject is on its grade level ────────────
+  //    classId is optional for back-compat with class-less assessments, where it
+  //    falls back to a subject-only / any-class-teacher check.
+  async assertCanManageAssessment(
+    userId: string,
+    roles: StaffRole[],
+    subjectId: string,
+    classId?: string | null,
+  ): Promise<void> {
     if (!this.isRestricted(roles)) return;
     const staffProfileId = await this.staffProfileId(userId);
-    if (!staffProfileId) throw new ForbiddenException('You can only manage assessments for subjects you teach');
+    if (!staffProfileId) throw new ForbiddenException('You can only manage assessments for your assigned subjects and classes');
 
+    // Subject teacher: must teach this subject — in this class when one is given.
     const teachesSubject = await this.prisma.teacherSubjectAssignment.findFirst({
-      where: { staffProfileId, subjectId },
+      where: { staffProfileId, subjectId, ...(classId ? { classId } : {}) },
       select: { id: true },
     });
     if (teachesSubject) return;
 
+    // Class teacher: must class-teach the target class (any of their classes when
+    // none is given) and the subject must be on that class's grade level.
     const classIds = await this.classTeacherClassIds(staffProfileId);
-    if (classIds.length > 0) {
+    if (classIds.length > 0 && (!classId || classIds.includes(classId))) {
       const match = await this.prisma.class.findFirst({
-        where: { id: { in: classIds }, gradeLevel: { subjects: { some: { subjectId } } } },
+        where: { id: classId ?? { in: classIds }, gradeLevel: { subjects: { some: { subjectId } } } },
         select: { id: true },
       });
       if (match) return;
     }
-    throw new ForbiddenException('You can only manage assessments for subjects you teach');
+    throw new ForbiddenException('You can only manage assessments for your assigned subjects and classes');
+  }
+
+  // ── List visibility: the where-filter for assessments a restricted teacher may
+  //    see (null = unrestricted). Class teacher sees everything for their class;
+  //    subject teacher sees their subject in their classes; class-less legacy
+  //    assessments fall back to recordable subjects. ─────────────────────────────
+  async assessmentScopeFilter(userId: string, roles: StaffRole[]): Promise<Prisma.AssessmentWhereInput | null> {
+    if (!this.isRestricted(roles)) return null;
+    const staffProfileId = await this.staffProfileId(userId);
+    if (!staffProfileId) return { id: '__none__' };
+
+    const classTeacherIds = await this.classTeacherClassIds(staffProfileId);
+    const pairs = await this.subjectClassPairs(staffProfileId);
+    const recordable = await this.recordableSubjectIds(userId);
+
+    const or: Prisma.AssessmentWhereInput[] = [];
+    if (classTeacherIds.length > 0) or.push({ classId: { in: classTeacherIds } });
+    for (const p of pairs) or.push({ subjectId: p.subjectId, classId: p.classId });
+    if (recordable.length > 0) or.push({ classId: null, subjectId: { in: recordable } });
+
+    return or.length > 0 ? { OR: or } : { id: '__none__' };
   }
 
   // ── Score recording: every scored student must be in a class the teacher

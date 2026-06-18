@@ -42,10 +42,11 @@ const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(CATEGORIES.map
 
 // ── New assessment modal ──────────────────────────────────────────────────────
 
-function NewAssessmentModal({ open, onClose, subjects, classes, terms, onCreated, assignedSubjectIds }: {
+function NewAssessmentModal({ open, onClose, subjects, classes, terms, onCreated, assignedSubjectIds, assignedClassIds }: {
   open: boolean; onClose: () => void;
   subjects: Subject[]; classes: ClassRow[]; terms: Term[]; onCreated: () => void;
   assignedSubjectIds: string[] | null; // null = no restriction
+  assignedClassIds: string[] | null;   // null = no restriction
 }) {
   const [form, setForm] = useState({
     title: '', subjectId: '', classId: '', termId: '', category: 'CLASS_TEST',
@@ -58,6 +59,9 @@ function NewAssessmentModal({ open, onClose, subjects, classes, terms, onCreated
   const visibleSubjects = assignedSubjectIds
     ? subjects.filter(s => assignedSubjectIds.includes(s.id))
     : subjects;
+  const visibleClasses = assignedClassIds
+    ? classes.filter(c => assignedClassIds.includes(c.id))
+    : classes;
 
   async function create() {
     if (!form.title || !form.subjectId || !form.classId || !form.termId) {
@@ -106,7 +110,7 @@ function NewAssessmentModal({ open, onClose, subjects, classes, terms, onCreated
             <select value={form.classId} onChange={e => setForm(f => ({ ...f, classId: e.target.value }))}
               className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
               <option value="">Select class…</option>
-              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {visibleClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </FormField>
 
@@ -367,6 +371,7 @@ export default function AssessmentsPage() {
         open={showNew} onClose={() => setShowNew(false)}
         subjects={subjects ?? []} classes={classes ?? []} terms={terms ?? []} onCreated={refetch}
         assignedSubjectIds={scope.restricted ? scope.recordableSubjectIds : null}
+        assignedClassIds={scope.restricted ? scope.assignedClassIds : null}
       />
     </div>
   );

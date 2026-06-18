@@ -22,7 +22,7 @@ export class AssessmentsController {
     @Query('subjectId') subjectId?: string,
     @Query('classId') classId?: string,
   ) {
-    return this.assessmentsService.findAll(user.schoolId, termId, subjectId, classId);
+    return this.assessmentsService.findAll(user.schoolId, { id: user.id, roles: user.roles }, termId, subjectId, classId);
   }
 
   @Get('grade-book/:classId')
