@@ -77,16 +77,20 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
   // Default to the assessment's own class until the user picks another.
   const effectiveClass = selectedClass || assessment?.class?.id || '';
 
-  const fetchStudents = useCallback(
-    () => effectiveClass
+  // Don't fetch students until the assessment has loaded, so we never request
+  // (and briefly flash) the whole school before narrowing to the class. Once
+  // loaded: fetch the assessment's class only (or all, for a legacy class-less
+  // assessment / explicit "All classes").
+  const fetchStudents = useCallback(() => {
+    if (!assessment) return Promise.resolve<Student[]>([]);
+    return effectiveClass
       ? staffApi.get<Student[]>(`/school/students?classId=${effectiveClass}`)
-      : staffApi.get<Student[]>('/school/students'),
-    [effectiveClass],
-  );
-  // Pass effectiveClass as the key so the list re-fetches once the assessment's
-  // class resolves (and when the user switches class) — otherwise useApi only
-  // runs on mount, before the class is known, and shows every student.
-  const { data: students, loading: studLoading } = useApi(fetchStudents, effectiveClass);
+      : staffApi.get<Student[]>('/school/students');
+  }, [assessment, effectiveClass]);
+  // Key gates the first real fetch on the assessment being ready, then re-fetches
+  // when the chosen class changes.
+  const studentsKey = assessment ? (effectiveClass || 'all') : 'pending';
+  const { data: students, loading: studLoading } = useApi(fetchStudents, studentsKey);
 
   // Score state — keyed by studentId. Re-seed whenever the visible class (and
   // therefore the student set) changes, mapping any already-recorded scores.
