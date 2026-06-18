@@ -64,7 +64,10 @@ function NewAssessmentModal({ open, onClose, subjects, classes, terms, onCreated
     : classes;
 
   async function create() {
-    if (!form.title || !form.subjectId || !form.classId || !form.termId) {
+    // The term select defaults to the active term for display; fall back to it
+    // here so an unchanged dropdown still submits a term.
+    const termId = form.termId || activeTerm?.id || '';
+    if (!form.title || !form.subjectId || !form.classId || !termId) {
       setError('Title, subject, class, and term are required.'); return;
     }
     setError(null); setSaving(true);
@@ -74,7 +77,7 @@ function NewAssessmentModal({ open, onClose, subjects, classes, terms, onCreated
         subjectId:      form.subjectId,
         classId:        form.classId,
         category:       form.category,
-        termId:         form.termId,
+        termId,
         totalScore:     parseFloat(form.totalScore),
         weight:         form.weight ? parseFloat(form.weight) : null,
         assessmentDate: form.assessmentDate || null,
