@@ -32,6 +32,12 @@ export class SubjectsController {
     return this.subjectsService.create(user.schoolId, dto);
   }
 
+  @Post('apply-curriculum')
+  @RequirePermission('academics', 'CREATE')
+  applyCurriculum(@CurrentUser() user: any) {
+    return this.subjectsService.applyCurriculum(user.schoolId);
+  }
+
   @Patch(':id')
   @RequirePermission('academics', 'EDIT')
   update(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateSubjectDto) {

@@ -93,6 +93,55 @@ export class SubjectsService {
     ]);
   }
 
+  // Apply the platform GES curriculum catalog to this school: for every grade
+  // level tagged with a levelType, create the matching subjects (deduped by name)
+  // and link them to that level. Idempotent — safe to run repeatedly.
+  async applyCurriculum(schoolId: string) {
+    const gradeLevels = await this.prisma.gradeLevel.findMany({
+      where: { schoolId, levelType: { not: null } },
+      select: { id: true, levelType: true },
+    });
+    if (gradeLevels.length === 0) {
+      return { subjectsCreated: 0, linksCreated: 0, message: 'Tag your grade levels with a level type (KG / Primary / JHS) first.' };
+    }
+
+    const catalog = await this.prisma.curriculumSubject.findMany();
+    const namesByLevel = new Map<string, string[]>();
+    for (const c of catalog) {
+      const arr = namesByLevel.get(c.levelType) ?? [];
+      arr.push(c.name);
+      namesByLevel.set(c.levelType, arr);
+    }
+
+    const existing = await this.prisma.subject.findMany({ where: { schoolId }, select: { id: true, name: true } });
+    const subjectIdByName = new Map(existing.map((s) => [s.name, s.id]));
+
+    let subjectsCreated = 0;
+    let linksCreated = 0;
+
+    for (const gl of gradeLevels) {
+      const names = namesByLevel.get(gl.levelType as string) ?? [];
+      for (const name of names) {
+        let subjectId = subjectIdByName.get(name);
+        if (!subjectId) {
+          const created = await this.prisma.subject.create({ data: { schoolId, name } });
+          subjectId = created.id;
+          subjectIdByName.set(name, subjectId);
+          subjectsCreated++;
+        }
+        const link = await this.prisma.gradeLevelSubject.findFirst({
+          where: { gradeLevelId: gl.id, subjectId },
+        });
+        if (!link) {
+          await this.prisma.gradeLevelSubject.create({ data: { gradeLevelId: gl.id, subjectId } });
+          linksCreated++;
+        }
+      }
+    }
+
+    return { subjectsCreated, linksCreated };
+  }
+
   async assignToGradeLevel(schoolId: string, id: string, dto: AssignSubjectToGradeLevelDto) {
     const subject = await this.prisma.subject.findFirst({ where: { id, schoolId } });
     if (!subject) throw new NotFoundException('Subject not found');

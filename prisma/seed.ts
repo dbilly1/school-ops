@@ -103,6 +103,27 @@ async function main() {
   }
   console.log(`✓ fee_collection package backfill: ${backfilled} row(s) added`);
 
+  // GES curriculum subject catalog (platform-level; super admin can edit later).
+  // Schools apply these to grade levels by matching levelType during setup.
+  const curriculum: { levelType: 'KG' | 'LOWER_PRIMARY' | 'UPPER_PRIMARY' | 'JHS'; names: string[] }[] = [
+    { levelType: 'KG', names: ['Numeracy', 'Language & Literacy', 'Our World Our People', 'Creative Arts'] },
+    { levelType: 'LOWER_PRIMARY', names: ['English Language', 'Mathematics', 'Science', 'History', 'Our World Our People', 'Religious & Moral Education', 'Creative Arts', 'Physical Education', 'Ghanaian Language', 'Computing', 'French'] },
+    { levelType: 'UPPER_PRIMARY', names: ['English Language', 'Mathematics', 'Science', 'History', 'Our World Our People', 'Religious & Moral Education', 'Creative Arts', 'Physical Education', 'Ghanaian Language', 'Computing', 'French'] },
+    { levelType: 'JHS', names: ['English Language', 'Mathematics', 'Integrated Science', 'Social Studies', 'Religious & Moral Education', 'Physical & Health Education', 'Career Technology', 'Computing', 'Creative Arts and Design', 'Ghanaian Language', 'French'] },
+  ];
+  let curriculumSeeded = 0;
+  for (const group of curriculum) {
+    for (let i = 0; i < group.names.length; i++) {
+      await prisma.curriculumSubject.upsert({
+        where: { levelType_name: { levelType: group.levelType, name: group.names[i] } },
+        update: {}, // don't clobber super-admin edits to sequence/code
+        create: { levelType: group.levelType, name: group.names[i], sequence: i },
+      });
+      curriculumSeeded++;
+    }
+  }
+  console.log(`✓ ${curriculumSeeded} curriculum subjects ensured`);
+
   console.log('Done.');
 }
 

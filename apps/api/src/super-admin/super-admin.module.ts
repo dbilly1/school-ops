@@ -11,6 +11,8 @@ import { SuperAdminSchoolsService } from './schools/super-admin-schools.service'
 import { SuperAdminSchoolsController } from './schools/super-admin-schools.controller';
 import { PlatformAnalyticsService } from './analytics/platform-analytics.service';
 import { PlatformAnalyticsController } from './analytics/platform-analytics.controller';
+import { CurriculumSubjectsService } from './curriculum/curriculum-subjects.service';
+import { CurriculumSubjectsController } from './curriculum/curriculum-subjects.controller';
 
 @Module({
   imports: [
@@ -30,12 +32,14 @@ import { PlatformAnalyticsController } from './analytics/platform-analytics.cont
     PackagesService,
     SuperAdminSchoolsService,
     PlatformAnalyticsService,
+    CurriculumSubjectsService,
   ],
   controllers: [
     SuperAdminAuthController,
     PackagesController,
     SuperAdminSchoolsController,
     PlatformAnalyticsController,
+    CurriculumSubjectsController,
   ],
   exports: [PackagesService],
 })

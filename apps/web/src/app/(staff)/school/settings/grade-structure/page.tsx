@@ -5,7 +5,19 @@ import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 
 type ClassSection = { id: string; name: string };
-type GradeLevel   = { id: string; name: string; sequence: number; gradeLevelId?: string; classes: ClassSection[] };
+type GradeLevel   = { id: string; name: string; sequence: number; levelType?: string | null; gradeLevelId?: string; classes: ClassSection[] };
+
+// GES education bands — tagging a grade level lets the GES subject template and
+// the right grading scale apply automatically.
+const LEVEL_TYPES: { value: string; label: string }[] = [
+  { value: '',              label: 'Untagged' },
+  { value: 'KG',            label: 'KG' },
+  { value: 'LOWER_PRIMARY', label: 'Lower Primary' },
+  { value: 'UPPER_PRIMARY', label: 'Upper Primary' },
+  { value: 'JHS',           label: 'JHS' },
+  { value: 'SHS',           label: 'SHS' },
+  { value: 'OTHER',         label: 'Other' },
+];
 
 // ── Single grade row (mirrors onboarding step-grade-structure row) ─────────────
 
@@ -55,6 +67,16 @@ function GradeRow({ grade, onRefetch }: { grade: GradeLevel; onRefetch: () => vo
     onRefetch();
   }
 
+  async function setLevelType(value: string) {
+    setSaving(true);
+    try {
+      await staffApi.patch(`/school/grade-structure/grade-levels/${grade.id}`, { levelType: value || null });
+      onRefetch();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="border border-slate-200 rounded-xl px-4 py-3.5">
       {/* Name row */}
@@ -95,6 +117,15 @@ function GradeRow({ grade, onRefetch }: { grade: GradeLevel; onRefetch: () => vo
             </>
           ) : (
             <>
+              <select
+                value={grade.levelType ?? ''}
+                onChange={e => setLevelType(e.target.value)}
+                disabled={saving}
+                title="Education level — used for GES subjects & grading scale"
+                className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 outline-none disabled:opacity-50"
+              >
+                {LEVEL_TYPES.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
+              </select>
               <button onClick={() => setEditing(true)} className="text-xs text-slate-400 hover:text-slate-700 transition">
                 Rename
               </button>

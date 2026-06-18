@@ -1,5 +1,6 @@
-import { IsString, IsInt, Min, IsOptional, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsInt, Min, IsOptional, IsArray, ValidateNested, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
+import { EducationLevelType } from '@prisma/client';
 
 export class CreateGradeLevelDto {
   @IsString()
@@ -8,6 +9,10 @@ export class CreateGradeLevelDto {
   @IsInt()
   @Min(1)
   sequence!: number;
+
+  @IsEnum(EducationLevelType)
+  @IsOptional()
+  levelType?: EducationLevelType;
 }
 
 export class CreateClassDto {
@@ -25,6 +30,10 @@ export class BulkGradeLevelItem {
   @IsInt()
   @Min(1)
   sequence!: number;
+
+  @IsEnum(EducationLevelType)
+  @IsOptional()
+  levelType?: EducationLevelType;
 
   /**
    * Sub-class labels for this grade level (e.g. ['A', 'B']).
@@ -51,4 +60,8 @@ export class UpdateGradeLevelDto {
   @Min(1)
   @IsOptional()
   sequence?: number;
+
+  @IsEnum(EducationLevelType)
+  @IsOptional()
+  levelType?: EducationLevelType;
 }

@@ -96,6 +96,17 @@ enum AssessmentCategory {
   END_OF_TERM_EXAM
 }
 
+// GES education bands — used to tag grade levels so the right curriculum-subject
+// template and grading scale apply automatically.
+enum EducationLevelType {
+  KG
+  LOWER_PRIMARY
+  UPPER_PRIMARY
+  JHS
+  SHS
+  OTHER
+}
+
 enum CalendarEventType {
   HOLIDAY
   VACATION
@@ -523,12 +534,13 @@ model SchoolCalendarEvent {
 // ============================================================
 
 model GradeLevel {
-  id        String   @id @default(uuid())
+  id        String              @id @default(uuid())
   schoolId  String
   name      String
   sequence  Int
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  levelType EducationLevelType?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
 
   school        School        @relation(fields: [schoolId], references: [id])
   classes       Class[]
@@ -662,6 +674,22 @@ model GradeLevelSubject {
 
   @@unique([gradeLevelId, subjectId])
   @@map("grade_level_subjects")
+}
+
+// Platform-level GES subject catalog, managed by the super admin. Schools apply
+// it during setup: subjects are copied into per-school Subject rows + linked to
+// grade levels by matching levelType. Not tenant-scoped.
+model CurriculumSubject {
+  id        String             @id @default(uuid())
+  levelType EducationLevelType
+  name      String
+  code      String?
+  sequence  Int                @default(0)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@unique([levelType, name])
+  @@map("curriculum_subjects")
 }
 
 // ============================================================

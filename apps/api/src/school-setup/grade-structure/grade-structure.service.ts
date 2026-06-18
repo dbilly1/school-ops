@@ -39,6 +39,7 @@ export class GradeStructureService {
           schoolId,
           name: l.name.trim(),
           sequence: existingSeqs.has(l.sequence) ? l.sequence + 1000 : l.sequence,
+          levelType: l.levelType ?? null,
         })),
         skipDuplicates: true,
       });
@@ -93,7 +94,7 @@ export class GradeStructureService {
     if (existing) throw new ConflictException('Grade level with this name already exists');
 
     return this.prisma.gradeLevel.create({
-      data: { schoolId, name: dto.name, sequence: dto.sequence },
+      data: { schoolId, name: dto.name, sequence: dto.sequence, levelType: dto.levelType ?? null },
     });
   }
 

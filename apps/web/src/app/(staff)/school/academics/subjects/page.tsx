@@ -366,6 +366,8 @@ export default function SubjectsPage() {
   const [showNew, setShowNew]     = useState(false);
   const [gradeFilter, setGradeFilter] = useState('');
   const [search, setSearch]       = useState('');
+  const [applying, setApplying]   = useState(false);
+  const [applyAlert, setApplyAlert] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
   const fetchSubjects = useCallback(
     () => staffApi.get<Subject[]>(`/school/subjects${gradeFilter ? `?gradeLevelId=${gradeFilter}` : ''}`),
@@ -380,6 +382,24 @@ export default function SubjectsPage() {
     !search || s.name.toLowerCase().includes(search.toLowerCase()) || (s.code?.toLowerCase().includes(search.toLowerCase())),
   );
 
+  async function applyGesSubjects() {
+    if (!confirm('Add the GES default subjects to every grade level you have tagged with a level type (KG / Primary / JHS)? Existing subjects are kept — this only adds what is missing.')) return;
+    setApplyAlert(null); setApplying(true);
+    try {
+      const res = await staffApi.post<{ subjectsCreated: number; linksCreated: number; message?: string }>('/school/subjects/apply-curriculum', {});
+      setApplyAlert({
+        type: 'success',
+        message: res.message
+          ?? `Added ${res.subjectsCreated} subject${res.subjectsCreated !== 1 ? 's' : ''} and ${res.linksCreated} grade-level link${res.linksCreated !== 1 ? 's' : ''}.`,
+      });
+      refetch();
+    } catch (err) {
+      setApplyAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to apply GES subjects.' });
+    } finally {
+      setApplying(false);
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
@@ -388,17 +408,29 @@ export default function SubjectsPage() {
           <p className="text-sm text-slate-500 mt-0.5">Define subjects and assign them to grade levels.</p>
         </div>
         {!readOnly && (
-          <button
-            onClick={() => setShowNew(true)}
-            className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition"
-            style={{ backgroundColor: 'var(--accent)' }}
-            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--accent-hover)'}
-            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--accent)'}
-          >
-            + Add subject
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={applyGesSubjects}
+              disabled={applying}
+              className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+              title="Create the GES default subjects for grade levels tagged by level type"
+            >
+              {applying ? 'Adding…' : '✨ Add GES subjects'}
+            </button>
+            <button
+              onClick={() => setShowNew(true)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition"
+              style={{ backgroundColor: 'var(--accent)' }}
+              onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--accent-hover)'}
+              onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--accent)'}
+            >
+              + Add subject
+            </button>
+          </div>
         )}
       </div>
+
+      {applyAlert && <div className="mb-4"><Alert type={applyAlert.type} message={applyAlert.message} /></div>}
 
       {/* Filters */}
       <div className="flex gap-3 mb-5">
