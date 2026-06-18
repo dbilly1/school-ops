@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { staffApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { useTeacherScope } from '@/hooks/use-teacher-scope';
+import { ClassTabs } from '@/components/ui/class-tabs';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -69,19 +70,15 @@ export default function GradeBookPage() {
     <div>
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold text-slate-900">Grade Book</h2>
-        <div className="flex gap-3">
-          <select value={activeTermId} onChange={e => setTermId(e.target.value)}
-            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-            <option value="">Select term…</option>
-            {terms?.map((t: any) => <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' (Active)' : ''}</option>)}
-          </select>
-          <select value={activeClassId} onChange={e => setClassId(e.target.value)}
-            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-            <option value="">Select class…</option>
-            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
+        <select value={activeTermId} onChange={e => setTermId(e.target.value)}
+          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
+          <option value="">Select term…</option>
+          {terms?.map((t: any) => <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' ✓' : ''}</option>)}
+        </select>
       </div>
+
+      {/* Class tabs */}
+      <ClassTabs classes={classes} value={activeClassId} onChange={setClassId} />
 
       {!activeClassId || !activeTermId ? (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-16 text-center text-sm text-slate-400">

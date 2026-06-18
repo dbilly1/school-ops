@@ -3,7 +3,8 @@
 import { useState, useCallback } from 'react';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
-import { SaveButton, Alert } from '@/components/ui/settings-card';
+import { Alert } from '@/components/ui/settings-card';
+import { ClassTabs } from '@/components/ui/class-tabs';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -118,7 +119,7 @@ export default function ReportCardsPage() {
       : Promise.resolve([]),
     [activeClassId, activeTermId],
   );
-  const { data: cards, loading, refetch } = useApi(fetchCards);
+  const { data: cards, loading, refetch } = useApi(fetchCards, `${activeClassId}|${activeTermId}`);
 
   const unpublishedCount = cards?.filter(c => !c.publishedAt).length ?? 0;
   const publishedCount   = cards?.filter(c => c.publishedAt).length  ?? 0;
@@ -164,19 +165,15 @@ export default function ReportCardsPage() {
           <p className="text-sm text-slate-500 mt-0.5">Generate, review, and publish term report cards per class.</p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <select value={activeTermId} onChange={e => setTermId(e.target.value)}
-            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-            <option value="">Select term…</option>
-            {terms?.map((t: any) => <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' (Active)' : ''}</option>)}
-          </select>
-          <select value={activeClassId} onChange={e => setClassId(e.target.value)}
-            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-            <option value="">Select class…</option>
-            {classes?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
+        <select value={activeTermId} onChange={e => setTermId(e.target.value)}
+          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
+          <option value="">Select term…</option>
+          {terms?.map((t: any) => <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' ✓' : ''}</option>)}
+        </select>
       </div>
+
+      {/* Class tabs */}
+      <ClassTabs classes={classes ?? []} value={activeClassId} onChange={setClassId} />
 
       {alert && <div className="mb-4"><Alert type={alert.type} message={alert.message} /></div>}
 
