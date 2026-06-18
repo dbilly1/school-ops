@@ -166,7 +166,10 @@ export class AssessmentsService {
   }
 
   async getGradeBook(schoolId: string, classId: string, termId: string) {
-    const cls = await this.prisma.class.findFirst({ where: { id: classId, schoolId } });
+    const cls = await this.prisma.class.findFirst({
+      where: { id: classId, schoolId },
+      select: { id: true, gradeLevelId: true },
+    });
     if (!cls) throw new NotFoundException('Class not found');
 
     const students = await this.prisma.studentClassAssignment.findMany({
@@ -177,29 +180,42 @@ export class AssessmentsService {
 
     const assessments = await this.prisma.assessment.findMany({
       where: { schoolId, termId, classId },
-      include: {
-        subject: { select: { id: true, name: true } },
-        scores: true,
-      },
-      orderBy: { assessmentDate: 'asc' },
+      include: { scores: true },
+      orderBy: [{ assessmentDate: 'asc' }, { createdAt: 'asc' }],
     });
 
-    const rows = students.map(({ student }) => {
-      const scores = assessments.map((a) => {
-        const score = a.scores.find((s) => s.studentId === student.id);
+    // Per-student row matching the grade-book UI: a column per assessment (raw
+    // score + grade by the class's level scale), plus the term average + grade.
+    return Promise.all(
+      students.map(async ({ student }) => {
+        const studentAssessments = await Promise.all(
+          assessments.map(async (a) => {
+            const score = a.scores.find((s) => s.studentId === student.id);
+            const rawScore = score ? Number(score.rawScore) : null;
+            const total = Number(a.totalScore);
+            const pct = rawScore !== null && total > 0 ? (rawScore / total) * 100 : null;
+            return {
+              assessmentId: a.id,
+              title: a.title,
+              totalScore: total,
+              rawScore,
+              displayGrade: pct !== null ? await this.gradingService.deriveGrade(schoolId, Math.round(pct), cls.gradeLevelId) : null,
+            };
+          }),
+        );
+
+        const pcts = studentAssessments
+          .filter((x) => x.rawScore !== null)
+          .map((x) => (x.rawScore! / x.totalScore) * 100);
+        const termAvg = pcts.length > 0 ? Math.round(pcts.reduce((s, p) => s + p, 0) / pcts.length) : null;
+
         return {
-          assessmentId: a.id,
-          title: a.title,
-          category: a.category,
-          subject: a.subject.name,
-          totalScore: a.totalScore,
-          rawScore: score?.rawScore ?? null,
-          percentage: score ? Math.round((Number(score.rawScore) / Number(a.totalScore)) * 100) : null,
+          student,
+          assessments: studentAssessments,
+          termAvg,
+          displayGrade: termAvg !== null ? await this.gradingService.deriveGrade(schoolId, termAvg, cls.gradeLevelId) : null,
         };
-      });
-      return { student, scores };
-    });
-
-    return { assessments: assessments.map((a) => ({ id: a.id, title: a.title, category: a.category, subject: a.subject.name, totalScore: a.totalScore })), rows };
+      }),
+    );
   }
 }

@@ -52,7 +52,7 @@ export default function GradeBookPage() {
       : Promise.resolve([]),
     [activeClassId, activeTermId],
   );
-  const { data: entries, loading } = useApi(fetchGradeBook);
+  const { data: entries, loading } = useApi(fetchGradeBook, `${activeClassId}|${activeTermId}`);
 
   // Collect all unique assessment columns
   const assessmentCols = entries?.[0]?.assessments ?? [];
