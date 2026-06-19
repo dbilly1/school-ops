@@ -271,7 +271,7 @@ export class ReportCardPdfService {
     if (!bands.length) return;
     doc.fontSize(11).font('Helvetica-Bold').fillColor(accent).text('Metrics');
     doc.moveDown(0.3);
-    const startX = 50, w1 = 36, w2 = 86, w3 = 180, rowH = 16;
+    const startX = 50, w1 = 40, w2 = 110, w3 = 345, rowH = 16;
     let y = doc.y;
     doc.fontSize(8.5).fillColor('#000');
     for (const b of bands) {

@@ -56,7 +56,11 @@ function PreviewInner({ studentId }: { studentId: string }) {
       {/* Print rule: show only the report sheet when printing */}
       <style>{`@media print {
         body * { visibility: hidden !important; }
-        #report-paper, #report-paper * { visibility: visible !important; }
+        #report-paper, #report-paper * {
+          visibility: visible !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
         #report-paper { position: absolute; left: 0; top: 0; width: 100%; }
       }`}</style>
 

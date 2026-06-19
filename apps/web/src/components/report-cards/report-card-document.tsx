@@ -336,7 +336,7 @@ function MetricsTable({ data, accent }: { data: ReportCardData; accent: string }
   const bands = data.gradingBands ?? [];
   if (bands.length === 0) return null;
   return (
-    <table className="w-full border-collapse text-sm sm:w-2/3">
+    <table className="w-full border-collapse text-sm">
       <thead><SectionTitle span={3} accent={accent}>Metrics</SectionTitle></thead>
       <tbody>
         {bands.map((b, i) => (
