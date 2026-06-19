@@ -7,6 +7,19 @@ import { Sidebar, MobileSidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { RouteGuard } from '@/components/guards/route-guard';
 
+// Darken a #rgb / #rrggbb colour toward black (factor < 1 = darker). Used for
+// the sidebar rail so it's a deep shade of the school's brand colour.
+function darkenHex(hex: string, factor = 0.55): string {
+  const m = hex.replace('#', '');
+  const full = m.length === 3 ? m.split('').map(c => c + c).join('') : m;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return hex;
+  const n = parseInt(full, 16);
+  const r = Math.round(((n >> 16) & 255) * factor);
+  const g = Math.round(((n >> 8) & 255) * factor);
+  const b = Math.round((n & 255) * factor);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
 export default function SchoolShellLayout({ children }: { children: React.ReactNode }) {
   const { user, branding, loading } = useStaffAuth();
   const router   = useRouter();
@@ -35,9 +48,11 @@ export default function SchoolShellLayout({ children }: { children: React.ReactN
     if (branding?.primaryColor) {
       root.style.setProperty('--accent', branding.primaryColor);
       root.style.setProperty('--accent-hover', branding.primaryColor);
+      root.style.setProperty('--accent-dark', darkenHex(branding.primaryColor));
     } else {
       root.style.setProperty('--accent', '#065f46');
       root.style.setProperty('--accent-hover', '#047857');
+      root.style.setProperty('--accent-dark', '#022c22');
     }
   }, [branding?.primaryColor]);
 

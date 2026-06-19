@@ -237,7 +237,7 @@ export function Sidebar() {
   return (
     <aside
       className="w-60 shrink-0 hidden lg:flex flex-col h-full"
-      style={{ backgroundColor: 'var(--accent, #0f172a)' }}
+      style={{ backgroundColor: 'var(--accent-dark, #0f172a)' }}
     >
       <SidebarBody />
     </aside>
@@ -259,7 +259,7 @@ export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () =>
           'absolute inset-y-0 left-0 w-60 flex flex-col shadow-xl transition-transform duration-300',
           open ? 'translate-x-0' : '-translate-x-full',
         )}
-        style={{ backgroundColor: 'var(--accent, #0f172a)' }}
+        style={{ backgroundColor: 'var(--accent-dark, #0f172a)' }}
       >
         <SidebarBody />
       </aside>
