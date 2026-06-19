@@ -1,11 +1,16 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { TimingInterceptor } from './common/timing.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Raise the JSON body limit (default 100kb) so inline assets like a base64
+  // school logo fit in a profile update.
+  app.useBodyParser('json', { limit: '6mb' });
 
   app.setGlobalPrefix('api');
 

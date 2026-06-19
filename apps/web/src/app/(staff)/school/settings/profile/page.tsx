@@ -19,6 +19,33 @@ const PRESET_COLORS = [
   '#831843', '#134e4a', '#1e40af', '#713f12',
 ];
 
+// Resize an image file down to fit `max` px (longest side) and return a PNG
+// data URL — keeps the stored logo small and transparency intact.
+function resizeImageToDataUrl(file: File, max = 256): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('read failed'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('decode failed'));
+      img.onload = () => {
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('no canvas context'));
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function ProfileSettingsPage() {
   const { branding } = useStaffAuth();
 
@@ -28,6 +55,25 @@ export default function ProfileSettingsPage() {
   const [pageLoading, setPageLoading] = useState(true);
   const [saving, setSaving]           = useState(false);
   const [alert, setAlert]             = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [logoBusy, setLogoBusy]       = useState(false);
+  const [logoError, setLogoError]     = useState<string | null>(null);
+
+  async function handleLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setLogoError('Please choose an image file (PNG or JPG).'); return; }
+    if (file.size > 8 * 1024 * 1024) { setLogoError('That image is too large (max 8MB).'); return; }
+    setLogoError(null); setLogoBusy(true);
+    try {
+      const dataUrl = await resizeImageToDataUrl(file, 256);
+      setForm(f => ({ ...f, logoUrl: dataUrl }));
+    } catch {
+      setLogoError('Could not process that image. Try a different file.');
+    } finally {
+      setLogoBusy(false);
+    }
+  }
 
   useEffect(() => {
     staffApi.get<SchoolProfile>('/school/profile')
@@ -55,7 +101,7 @@ export default function ProfileSettingsPage() {
         address:      form.address,
         phone:        form.phone,
         primaryColor: form.primaryColor,
-        logoUrl:      form.logoUrl || undefined,
+        logoUrl:      form.logoUrl, // string data-URL/URL, or null to clear
       });
       setAlert({ type: 'success', message: 'Profile saved successfully.' });
     } catch (err) {
@@ -171,26 +217,45 @@ export default function ProfileSettingsPage() {
             </div>
           </div>
 
-          {/* Logo URL */}
-          <FormField
-            label="Logo URL"
-            hint="Paste a public image URL. Recommended size: 64×64px or larger, square."
-          >
-            <div className="flex gap-3">
-              {form.logoUrl && (
+          {/* Logo upload */}
+          <div>
+            <p className="text-sm font-medium text-slate-700 mb-2">School logo</p>
+            <div className="flex items-center gap-4">
+              {form.logoUrl ? (
                 <img
                   src={form.logoUrl}
                   alt="School logo"
-                  className="w-10 h-10 rounded-lg object-cover border border-slate-200 shrink-0"
+                  className="w-16 h-16 rounded-lg object-contain border border-slate-200 bg-white shrink-0"
                 />
+              ) : (
+                <div className="w-16 h-16 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-[10px] text-slate-300 shrink-0">
+                  No logo
+                </div>
               )}
-              <Input
-                value={form.logoUrl ?? ''}
-                onChange={set('logoUrl')}
-                placeholder="https://example.com/logo.png"
-              />
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-3">
+                  <label
+                    className="px-3.5 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                  >
+                    <input type="file" accept="image/*" className="hidden" onChange={handleLogoFile} disabled={logoBusy} />
+                    {logoBusy ? 'Processing…' : form.logoUrl ? 'Replace logo' : 'Upload logo'}
+                  </label>
+                  {form.logoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => { setForm(f => ({ ...f, logoUrl: null })); setLogoError(null); }}
+                      className="text-xs text-red-400 hover:text-red-600 transition"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400">PNG or JPG. Square works best — auto-resized to 256px. Click Save to apply.</p>
+                {logoError && <p className="text-xs text-red-500">{logoError}</p>}
+              </div>
             </div>
-          </FormField>
+          </div>
 
           <div className="flex justify-end">
             <SaveButton loading={saving} onClick={handleSave} />

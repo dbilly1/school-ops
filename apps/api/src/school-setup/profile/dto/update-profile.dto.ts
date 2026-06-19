@@ -1,4 +1,4 @@
-import { IsString, IsOptional } from 'class-validator';
+import { IsString, IsOptional, MaxLength } from 'class-validator';
 
 export class UpdateSchoolProfileDto {
   @IsString()
@@ -21,8 +21,10 @@ export class UpdateSchoolProfileDto {
   @IsOptional()
   email?: string;
 
+  // Accepts a public URL or an inline base64 data URL (resized client-side).
   @IsString()
   @IsOptional()
+  @MaxLength(5_000_000)
   logoUrl?: string;
 
   @IsString()
