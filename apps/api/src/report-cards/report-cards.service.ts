@@ -329,10 +329,27 @@ export class ReportCardsService {
       label: b.label, minScore: Number(b.minScore), maxScore: Number(b.maxScore), remark: b.remark,
     }));
 
+    // Holistic header extras: class teacher + when the next term reopens.
+    let classTeacherName: string | null = null;
+    if (assignment?.classId) {
+      const tca = await this.prisma.teacherClassAssignment.findFirst({
+        where: { classId: assignment.classId },
+        include: { staffProfile: { include: { user: { select: { firstName: true, lastName: true } } } } },
+      });
+      if (tca) classTeacherName = `${tca.staffProfile.user.firstName} ${tca.staffProfile.user.lastName}`.trim();
+    }
+    const nextTerm = await this.prisma.term.findFirst({
+      where: { academicYearId: term.academicYearId, sequence: { gt: term.sequence } },
+      orderBy: { sequence: 'asc' },
+      select: { startDate: true },
+    });
+
     return {
       student: { id: student.id, studentId: student.studentId, firstName: student.firstName, lastName: student.lastName },
       term: { id: term.id, name: term.name, academicYear: term.academicYear },
       className: assignment?.class.name ?? null,
+      classTeacherName,
+      nextTermReopens: nextTerm?.startDate ?? null,
       config,
       subjects,
       overallGrade,

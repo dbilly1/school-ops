@@ -14,7 +14,7 @@ export class ReportCardPdfService {
     const data = await this.reportCards.getStudentReportCard(schoolId, studentId, termId);
     const school = await this.prisma.school.findUnique({
       where: { id: schoolId },
-      select: { name: true, primaryColor: true, address: true, phone: true, logoUrl: true },
+      select: { name: true, primaryColor: true, address: true, phone: true, email: true, logoUrl: true },
     });
 
     const config = data.config;
@@ -30,55 +30,72 @@ export class ReportCardPdfService {
 
     const accent = school?.primaryColor || '#1a56db';
 
-    // ── Header ──────────────────────────────────────────────
-    // Centered logo (if an inline/base64 logo is set), then the school name.
     const logoBuf = this.dataUrlToBuffer(school?.logoUrl);
-    if (logoBuf) {
-      try {
-        const size = 56;
-        doc.image(logoBuf, (doc.page.width - size) / 2, doc.y, { fit: [size, size], align: 'center' });
-        doc.y += size + 6;
-      } catch {
-        // ignore a malformed image — never let it break the report
+
+    if (holisticLayout) {
+      // ── Branded header band ───────────────────────────────
+      const bandH = 72;
+      doc.save();
+      doc.rect(0, 0, doc.page.width, bandH).fill(accent);
+      doc.rect(0, 0, 8, bandH).fill('#f59e0b');
+      let tx = 56;
+      if (logoBuf) {
+        try {
+          doc.circle(80, bandH / 2, 24).fill('#fff');
+          doc.image(logoBuf, 60, bandH / 2 - 18, { fit: [40, 40] });
+          tx = 116;
+        } catch { /* ignore bad image */ }
       }
-    }
-    doc.fillColor(accent).fontSize(20).font('Helvetica-Bold')
-      .text(school?.name ?? 'School', { align: 'center' });
-    if (school?.address) {
-      doc.fillColor('#555').fontSize(9).font('Helvetica').text(school.address, { align: 'center' });
-    }
-    if (school?.phone) {
-      doc.fillColor('#555').fontSize(9).font('Helvetica').text(school.phone, { align: 'center' });
-    }
-    doc.moveDown(0.5);
-    doc.fillColor('#000').fontSize(13).font('Helvetica-Bold')
-      .text('Terminal Report Card', { align: 'center' });
-    doc.moveDown(0.5);
-    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor(accent).lineWidth(2).stroke();
-    doc.moveDown(1);
+      doc.fillColor('#fff').font('Helvetica-Bold').fontSize(16)
+        .text((school?.name ?? 'School').toUpperCase(), tx, 18, { width: 300 });
+      if (school?.address) doc.font('Helvetica').fontSize(8).fillColor('#fff').text(school.address, tx, 44, { width: 300 });
+      doc.font('Helvetica').fontSize(8.5).fillColor('#fff');
+      let cy = 20;
+      if (school?.phone) { doc.text(school.phone, 380, cy, { width: 165, align: 'right' }); cy += 12; }
+      if (school?.email) { doc.text(school.email, 380, cy, { width: 165, align: 'right' }); }
+      doc.restore();
+      doc.fillColor('#000');
+      doc.y = bandH + 16;
+      doc.x = 50;
 
-    // ── Student / Term Info ─────────────────────────────────
-    const infoTop = doc.y;
-    doc.fillColor('#000').fontSize(10).font('Helvetica-Bold')
-      .text(`Name: `, 50, infoTop, { continued: true })
-      .font('Helvetica').text(`${data.student.firstName} ${data.student.lastName}`);
-    doc.font('Helvetica-Bold')
-      .text(`Student ID: `, { continued: true })
-      .font('Helvetica').text(data.student.studentId);
+      // ── Student info box ──────────────────────────────────
+      this.drawInfoBox(doc, data);
+      doc.moveDown(1);
+    } else {
+      // ── Standard centered header ──────────────────────────
+      if (logoBuf) {
+        try {
+          const size = 56;
+          doc.image(logoBuf, (doc.page.width - size) / 2, doc.y, { fit: [size, size], align: 'center' });
+          doc.y += size + 6;
+        } catch { /* ignore bad image */ }
+      }
+      doc.fillColor(accent).fontSize(20).font('Helvetica-Bold')
+        .text(school?.name ?? 'School', { align: 'center' });
+      if (school?.address) doc.fillColor('#555').fontSize(9).font('Helvetica').text(school.address, { align: 'center' });
+      if (school?.phone) doc.fillColor('#555').fontSize(9).font('Helvetica').text(school.phone, { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fillColor('#000').fontSize(13).font('Helvetica-Bold').text('Terminal Report Card', { align: 'center' });
+      doc.moveDown(0.5);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor(accent).lineWidth(2).stroke();
+      doc.moveDown(1);
 
-    if (data.className) {
-      doc.font('Helvetica-Bold')
-        .text(`Class: `, 50, doc.y, { continued: true })
-        .font('Helvetica').text(data.className);
+      const infoTop = doc.y;
+      doc.fillColor('#000').fontSize(10).font('Helvetica-Bold')
+        .text(`Name: `, 50, infoTop, { continued: true })
+        .font('Helvetica').text(`${data.student.firstName} ${data.student.lastName}`);
+      doc.font('Helvetica-Bold').text(`Student ID: `, { continued: true })
+        .font('Helvetica').text(data.student.studentId);
+      if (data.className) {
+        doc.font('Helvetica-Bold').text(`Class: `, 50, doc.y, { continued: true })
+          .font('Helvetica').text(data.className);
+      }
+      doc.font('Helvetica-Bold').text(`Academic Year: `, 320, infoTop, { continued: true })
+        .font('Helvetica').text(data.term.academicYear.name);
+      doc.font('Helvetica-Bold').text(`Term: `, 320, doc.y, { continued: true })
+        .font('Helvetica').text(data.term.name);
+      doc.moveDown(1.5);
     }
-
-    doc.font('Helvetica-Bold')
-      .text(`Academic Year: `, 320, infoTop, { continued: true })
-      .font('Helvetica').text(data.term.academicYear.name);
-    doc.font('Helvetica-Bold')
-      .text(`Term: `, 320, doc.y, { continued: true })
-      .font('Helvetica').text(data.term.name);
-    doc.moveDown(1.5);
 
     // ── Assessment scale (holistic layout shows it before subjects) ─────────
     if (holisticLayout && showScale) {
@@ -152,7 +169,18 @@ export class ReportCardPdfService {
     }
 
     // ── Footer ──────────────────────────────────────────────
-    if (config?.footerText) {
+    if (holisticLayout) {
+      const bandH = 28;
+      const fy = doc.page.height - bandH;
+      doc.save();
+      doc.rect(0, fy, doc.page.width, bandH).fill(accent);
+      doc.rect(0, fy, 8, bandH).fill('#f59e0b');
+      if (config?.footerText) {
+        doc.fillColor('#fff').font('Helvetica-Bold').fontSize(10)
+          .text(config.footerText.toUpperCase(), 50, fy + 9, { align: 'center', width: 495, characterSpacing: 2 });
+      }
+      doc.restore();
+    } else if (config?.footerText) {
       doc.fontSize(8).font('Helvetica-Oblique').fillColor('#777')
         .text(config.footerText, 50, 780, { align: 'center', width: 495 });
     }
@@ -229,18 +257,51 @@ export class ReportCardPdfService {
     doc.y = y + 8;
   }
 
-  // Metrics: the grade-band key (from the school's grading scale).
+  // Metrics: the grade-band key (from the school's grading scale) as a boxed table.
   private drawMetrics(doc: PDFKit.PDFDocument, data: any, accent: string) {
     const bands = data.gradingBands ?? [];
     if (!bands.length) return;
     doc.fontSize(11).font('Helvetica-Bold').fillColor(accent).text('Metrics');
     doc.moveDown(0.3);
-    doc.fontSize(9).fillColor('#000');
+    const startX = 50, w1 = 36, w2 = 86, w3 = 180, rowH = 16;
+    let y = doc.y;
+    doc.fontSize(8.5).fillColor('#000');
     for (const b of bands) {
-      doc.font('Helvetica-Bold').text(`${b.label}  `, { continued: true });
-      doc.font('Helvetica').text(`${b.minScore}–${b.maxScore}%${b.remark ? `   ${b.remark}` : ''}`);
+      doc.rect(startX, y, w1, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+      doc.rect(startX + w1, y, w2, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+      doc.rect(startX + w1 + w2, y, w3, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+      doc.font('Helvetica-Bold').text(b.label, startX + 4, y + 4, { width: w1 - 8 });
+      doc.font('Helvetica').text(`${b.minScore}–${b.maxScore}%`, startX + w1 + 4, y + 4, { width: w2 - 8 });
+      doc.text(b.remark ?? '', startX + w1 + w2 + 4, y + 4, { width: w3 - 8 });
+      y += rowH;
     }
-    doc.moveDown(1);
+    doc.y = y + 8;
+  }
+
+  // Student info box for the holistic layout (bordered 2-column grid).
+  private drawInfoBox(doc: PDFKit.PDFDocument, data: any) {
+    const rows: [string, string][] = [
+      [`Name: ${data.student.firstName} ${data.student.lastName}`, `Class: ${data.className ?? '-'}`],
+      [`Academic Year/Term: ${data.term.academicYear.name} - ${data.term.name}`, `Date: ${this.fmtDate(new Date().toISOString())}`],
+      [`Class Teacher: ${data.classTeacherName ?? '-'}`, `School Reopens: ${this.fmtDate(data.nextTermReopens) || '-'}`],
+    ];
+    const startX = 50, colW = 247.5, rowH = 18;
+    let y = doc.y;
+    doc.fontSize(9).font('Helvetica').fillColor('#000');
+    for (const [left, right] of rows) {
+      doc.rect(startX, y, colW, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+      doc.rect(startX + colW, y, colW, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+      doc.text(left, startX + 4, y + 5, { width: colW - 8 });
+      doc.text(right, startX + colW + 4, y + 5, { width: colW - 8 });
+      y += rowH;
+    }
+    doc.y = y;
+  }
+
+  private fmtDate(value?: string | null): string {
+    if (!value) return '';
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }
 
   private drawSubjectsTable(
