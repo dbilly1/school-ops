@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { Alert } from '@/components/ui/settings-card';
@@ -8,13 +9,16 @@ import { ClassTabs } from '@/components/ui/class-tabs';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+type CardStatus = 'NOT_GENERATED' | 'DRAFT' | 'PUBLISHED';
+
 type ReportCard = {
-  id: string;
+  id: string | null;
   studentId: string;
   student: { firstName: string; lastName: string; studentId: string };
   termId: string;
+  status: CardStatus;
   publishedAt: string | null;
-  generatedAt: string;
+  generatedAt: string | null;
   aggregate: number | null;
   position: number | null;
   classSize: number | null;
@@ -22,30 +26,27 @@ type ReportCard = {
 
 // ── Report card row ───────────────────────────────────────────────────────────
 
-function ReportCardRow({ card, apiBase }: { card: ReportCard; apiBase: string }) {
-  const [downloading, setDownloading] = useState(false);
-
-  async function downloadPdf() {
-    setDownloading(true);
-    try {
-      const res = await fetch(
-        `${apiBase}/school/report-cards/student/${card.studentId}/pdf?termId=${card.termId}`,
-        { headers: { Authorization: `Bearer ${localStorage.getItem('so_staff_access')}` } },
-      );
-      const blob  = await res.blob();
-      const url   = URL.createObjectURL(blob);
-      const a     = document.createElement('a');
-      a.href      = url;
-      a.download  = `report-card-${card.student.studentId}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } finally {
-      setDownloading(false);
-    }
-  }
-
+function StatusChip({ status }: { status: CardStatus }) {
+  if (status === 'PUBLISHED') return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Published
+    </span>
+  );
+  if (status === 'DRAFT') return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Draft
+    </span>
+  );
   return (
-    <tr className="border-b border-slate-50 hover:bg-slate-50/60 transition">
+    <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
+      <span className="w-1.5 h-1.5 rounded-full bg-slate-300" /> Not generated
+    </span>
+  );
+}
+
+function ReportCardRow({ card, onPreview }: { card: ReportCard; onPreview: () => void }) {
+  return (
+    <tr onClick={onPreview} className="border-b border-slate-50 hover:bg-slate-50/60 transition cursor-pointer">
       <td className="px-4 py-3.5">
         <p className="text-sm font-medium text-slate-800">
           {card.student.lastName}, {card.student.firstName}
@@ -60,31 +61,12 @@ function ReportCardRow({ card, apiBase }: { card: ReportCard; apiBase: string })
       </td>
       <td className="px-4 py-3.5 hidden md:table-cell">
         <span className="text-xs text-slate-500">
-          {new Date(card.generatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+          {card.generatedAt ? new Date(card.generatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
         </span>
       </td>
-      <td className="px-4 py-3.5">
-        {card.publishedAt ? (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            Published
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-            Draft
-          </span>
-        )}
-      </td>
-      <td className="px-4 py-3.5 text-right">
-        <button
-          onClick={downloadPdf}
-          disabled={downloading}
-          className="text-xs font-medium transition disabled:opacity-40"
-          style={{ color: 'var(--accent)' }}
-        >
-          {downloading ? 'Downloading…' : '↓ PDF'}
-        </button>
+      <td className="px-4 py-3.5"><StatusChip status={card.status} /></td>
+      <td className="px-4 py-3.5 text-right whitespace-nowrap">
+        <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>Preview →</span>
       </td>
     </tr>
   );
@@ -93,13 +75,12 @@ function ReportCardRow({ card, apiBase }: { card: ReportCard; apiBase: string })
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ReportCardsPage() {
+  const router = useRouter();
   const [classId, setClassId]   = useState('');
   const [termId, setTermId]     = useState('');
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [alert, setAlert]       = useState<{ type: 'error' | 'success'; message: string } | null>(null);
-
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
   const fetchClasses = useCallback(() => staffApi.get<{ id: string; name: string }[]>('/school/grade-structure/classes'), []);
   const fetchTerms   = useCallback(() =>
@@ -121,8 +102,13 @@ export default function ReportCardsPage() {
   );
   const { data: cards, loading, refetch } = useApi(fetchCards, `${activeClassId}|${activeTermId}`);
 
-  const unpublishedCount = cards?.filter(c => !c.publishedAt).length ?? 0;
-  const publishedCount   = cards?.filter(c => c.publishedAt).length  ?? 0;
+  const generatedCount   = cards?.filter(c => c.status !== 'NOT_GENERATED').length ?? 0;
+  const publishedCount   = cards?.filter(c => c.status === 'PUBLISHED').length ?? 0;
+  const unpublishedCount = cards?.filter(c => c.status === 'DRAFT').length ?? 0;
+
+  function openPreview(studentId: string) {
+    router.push(`/school/academics/report-cards/${studentId}?termId=${activeTermId}`);
+  }
 
   async function generate() {
     if (!activeClassId || !activeTermId) return;
@@ -143,7 +129,7 @@ export default function ReportCardsPage() {
 
   async function publishAll() {
     if (!activeTermId || !activeClassId || !cards) return;
-    const draftCount = cards.filter(c => !c.publishedAt).length;
+    const draftCount = cards.filter(c => c.status === 'DRAFT').length;
     if (!draftCount) return;
     setAlert(null); setPublishing(true);
     try {
@@ -183,12 +169,13 @@ export default function ReportCardsPage() {
           <div className="flex-1">
             {cards && cards.length > 0 ? (
               <p className="text-sm text-slate-600">
-                <span className="font-semibold text-slate-800">{cards.length}</span> report cards ·{' '}
+                <span className="font-semibold text-slate-800">{cards.length}</span> students ·{' '}
+                <span className="font-semibold text-slate-700">{generatedCount}</span> generated ·{' '}
                 <span className="font-semibold text-emerald-600">{publishedCount}</span> published ·{' '}
                 <span className="font-semibold text-amber-600">{unpublishedCount}</span> draft
               </p>
             ) : (
-              <p className="text-sm text-slate-500">No report cards generated yet for this class and term.</p>
+              <p className="text-sm text-slate-500">No students in this class.</p>
             )}
           </div>
 
@@ -197,7 +184,7 @@ export default function ReportCardsPage() {
             disabled={generating}
             className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
           >
-            {generating ? 'Generating…' : cards && cards.length > 0 ? '↺ Regenerate' : 'Generate report cards'}
+            {generating ? 'Generating…' : generatedCount > 0 ? '↺ Regenerate' : 'Generate report cards'}
           </button>
 
           {unpublishedCount > 0 && (
@@ -242,11 +229,11 @@ export default function ReportCardsPage() {
                 </tr>
               ))}
               {!loading && cards?.map(card => (
-                <ReportCardRow key={card.id} card={card} apiBase={API_BASE} />
+                <ReportCardRow key={card.studentId} card={card} onPreview={() => openPreview(card.studentId)} />
               ))}
               {!loading && (!cards || cards.length === 0) && (
                 <tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
-                  No report cards. Click "Generate report cards" to create them.
+                  No students in this class. Assign students to it first.
                 </td></tr>
               )}
             </tbody>

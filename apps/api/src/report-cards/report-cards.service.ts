@@ -241,23 +241,24 @@ export class ReportCardsService {
       orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
     });
 
-    // Only return generated cards, flattened to the shape the UI expects.
-    return assignments
-      .filter(({ student }) => student.reportCards.length > 0)
-      .map(({ student }) => {
-        const rc = student.reportCards[0];
-        return {
-          id: rc.id,
-          studentId: student.id,
-          student: { firstName: student.firstName, lastName: student.lastName, studentId: student.studentId },
-          termId: rc.termId,
-          publishedAt: rc.publishedAt,
-          generatedAt: rc.createdAt,
-          aggregate: rc.aggregate ? Number(rc.aggregate) : null,
-          position: rc.position,
-          classSize: rc.classSize,
-        };
-      });
+    // Return every student in the class with their report-card status, so the UI
+    // can list (and preview) all of them — generated or not.
+    return assignments.map(({ student }) => {
+      const rc = student.reportCards[0] ?? null;
+      const status = !rc ? 'NOT_GENERATED' : rc.publishedAt ? 'PUBLISHED' : 'DRAFT';
+      return {
+        id: rc?.id ?? null,
+        studentId: student.id,
+        student: { firstName: student.firstName, lastName: student.lastName, studentId: student.studentId },
+        termId,
+        status,
+        publishedAt: rc?.publishedAt ?? null,
+        generatedAt: rc?.createdAt ?? null,
+        aggregate: rc?.aggregate != null ? Number(rc.aggregate) : null,
+        position: rc?.position ?? null,
+        classSize: rc?.classSize ?? null,
+      };
+    });
   }
 
   async getStudentReportCard(schoolId: string, studentId: string, termId: string) {

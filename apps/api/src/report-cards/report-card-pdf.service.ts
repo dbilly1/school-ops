@@ -14,7 +14,7 @@ export class ReportCardPdfService {
     const data = await this.reportCards.getStudentReportCard(schoolId, studentId, termId);
     const school = await this.prisma.school.findUnique({
       where: { id: schoolId },
-      select: { name: true, primaryColor: true, address: true, phone: true },
+      select: { name: true, primaryColor: true, address: true, phone: true, logoUrl: true },
     });
 
     const config = data.config;
@@ -28,6 +28,17 @@ export class ReportCardPdfService {
     const accent = school?.primaryColor || '#1a56db';
 
     // ── Header ──────────────────────────────────────────────
+    // Centered logo (if an inline/base64 logo is set), then the school name.
+    const logoBuf = this.dataUrlToBuffer(school?.logoUrl);
+    if (logoBuf) {
+      try {
+        const size = 56;
+        doc.image(logoBuf, (doc.page.width - size) / 2, doc.y, { fit: [size, size], align: 'center' });
+        doc.y += size + 6;
+      } catch {
+        // ignore a malformed image — never let it break the report
+      }
+    }
     doc.fillColor(accent).fontSize(20).font('Helvetica-Bold')
       .text(school?.name ?? 'School', { align: 'center' });
     if (school?.address) {
@@ -130,6 +141,19 @@ export class ReportCardPdfService {
     return new Promise((resolve) => {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
     });
+  }
+
+  // Parse a base64 image data URL into a Buffer pdfkit can render. Returns null
+  // for empty values or remote URLs (pdfkit can't fetch those).
+  private dataUrlToBuffer(value?: string | null): Buffer | null {
+    if (!value) return null;
+    const match = /^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/.exec(value);
+    if (!match) return null;
+    try {
+      return Buffer.from(match[1], 'base64');
+    } catch {
+      return null;
+    }
   }
 
   private drawSubjectsTable(
