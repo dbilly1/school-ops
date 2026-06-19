@@ -161,7 +161,23 @@ export default function ReportCardConfigPage() {
     }
     setAlert(null); setSaving(true);
     try {
-      await staffApi.patch('/school/report-card-config', config);
+      // Send only editable fields — the API rejects id/schoolId/updatedAt etc.
+      await staffApi.patch('/school/report-card-config', {
+        showRawScore: config.showRawScore,
+        showGradeLabel: config.showGradeLabel,
+        showAttendanceSummary: config.showAttendanceSummary,
+        showBehaviourScores: config.showBehaviourScores,
+        showTeacherComments: config.showTeacherComments,
+        showPrincipalComments: config.showPrincipalComments,
+        showNextTermInfo: config.showNextTermInfo,
+        showPosition: config.showPosition,
+        showAssessmentScale: config.showAssessmentScale,
+        showMetricsTable: config.showMetricsTable,
+        reportCardLayout: config.reportCardLayout,
+        sbaWeight: config.sbaWeight,
+        examWeight: config.examWeight,
+        footerText: config.footerText,
+      });
       // Persist per-category SBA weights (empty values are dropped → equal weighting).
       const weights = Object.entries(catWeights)
         .filter(([, v]) => v !== '' && !isNaN(parseFloat(v)))
