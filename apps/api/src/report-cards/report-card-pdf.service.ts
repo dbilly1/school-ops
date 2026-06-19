@@ -219,6 +219,10 @@ export class ReportCardPdfService {
     if (!scale?.levels?.length || !scale?.skills?.length) return;
     const ratings: Record<string, string> = data.holistic ?? {};
 
+    // Keep the whole section together when it fits.
+    const est = 30 + scale.levels.length * 12 + 24 + scale.skills.length * 18;
+    if (est <= doc.page.height - 100) doc.y = this.pageBreak(doc, doc.y, est);
+
     doc.fontSize(11).font('Helvetica-Bold').fillColor(accent).text('Assessment Scale');
     doc.moveDown(0.3);
     doc.fontSize(8.5).fillColor('#000');
@@ -249,7 +253,6 @@ export class ReportCardPdfService {
     doc.font('Helvetica').fontSize(8.5).fillColor('#000');
     for (const sk of scale.skills) {
       const rowH = Math.max(16, doc.heightOfString(sk.label, { width: skillW - 8 }) + 8);
-      y = this.pageBreak(doc, y, rowH);
       doc.fillColor('#000').text(sk.label, startX + 4, y + 4, { width: skillW - 8 });
       x = startX + skillW;
       const chosen = ratings[sk.id];
@@ -270,13 +273,15 @@ export class ReportCardPdfService {
   private drawMetrics(doc: PDFKit.PDFDocument, data: any, accent: string) {
     const bands = data.gradingBands ?? [];
     if (!bands.length) return;
+    const rowHm = 16;
+    const estM = 24 + bands.length * rowHm;
+    if (estM <= doc.page.height - 100) doc.y = this.pageBreak(doc, doc.y, estM);
     doc.fontSize(11).font('Helvetica-Bold').fillColor(accent).text('Metrics');
     doc.moveDown(0.3);
-    const startX = 50, w1 = 40, w2 = 110, w3 = 345, rowH = 16;
+    const startX = 50, w1 = 40, w2 = 110, w3 = 345, rowH = rowHm;
     let y = doc.y;
     doc.fontSize(8.5).fillColor('#000');
     for (const b of bands) {
-      y = this.pageBreak(doc, y, rowH);
       doc.rect(startX, y, w1, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
       doc.rect(startX + w1, y, w2, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
       doc.rect(startX + w1 + w2, y, w3, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
@@ -348,8 +353,11 @@ export class ReportCardPdfService {
     ];
     if (showGradeLabel) cols.push({ label: 'Grade', width: 75, key: 'gradeLabel' });
 
-    // Header row (kept on the same page as at least one data row)
-    y = this.pageBreak(doc, y, rowHeight * 2);
+    // Keep the whole table together when it fits on a page; only break row-by-row
+    // if it's genuinely taller than a full page.
+    const estHeight = (subjects.length + 1) * rowHeight + 6;
+    const onePage = estHeight <= doc.page.height - 100;
+    y = this.pageBreak(doc, y, onePage ? estHeight : rowHeight * 2);
     const drawHeader = () => {
       doc.rect(startX, y, 495, rowHeight).fill(accent);
       doc.fillColor('#fff').fontSize(9.5).font('Helvetica-Bold');
@@ -366,9 +374,11 @@ export class ReportCardPdfService {
     // Data rows — each row boxed so the table can break across pages cleanly.
     doc.font('Helvetica').fontSize(9.5);
     subjects.forEach((s, i) => {
-      const broke = y;
-      y = this.pageBreak(doc, y, rowHeight);
-      if (y !== broke) drawHeader(); // repeat the header on a new page
+      if (!onePage) {
+        const broke = y;
+        y = this.pageBreak(doc, y, rowHeight);
+        if (y !== broke) drawHeader(); // repeat the header on a new page
+      }
       if (i % 2 === 1) doc.rect(startX, y, 495, rowHeight).fill('#f3f4f6');
       doc.fillColor('#000').font('Helvetica').fontSize(9.5);
       let x = startX;

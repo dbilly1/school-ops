@@ -55,7 +55,9 @@ function PreviewInner({ studentId }: { studentId: string }) {
     <div>
       {/* Print rule: show only the report sheet when printing */}
       <style>{`
-      @page { size: A4; margin: 12mm; }
+      /* margin: 0 makes the browser drop its injected header/footer (page URL,
+         title, date) — the report supplies its own padding/bands. */
+      @page { size: A4; margin: 0; }
       @media print {
         body * { visibility: hidden !important; }
         #report-paper, #report-paper * {
@@ -64,11 +66,8 @@ function PreviewInner({ studentId }: { studentId: string }) {
           print-color-adjust: exact !important;
         }
         #report-paper { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; }
-        /* Let tables flow across A4 pages, but never split a row, and repeat
-           table headers on each new page. */
-        #report-paper table { break-inside: auto; }
-        #report-paper tr, #report-paper img { break-inside: avoid; }
-        #report-paper thead { display: table-header-group; }
+        /* Keep whole components together — never split a table/section across pages. */
+        #report-paper table, #report-paper tr { break-inside: avoid; }
         #report-paper h3 { break-after: avoid; }
       }`}</style>
 
