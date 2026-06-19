@@ -54,14 +54,22 @@ function PreviewInner({ studentId }: { studentId: string }) {
   return (
     <div>
       {/* Print rule: show only the report sheet when printing */}
-      <style>{`@media print {
+      <style>{`
+      @page { size: A4; margin: 12mm; }
+      @media print {
         body * { visibility: hidden !important; }
         #report-paper, #report-paper * {
           visibility: visible !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
-        #report-paper { position: absolute; left: 0; top: 0; width: 100%; }
+        #report-paper { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; }
+        /* Let tables flow across A4 pages, but never split a row, and repeat
+           table headers on each new page. */
+        #report-paper table { break-inside: auto; }
+        #report-paper tr, #report-paper img { break-inside: avoid; }
+        #report-paper thead { display: table-header-group; }
+        #report-paper h3 { break-after: avoid; }
       }`}</style>
 
       {/* Action bar */}

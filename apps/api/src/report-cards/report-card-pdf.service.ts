@@ -249,6 +249,7 @@ export class ReportCardPdfService {
     doc.font('Helvetica').fontSize(8.5).fillColor('#000');
     for (const sk of scale.skills) {
       const rowH = Math.max(16, doc.heightOfString(sk.label, { width: skillW - 8 }) + 8);
+      y = this.pageBreak(doc, y, rowH);
       doc.fillColor('#000').text(sk.label, startX + 4, y + 4, { width: skillW - 8 });
       x = startX + skillW;
       const chosen = ratings[sk.id];
@@ -275,6 +276,7 @@ export class ReportCardPdfService {
     let y = doc.y;
     doc.fontSize(8.5).fillColor('#000');
     for (const b of bands) {
+      y = this.pageBreak(doc, y, rowH);
       doc.rect(startX, y, w1, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
       doc.rect(startX + w1, y, w2, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
       doc.rect(startX + w1 + w2, y, w3, rowH).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
@@ -312,6 +314,16 @@ export class ReportCardPdfService {
     return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }
 
+  // If `needed` px won't fit before the bottom A4 margin, start a new page and
+  // return the fresh y; otherwise return y unchanged.
+  private pageBreak(doc: PDFKit.PDFDocument, y: number, needed: number): number {
+    if (y + needed > doc.page.height - 50) {
+      doc.addPage();
+      return doc.y;
+    }
+    return y;
+  }
+
   private ordinal(n: number): string {
     const s = ['th', 'st', 'nd', 'rd'];
     const v = n % 100;
@@ -336,24 +348,30 @@ export class ReportCardPdfService {
     ];
     if (showGradeLabel) cols.push({ label: 'Grade', width: 75, key: 'gradeLabel' });
 
-    // Header row
-    doc.rect(startX, y, 495, rowHeight).fill(accent);
-    doc.fillColor('#fff').fontSize(9.5).font('Helvetica-Bold');
-    let x = startX;
-    for (const col of cols) {
-      doc.text(col.label, x + 6, y + 6, { width: col.width - 12 });
-      x += col.width;
-    }
-    y += rowHeight;
+    // Header row (kept on the same page as at least one data row)
+    y = this.pageBreak(doc, y, rowHeight * 2);
+    const drawHeader = () => {
+      doc.rect(startX, y, 495, rowHeight).fill(accent);
+      doc.fillColor('#fff').fontSize(9.5).font('Helvetica-Bold');
+      let hx = startX;
+      for (const col of cols) {
+        doc.text(col.label, hx + 6, y + 6, { width: col.width - 12 });
+        hx += col.width;
+      }
+      doc.rect(startX, y, 495, rowHeight).strokeColor('#d1d5db').lineWidth(0.5).stroke();
+      y += rowHeight;
+    };
+    drawHeader();
 
-    // Data rows
+    // Data rows — each row boxed so the table can break across pages cleanly.
     doc.font('Helvetica').fontSize(9.5);
     subjects.forEach((s, i) => {
-      if (i % 2 === 1) {
-        doc.rect(startX, y, 495, rowHeight).fill('#f3f4f6');
-      }
-      doc.fillColor('#000');
-      x = startX;
+      const broke = y;
+      y = this.pageBreak(doc, y, rowHeight);
+      if (y !== broke) drawHeader(); // repeat the header on a new page
+      if (i % 2 === 1) doc.rect(startX, y, 495, rowHeight).fill('#f3f4f6');
+      doc.fillColor('#000').font('Helvetica').fontSize(9.5);
+      let x = startX;
       for (const col of cols) {
         let value = '';
         if (col.key === 'subject') value = s.subject;
@@ -364,17 +382,15 @@ export class ReportCardPdfService {
         doc.text(value, x + 6, y + 6, { width: col.width - 12 });
         x += col.width;
       }
+      doc.rect(startX, y, 495, rowHeight).strokeColor('#d1d5db').lineWidth(0.5).stroke();
       y += rowHeight;
     });
-
-    // Border
-    doc.rect(startX, doc.y - subjects.length * rowHeight - rowHeight, 495, (subjects.length + 1) * rowHeight)
-      .strokeColor('#d1d5db').lineWidth(1).stroke();
 
     doc.y = y + 4;
   }
 
   private drawCommentBox(doc: PDFKit.PDFDocument, label: string, accent: string, text?: string | null) {
+    doc.y = this.pageBreak(doc, doc.y, 70); // keep the label + box together
     doc.fontSize(11).font('Helvetica-Bold').fillColor(accent).text(label);
     doc.moveDown(0.3);
     const boxY = doc.y;
