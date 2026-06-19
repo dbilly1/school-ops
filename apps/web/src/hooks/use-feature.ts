@@ -64,6 +64,45 @@ export function useFeature(featureKey: string): FeatureResult {
   };
 }
 
+// ── useAllFeatures (one request for the whole sidebar) ────────────────────────
+// Loads every feature's state in a single call so nav items appear together
+// instead of popping in one-by-one as individual /state requests resolve.
+
+const allFeaturesCache = new Map<string, Map<string, FeatureState>>(); // schoolId -> key->state
+
+export function useAllFeatures(): { states: Map<string, FeatureState>; loading: boolean } {
+  const { user } = useStaffAuth();
+  const [states, setStates]   = useState<Map<string, FeatureState>>(new Map());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!user) { setLoading(false); return; }
+
+      const cached = allFeaturesCache.get(user.schoolId);
+      if (cached) { setStates(cached); setLoading(false); return; }
+
+      setLoading(true);
+      try {
+        const list = await staffApi.get<{ featureKey: string; state: FeatureState }[]>('/school/features');
+        const map = new Map(list.map(f => [f.featureKey, f.state]));
+        allFeaturesCache.set(user.schoolId, map);
+        // Seed the per-key cache so any useFeature() elsewhere resolves instantly.
+        for (const [k, s] of map) featureCache.set(`${user.schoolId}:${k}`, s);
+        if (!cancelled) setStates(map);
+      } catch {
+        if (!cancelled) setStates(new Map());
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  return { states, loading };
+}
+
 // ── useSubFeature ─────────────────────────────────────────────────────────────
 
 export function useSubFeature(featureKey: string, subFeatureKey: string): SubFeatureResult {

@@ -4,7 +4,8 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useStaffAuth } from '@/contexts/staff-auth';
 import { useTeacherScope } from '@/hooks/use-teacher-scope';
-import { useFeature } from '@/hooks/use-feature';
+import { useAllFeatures } from '@/hooks/use-feature';
+import { FeatureState } from '@schoolops/types';
 import { cn } from '@/lib/cn';
 import { OWNER_ADMIN, OWNER_ADMIN_TEACHER, OWNER_ADMIN_ACCOUNTANT, OWNER_ADMIN_TRANSPORT } from '@/lib/staff-roles';
 
@@ -53,15 +54,9 @@ type NavItem = {
   roles?: string[];      // if set, item only shows for users with at least one matching role
 };
 
-// ── Feature-gated nav link ────────────────────────────────────────────────────
-
-function GatedNavLink({ item, active }: { item: NavItem; active: boolean }) {
-  const { state, loading } = useFeature(item.featureKey!);
-  if (loading || state !== 'ACTIVE') return null;
-  return <NavLink item={item} active={active} />;
-}
-
-// ── Plain nav link ────────────────────────────────────────────────────────────
+// ── Nav link ──────────────────────────────────────────────────────────────────
+// The rail is tinted with the school's accent colour, so active/hover use white
+// overlays for contrast rather than the accent itself.
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   return (
@@ -70,10 +65,9 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
       className={cn(
         'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
         active
-          ? 'text-white font-medium'
-          : 'text-slate-400 hover:text-white hover:bg-white/10',
+          ? 'bg-white/20 text-white font-medium'
+          : 'text-white/75 hover:text-white hover:bg-white/10',
       )}
-      style={active ? { backgroundColor: 'var(--accent)' } : {}}
     >
       <Icon d={item.iconPath} />
       <span>{item.label}</span>
@@ -83,16 +77,18 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 
 // ── Nav section ───────────────────────────────────────────────────────────────
 
-function NavSection({ label, items, pathname, hasRole, hiddenIds }: {
+function NavSection({ label, items, pathname, hasRole, hiddenIds, featureStates }: {
   label: string;
   items: NavItem[];
   pathname: string;
   hasRole: (role: string) => boolean;
   hiddenIds?: string[];
+  featureStates: Map<string, FeatureState>;
 }) {
   const visibleItems = items.filter(item => {
     if (item.roles && !item.roles.some(r => hasRole(r))) return false;
     if (item.id && hiddenIds?.includes(item.id)) return false;
+    if (item.featureKey && featureStates.get(item.featureKey) !== FeatureState.ACTIVE) return false;
     return true;
   });
 
@@ -100,13 +96,12 @@ function NavSection({ label, items, pathname, hasRole, hiddenIds }: {
 
   return (
     <div>
-      <p className="px-3 mb-1 text-[10px] uppercase tracking-widest font-semibold text-slate-500">
+      <p className="px-3 mb-1 text-[10px] uppercase tracking-widest font-semibold text-white/50">
         {label}
       </p>
       <div className="space-y-0.5">
         {visibleItems.map(item => {
           const active = pathname === item.href || pathname.startsWith(item.href + '/');
-          if (item.featureKey) return <GatedNavLink key={item.href} item={item} active={active} />;
           return <NavLink key={item.href} item={item} active={active} />;
         })}
       </div>
@@ -165,29 +160,30 @@ const NAV: { section: string; items: NavItem[] }[] = [
 // Shared inner content — rendered both in the desktop rail and the mobile drawer.
 function SidebarBody() {
   const pathname = usePathname();
-  const { branding, hasRole } = useStaffAuth();
+  const { branding, hasRole, loading: authLoading } = useStaffAuth();
   const scope = useTeacherScope();
+  const { states: featureStates, loading: featuresLoading } = useAllFeatures();
 
   const isOwnerOrAdmin = hasRole('SCHOOL_OWNER') || hasRole('SCHOOL_ADMIN');
   // A pure teacher only sees Attendance if they have at least one assigned class
   const canSeeAttendance = isOwnerOrAdmin || (scope.restricted ? scope.assignedClassIds.length > 0 : true);
 
+  // Render the whole nav at once (not item-by-item) once auth + features + scope are ready.
+  const navReady = !authLoading && !featuresLoading && !scope.loading;
+
   return (
     <>
       {/* School identity */}
-      <div className="px-4 py-5 border-b border-white/10">
+      <div className="px-4 py-5 border-b border-white/15">
         <div className="flex items-center gap-3">
           {branding?.logoUrl ? (
             <img
               src={branding.logoUrl}
               alt={branding.name}
-              className="w-8 h-8 rounded-lg object-cover"
+              className="w-8 h-8 rounded-lg object-cover bg-white/90"
             />
           ) : (
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shrink-0"
-              style={{ backgroundColor: 'var(--accent)' }}
-            >
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-white/20 text-white font-bold text-sm shrink-0">
               {branding?.name?.[0]?.toUpperCase() ?? 'S'}
             </div>
           )}
@@ -195,28 +191,37 @@ function SidebarBody() {
             <p className="text-white text-sm font-semibold truncate">
               {branding?.name ?? 'SchoolOps'}
             </p>
-            <p className="text-slate-500 text-xs">Staff Portal</p>
+            <p className="text-white/50 text-xs">Staff Portal</p>
           </div>
         </div>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
-        {NAV.map(({ section, items }) => (
-          <NavSection
-            key={section}
-            label={section}
-            items={items}
-            pathname={pathname}
-            hasRole={hasRole}
-            hiddenIds={canSeeAttendance ? [] : ['attendance']}
-          />
-        ))}
+        {!navReady ? (
+          <div className="space-y-2 px-1">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <div key={i} className="h-8 rounded-lg bg-white/10 animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          NAV.map(({ section, items }) => (
+            <NavSection
+              key={section}
+              label={section}
+              items={items}
+              pathname={pathname}
+              hasRole={hasRole}
+              hiddenIds={canSeeAttendance ? [] : ['attendance']}
+              featureStates={featureStates}
+            />
+          ))
+        )}
       </nav>
 
       {/* Settings — owners and admins only */}
-      {isOwnerOrAdmin && (
-        <div className="px-3 py-3 border-t border-white/10">
+      {isOwnerOrAdmin && navReady && (
+        <div className="px-3 py-3 border-t border-white/15">
           <NavLink
             item={{ label: 'Settings', href: '/school/settings', iconPath: icons.settings }}
             active={pathname.startsWith('/school/settings')}
@@ -230,7 +235,10 @@ function SidebarBody() {
 // Desktop rail — hidden below lg (the mobile drawer takes over there).
 export function Sidebar() {
   return (
-    <aside className="w-60 shrink-0 hidden lg:flex flex-col h-full bg-slate-900">
+    <aside
+      className="w-60 shrink-0 hidden lg:flex flex-col h-full"
+      style={{ backgroundColor: 'var(--accent, #0f172a)' }}
+    >
       <SidebarBody />
     </aside>
   );
@@ -248,9 +256,10 @@ export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () =>
       {/* Drawer */}
       <aside
         className={cn(
-          'absolute inset-y-0 left-0 w-60 flex flex-col bg-slate-900 shadow-xl transition-transform duration-300',
+          'absolute inset-y-0 left-0 w-60 flex flex-col shadow-xl transition-transform duration-300',
           open ? 'translate-x-0' : '-translate-x-full',
         )}
+        style={{ backgroundColor: 'var(--accent, #0f172a)' }}
       >
         <SidebarBody />
       </aside>
