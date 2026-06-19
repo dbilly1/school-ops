@@ -107,6 +107,13 @@ enum EducationLevelType {
   OTHER
 }
 
+// Report card visual layout. STANDARD = the original; HOLISTIC = the
+// holistic/competency style (assessment scale + holistic development table).
+enum ReportCardLayout {
+  STANDARD
+  HOLISTIC
+}
+
 enum CalendarEventType {
   HOLIDAY
   VACATION
@@ -247,6 +254,8 @@ model School {
   userPermissionOverrides  UserPermissionOverride[]
   gradingScales            GradingScale[]
   assessmentCategoryWeights AssessmentCategoryWeight[]
+  holisticProficiencyLevels HolisticProficiencyLevel[]
+  holisticSkills           HolisticSkill[]
 
   @@map("schools")
 }
@@ -1315,6 +1324,10 @@ model ReportCardConfig {
   showPrincipalComments Boolean  @default(true)
   showNextTermInfo      Boolean  @default(false)
   showPosition          Boolean  @default(true)
+  // Holistic-style extras (off by default; not every school uses them).
+  reportCardLayout      ReportCardLayout @default(STANDARD)
+  showAssessmentScale   Boolean  @default(false)
+  showMetricsTable      Boolean  @default(false)
   // Terminal-grade weighting: class score (SBA) vs end-of-term exam. GES
   // standards-based default is 50/50; schools may change it (e.g. 30/70).
   sbaWeight             Decimal  @default(50)
@@ -1326,6 +1339,37 @@ model ReportCardConfig {
   customSections ReportCardCustomSection[]
 
   @@map("report_card_configs")
+}
+
+// School-configurable proficiency levels for the Holistic Development section
+// (e.g. E=Emerging, D=Developing, EX=Expected, EE=Exceeding Expectations).
+model HolisticProficiencyLevel {
+  id          String  @id @default(uuid())
+  schoolId    String
+  code        String
+  label       String
+  description String?
+  sequence    Int     @default(0)
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@unique([schoolId, code])
+  @@index([schoolId])
+  @@map("holistic_proficiency_levels")
+}
+
+// School-configurable skill rows assessed on the proficiency scale.
+model HolisticSkill {
+  id         String @id @default(uuid())
+  schoolId   String
+  label      String
+  groupLabel String?
+  sequence   Int    @default(0)
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@map("holistic_skills")
 }
 
 // Optional per-category weighting WITHIN the class-score (SBA) bucket. When no
@@ -1364,6 +1408,8 @@ model ReportCard {
   aggregate   Decimal?
   position    Int?
   classSize   Int?
+  // Per-student Holistic Development ratings: { [skillId]: levelCode }.
+  holistic    Json?
   // GES "Attitudes, Interests & Conduct" section + remarks.
   attitudes        String?
   interests        String?

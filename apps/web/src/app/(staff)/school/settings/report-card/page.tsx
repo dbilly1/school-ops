@@ -13,12 +13,15 @@ type ReportCardConfig = {
   showPrincipalComments: boolean;
   showNextTermInfo: boolean;
   showPosition: boolean;
+  showAssessmentScale: boolean;
+  showMetricsTable: boolean;
+  reportCardLayout: 'STANDARD' | 'HOLISTIC';
   sbaWeight: number;
   examWeight: number;
   footerText: string | null;
 };
 
-type BoolKey = Exclude<keyof ReportCardConfig, 'footerText' | 'sbaWeight' | 'examWeight'>;
+type BoolKey = Exclude<keyof ReportCardConfig, 'footerText' | 'sbaWeight' | 'examWeight' | 'reportCardLayout'>;
 type Toggle = { key: BoolKey; label: string; description: string };
 
 const TOGGLES: Toggle[] = [
@@ -27,6 +30,8 @@ const TOGGLES: Toggle[] = [
   { key: 'showPosition',           label: 'Class position',      description: 'Show the student’s position/rank in class and the aggregate.' },
   { key: 'showAttendanceSummary',  label: 'Attendance summary',  description: 'Include number of days present/absent for the term.' },
   { key: 'showBehaviourScores',    label: 'Attitudes, interests & conduct', description: 'Include the GES attitudes/interests/conduct section.' },
+  { key: 'showAssessmentScale',    label: 'Assessment scale (Holistic Development)', description: 'Show the proficiency scale + holistic skills table. Configure the levels & skills below.' },
+  { key: 'showMetricsTable',       label: 'Metrics table',       description: 'Show the grade-band key (from your grading scale) on the report.' },
   { key: 'showTeacherComments',    label: 'Teacher comments',    description: 'Allow class teachers to add a comment per student.' },
   { key: 'showPrincipalComments',  label: "Head teacher's remarks", description: "Include the head teacher's or principal's remarks section." },
   { key: 'showNextTermInfo',       label: 'Next term information', description: 'Show next term start date and any notices on the report.' },
@@ -42,11 +47,93 @@ const SBA_CATEGORIES: { value: string; label: string }[] = [
   { value: 'MID_TERM',       label: 'Mid-Term' },
 ];
 
+// ── Assessment scale editor (proficiency levels + holistic skills) ────────────
+
+type LevelRow = { code: string; label: string; description: string };
+type SkillRow = { label: string };
+
+function AssessmentScaleEditor() {
+  const [levels, setLevels]     = useState<LevelRow[]>([]);
+  const [skills, setSkills]     = useState<SkillRow[]>([]);
+  const [groupLabel, setGroupLabel] = useState('Holistic Development (Personal Growth & Learning Skills)');
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState(false);
+  const [alert, setAlert]       = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+
+  useEffect(() => {
+    staffApi.get<{ levels: { code: string; label: string; description: string | null }[]; skills: { label: string; groupLabel: string | null }[] }>('/school/report-card-config/assessment-scale')
+      .then(d => {
+        setLevels(d.levels.map(l => ({ code: l.code, label: l.label, description: l.description ?? '' })));
+        setSkills(d.skills.map(s => ({ label: s.label })));
+        if (d.skills[0]?.groupLabel) setGroupLabel(d.skills[0].groupLabel);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    setAlert(null); setSaving(true);
+    try {
+      await staffApi.put('/school/report-card-config/assessment-scale', {
+        levels: levels.filter(l => l.code.trim() && l.label.trim()).map((l, i) => ({ code: l.code.trim(), label: l.label.trim(), description: l.description.trim() || undefined, sequence: i })),
+        skills: skills.filter(s => s.label.trim()).map((s, i) => ({ label: s.label.trim(), groupLabel: groupLabel.trim() || undefined, sequence: i })),
+      });
+      setAlert({ type: 'success', message: 'Assessment scale saved.' });
+    } catch (err) {
+      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to save.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return null;
+
+  return (
+    <SettingsCard
+      title="Assessment scale & holistic skills"
+      description="Used by the Assessment Scale section. Defaults shown — edit, add or remove. Turn the section off above if your school doesn't use it."
+      footer={<SaveButton loading={saving} onClick={save} label="Save scale" />}
+    >
+      {alert && <div className="mb-4"><Alert type={alert.type} message={alert.message} /></div>}
+
+      {/* Proficiency levels */}
+      <p className="text-sm font-semibold text-slate-700 mb-2">Proficiency levels</p>
+      <div className="space-y-2 mb-5">
+        {levels.map((l, i) => (
+          <div key={i} className="flex gap-2 items-center">
+            <input value={l.code} onChange={e => setLevels(ls => ls.map((x, j) => j === i ? { ...x, code: e.target.value } : x))} placeholder="EX" className="w-16 px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none" />
+            <input value={l.label} onChange={e => setLevels(ls => ls.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder="Expected" className="w-40 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg outline-none" />
+            <input value={l.description} onChange={e => setLevels(ls => ls.map((x, j) => j === i ? { ...x, description: e.target.value } : x))} placeholder="Description (optional)" className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg outline-none" />
+            <button type="button" onClick={() => setLevels(ls => ls.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-400 text-lg leading-none">×</button>
+          </div>
+        ))}
+        <button type="button" onClick={() => setLevels(ls => [...ls, { code: '', label: '', description: '' }])} className="text-sm" style={{ color: 'var(--accent)' }}>+ Add level</button>
+      </div>
+
+      {/* Group heading */}
+      <label className="block text-xs font-medium text-slate-500 mb-1">Skills group heading</label>
+      <input value={groupLabel} onChange={e => setGroupLabel(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none mb-4" />
+
+      {/* Skills */}
+      <p className="text-sm font-semibold text-slate-700 mb-2">Skills assessed</p>
+      <div className="space-y-2">
+        {skills.map((s, i) => (
+          <div key={i} className="flex gap-2 items-center">
+            <input value={s.label} onChange={e => setSkills(ss => ss.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder="Learner stays focused and works independently." className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg outline-none" />
+            <button type="button" onClick={() => setSkills(ss => ss.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-400 text-lg leading-none">×</button>
+          </div>
+        ))}
+        <button type="button" onClick={() => setSkills(ss => [...ss, { label: '' }])} className="text-sm" style={{ color: 'var(--accent)' }}>+ Add skill</button>
+      </div>
+    </SettingsCard>
+  );
+}
+
 export default function ReportCardConfigPage() {
   const [config, setConfig] = useState<ReportCardConfig>({
     showRawScore: true, showGradeLabel: true, showAttendanceSummary: true,
     showBehaviourScores: false, showTeacherComments: true,
     showPrincipalComments: true, showNextTermInfo: true, showPosition: true,
+    showAssessmentScale: false, showMetricsTable: false, reportCardLayout: 'STANDARD',
     sbaWeight: 50, examWeight: 50, footerText: null,
   });
   const [catWeights, setCatWeights] = useState<Record<string, string>>({});
@@ -97,6 +184,26 @@ export default function ReportCardConfigPage() {
         <p className="text-sm text-slate-500 mt-0.5">Configure what appears on each student's term report card.</p>
       </div>
 
+      <SettingsCard title="Layout" description="Pick the report card style. Both use your sections and grading; the holistic style leads with the Assessment Scale & Holistic Development table." footer={<SaveButton loading={saving} onClick={save} />}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {([
+            { value: 'STANDARD', title: 'Standard', desc: 'Subjects-first terminal report. Assessment scale & metrics appear at the end if enabled.' },
+            { value: 'HOLISTIC', title: 'Holistic', desc: 'Competency style: Assessment Scale & Holistic Development table lead, then subjects & metrics.' },
+          ] as const).map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setConfig(c => ({ ...c, reportCardLayout: opt.value }))}
+              className={`text-left px-4 py-3 rounded-xl border text-sm transition ${config.reportCardLayout === opt.value ? 'border-transparent text-white' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}
+              style={config.reportCardLayout === opt.value ? { backgroundColor: 'var(--accent)' } : {}}
+            >
+              <p className="font-semibold">{opt.title}</p>
+              <p className={`text-xs mt-0.5 ${config.reportCardLayout === opt.value ? 'text-white/70' : 'text-slate-400'}`}>{opt.desc}</p>
+            </button>
+          ))}
+        </div>
+      </SettingsCard>
+
       <SettingsCard title="Sections" description="Toggle each section on or off. Changes apply to the next generated report." footer={<SaveButton loading={saving} onClick={save} />}>
         {alert && <div className="mb-4"><Alert type={alert.type} message={alert.message} /></div>}
         <div className="space-y-4">
@@ -118,6 +225,8 @@ export default function ReportCardConfigPage() {
           ))}
         </div>
       </SettingsCard>
+
+      <AssessmentScaleEditor />
 
       <SettingsCard
         title="Terminal grade weighting"

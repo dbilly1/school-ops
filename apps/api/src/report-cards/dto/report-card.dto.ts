@@ -1,4 +1,4 @@
-import { IsString, IsArray, IsOptional } from 'class-validator';
+import { IsString, IsArray, IsOptional, IsObject } from 'class-validator';
 
 export class GenerateReportCardsDto {
   @IsString()
@@ -45,4 +45,9 @@ export class UpdateReportCardDto {
   @IsString()
   @IsOptional()
   promotedTo?: string;
+
+  // Holistic Development ratings: { [skillId]: levelCode }.
+  @IsObject()
+  @IsOptional()
+  holistic?: Record<string, string>;
 }

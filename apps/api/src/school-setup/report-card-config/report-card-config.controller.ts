@@ -1,7 +1,7 @@
-import { Controller, Get, Patch, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Put, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ReportCardConfigService } from './report-card-config.service';
-import { UpdateReportCardConfigDto, UpdateCategoryWeightsDto } from './dto/report-card-config.dto';
+import { UpdateReportCardConfigDto, UpdateCategoryWeightsDto, UpdateAssessmentScaleDto } from './dto/report-card-config.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { ManagementWriteGuard } from '../../auth/guards/management-write.guard';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -31,5 +31,15 @@ export class ReportCardConfigController {
   @Patch('category-weights')
   updateCategoryWeights(@CurrentUser() user: any, @Body() dto: UpdateCategoryWeightsDto) {
     return this.service.updateCategoryWeights(user.schoolId, dto);
+  }
+
+  @Get('assessment-scale')
+  getAssessmentScale(@CurrentUser() user: any) {
+    return this.service.getAssessmentScale(user.schoolId);
+  }
+
+  @Put('assessment-scale')
+  updateAssessmentScale(@CurrentUser() user: any, @Body() dto: UpdateAssessmentScaleDto) {
+    return this.service.updateAssessmentScale(user.schoolId, dto);
   }
 }

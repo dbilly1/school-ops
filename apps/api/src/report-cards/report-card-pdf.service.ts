@@ -20,6 +20,9 @@ export class ReportCardPdfService {
     const config = data.config;
     const showGradeLabel = config?.showGradeLabel ?? true;
     const showPosition = config?.showPosition ?? true;
+    const holisticLayout = config?.reportCardLayout === 'HOLISTIC';
+    const showScale = config?.showAssessmentScale ?? false;
+    const showMetrics = config?.showMetricsTable ?? false;
 
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
     const chunks: Buffer[] = [];
@@ -77,6 +80,11 @@ export class ReportCardPdfService {
       .font('Helvetica').text(data.term.name);
     doc.moveDown(1.5);
 
+    // ── Assessment scale (holistic layout shows it before subjects) ─────────
+    if (holisticLayout && showScale) {
+      this.drawAssessmentScale(doc, data, accent);
+    }
+
     // ── Subjects Table ──────────────────────────────────────
     this.drawSubjectsTable(doc, data.subjects, accent, showGradeLabel);
     doc.moveDown(0.8);
@@ -88,6 +96,11 @@ export class ReportCardPdfService {
     doc.fontSize(10).font('Helvetica-Bold').fillColor('#000').text(summaryParts.join('    •    '));
     doc.moveDown(1);
 
+    // ── Metrics (holistic layout shows the grade key right after subjects) ──
+    if (holisticLayout && showMetrics) {
+      this.drawMetrics(doc, data, accent);
+    }
+
     // ── Attendance Summary ──────────────────────────────────
     if (config?.showAttendanceSummary ?? true) {
       doc.fontSize(11).font('Helvetica-Bold').fillColor(accent).text('Attendance Summary');
@@ -95,6 +108,14 @@ export class ReportCardPdfService {
       doc.fontSize(10).font('Helvetica').fillColor('#000')
         .text(`Days Present: ${data.attendance.presentDays} / ${data.attendance.totalDays}   •   Absent: ${data.attendance.absentDays}   •   Rate: ${data.attendance.rate}%`);
       doc.moveDown(1);
+    }
+
+    // ── Assessment scale + Metrics (standard layout appends them) ───────────
+    if (!holisticLayout && showScale) {
+      this.drawAssessmentScale(doc, data, accent);
+    }
+    if (!holisticLayout && showMetrics) {
+      this.drawMetrics(doc, data, accent);
     }
 
     // ── Attitudes / Interests / Conduct ─────────────────────
@@ -154,6 +175,72 @@ export class ReportCardPdfService {
     } catch {
       return null;
     }
+  }
+
+  // Assessment Scale: proficiency legend + Holistic Development ratings table.
+  private drawAssessmentScale(doc: PDFKit.PDFDocument, data: any, accent: string) {
+    const scale = data.assessmentScale;
+    if (!scale?.levels?.length || !scale?.skills?.length) return;
+    const ratings: Record<string, string> = data.holistic ?? {};
+
+    doc.fontSize(11).font('Helvetica-Bold').fillColor(accent).text('Assessment Scale');
+    doc.moveDown(0.3);
+    doc.fontSize(8.5).fillColor('#000');
+    for (const l of scale.levels) {
+      doc.font('Helvetica-Bold').text(`${l.code} ${l.label}`, { continued: !!l.description });
+      doc.font('Helvetica').text(l.description ? ` — ${l.description}` : '');
+    }
+    doc.moveDown(0.4);
+
+    const group = scale.skills[0]?.groupLabel || 'Holistic Development';
+    doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#000').text(group);
+    doc.moveDown(0.2);
+
+    const startX = 50;
+    const levelW = 34;
+    const skillW = 495 - scale.levels.length * levelW;
+    let y = doc.y;
+
+    // Header row
+    const headH = 18;
+    doc.rect(startX, y, 495, headH).fill('#f3f4f6');
+    doc.fillColor('#475569').fontSize(8.5).font('Helvetica-Bold');
+    doc.text('Skill', startX + 4, y + 5, { width: skillW - 8 });
+    let x = startX + skillW;
+    for (const l of scale.levels) { doc.text(l.code, x, y + 5, { width: levelW, align: 'center' }); x += levelW; }
+    y += headH;
+
+    doc.font('Helvetica').fontSize(8.5).fillColor('#000');
+    for (const sk of scale.skills) {
+      const rowH = Math.max(16, doc.heightOfString(sk.label, { width: skillW - 8 }) + 8);
+      doc.fillColor('#000').text(sk.label, startX + 4, y + 4, { width: skillW - 8 });
+      x = startX + skillW;
+      const chosen = ratings[sk.id];
+      for (const l of scale.levels) {
+        if (chosen === l.code) {
+          doc.fillColor(accent).text('X', x, y + 4, { width: levelW, align: 'center' });
+          doc.fillColor('#000');
+        }
+        x += levelW;
+      }
+      doc.moveTo(startX, y + rowH).lineTo(545, y + rowH).strokeColor('#e5e7eb').lineWidth(0.5).stroke();
+      y += rowH;
+    }
+    doc.y = y + 8;
+  }
+
+  // Metrics: the grade-band key (from the school's grading scale).
+  private drawMetrics(doc: PDFKit.PDFDocument, data: any, accent: string) {
+    const bands = data.gradingBands ?? [];
+    if (!bands.length) return;
+    doc.fontSize(11).font('Helvetica-Bold').fillColor(accent).text('Metrics');
+    doc.moveDown(0.3);
+    doc.fontSize(9).fillColor('#000');
+    for (const b of bands) {
+      doc.font('Helvetica-Bold').text(`${b.label}  `, { continued: true });
+      doc.font('Helvetica').text(`${b.minScore}–${b.maxScore}%${b.remark ? `   ${b.remark}` : ''}`);
+    }
+    doc.moveDown(1);
   }
 
   private drawSubjectsTable(

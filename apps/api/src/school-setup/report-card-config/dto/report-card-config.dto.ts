@@ -1,6 +1,6 @@
 import { IsBoolean, IsString, IsOptional, IsArray, ValidateNested, IsInt, IsNumber, Min, Max, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
-import { AssessmentCategory } from '@prisma/client';
+import { AssessmentCategory, ReportCardLayout } from '@prisma/client';
 
 export class CustomSectionDto {
   @IsString()
@@ -59,6 +59,18 @@ export class UpdateReportCardConfigDto {
   @IsOptional()
   showPosition?: boolean;
 
+  @IsEnum(ReportCardLayout)
+  @IsOptional()
+  reportCardLayout?: ReportCardLayout;
+
+  @IsBoolean()
+  @IsOptional()
+  showAssessmentScale?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  showMetricsTable?: boolean;
+
   // Class-score (SBA) vs end-of-term-exam split. Should sum to 100.
   @IsNumber()
   @Min(0)
@@ -81,4 +93,47 @@ export class UpdateReportCardConfigDto {
   @Type(() => CustomSectionDto)
   @IsOptional()
   customSections?: CustomSectionDto[];
+}
+
+// ── Assessment scale (Holistic Development) configuration ──────────────────────
+
+export class ProficiencyLevelDto {
+  @IsString()
+  code!: string;
+
+  @IsString()
+  label!: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @IsInt()
+  @IsOptional()
+  sequence?: number;
+}
+
+export class HolisticSkillDto {
+  @IsString()
+  label!: string;
+
+  @IsString()
+  @IsOptional()
+  groupLabel?: string;
+
+  @IsInt()
+  @IsOptional()
+  sequence?: number;
+}
+
+export class UpdateAssessmentScaleDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProficiencyLevelDto)
+  levels!: ProficiencyLevelDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => HolisticSkillDto)
+  skills!: HolisticSkillDto[];
 }

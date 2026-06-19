@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GradingService } from '../school-setup/grading/grading.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isExamCategory } from '../assessments/assessment-category.util';
+import { DEFAULT_LEVELS, DEFAULT_SKILLS } from '../school-setup/report-card-config/report-card-config.service';
 import { GenerateReportCardsDto, PublishReportCardsDto, UpdateReportCardDto } from './dto/report-card.dto';
 
 // Per-subject computed terminal result.
@@ -312,6 +313,22 @@ export class ReportCardsService {
     const totalDays = attendance.length;
     const presentDays = attendance.filter((a) => a.status === 'PRESENT' || a.status === 'LATE').length;
 
+    // Assessment scale (Holistic Development) — configured rows or defaults.
+    const [levelRows, skillRows] = await Promise.all([
+      this.prisma.holisticProficiencyLevel.findMany({ where: { schoolId }, orderBy: { sequence: 'asc' } }),
+      this.prisma.holisticSkill.findMany({ where: { schoolId }, orderBy: { sequence: 'asc' } }),
+    ]);
+    const assessmentScale = {
+      levels: levelRows.length > 0 ? levelRows : DEFAULT_LEVELS.map((l) => ({ id: l.code, ...l })),
+      skills: skillRows.length > 0 ? skillRows : DEFAULT_SKILLS.map((s, i) => ({ id: `default-${i}`, ...s })),
+    };
+
+    // Metrics table = the active grading scale bands for this student's level.
+    const scale = await this.grading.getActiveScale(schoolId, gradeLevelId);
+    const gradingBands = (scale?.bands ?? []).map((b) => ({
+      label: b.label, minScore: Number(b.minScore), maxScore: Number(b.maxScore), remark: b.remark,
+    }));
+
     return {
       student: { id: student.id, studentId: student.studentId, firstName: student.firstName, lastName: student.lastName },
       term: { id: term.id, name: term.name, academicYear: term.academicYear },
@@ -320,6 +337,9 @@ export class ReportCardsService {
       subjects,
       overallGrade,
       aggregate,
+      assessmentScale,
+      gradingBands,
+      holistic: (reportCard?.holistic as Record<string, string> | null) ?? null,
       position: reportCard?.position ?? null,
       classSize: reportCard?.classSize ?? null,
       conduct: reportCard
@@ -337,15 +357,21 @@ export class ReportCardsService {
     };
   }
 
-  // Update the conduct / remarks section of a generated report card.
+  // Update the conduct / remarks / holistic ratings of a report card.
   async updateReportCard(schoolId: string, studentId: string, termId: string, dto: UpdateReportCardDto) {
     const student = await this.prisma.student.findFirst({ where: { id: studentId, schoolId } });
     if (!student) throw new NotFoundException('Student not found');
 
+    const { holistic, ...rest } = dto;
+    const data = {
+      ...rest,
+      ...(holistic !== undefined ? { holistic: holistic as Prisma.InputJsonValue } : {}),
+    };
+
     return this.prisma.reportCard.upsert({
       where: { studentId_termId: { studentId, termId } },
-      update: { ...dto },
-      create: { studentId, termId, ...dto },
+      update: data,
+      create: { studentId, termId, ...data },
     });
   }
 

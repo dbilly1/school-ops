@@ -1,6 +1,21 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UpdateReportCardConfigDto, UpdateCategoryWeightsDto } from './dto/report-card-config.dto';
+import { UpdateReportCardConfigDto, UpdateCategoryWeightsDto, UpdateAssessmentScaleDto } from './dto/report-card-config.dto';
+
+// Defaults offered when a school hasn't configured its own holistic scale yet.
+export const DEFAULT_LEVELS = [
+  { code: 'E', label: 'Emerging', description: 'Learner is beginning to show the skill with support.', sequence: 0 },
+  { code: 'D', label: 'Developing', description: 'Learner is building the skill and can do it with some support.', sequence: 1 },
+  { code: 'EX', label: 'Expected', description: 'Learner shows the skill independently and consistently.', sequence: 2 },
+  { code: 'EE', label: 'Exceeding Expectations', description: 'Learner confidently applies the skill beyond what is expected.', sequence: 3 },
+];
+export const DEFAULT_GROUP = 'Holistic Development (Personal Growth & Learning Skills)';
+export const DEFAULT_SKILLS = [
+  'Learner recognises, expresses, and manages emotions appropriately.',
+  'Learner builds positive relationships showing respect and responsibility.',
+  'Learner listens, speaks clearly, and expresses ideas confidently.',
+  'Learner stays focused, follows instructions, and works independently.',
+].map((label, sequence) => ({ label, groupLabel: DEFAULT_GROUP, sequence }));
 
 @Injectable()
 export class ReportCardConfigService {
@@ -78,6 +93,48 @@ export class ReportCardConfigService {
         });
       }
       return tx.assessmentCategoryWeight.findMany({ where: { schoolId } });
+    });
+  }
+
+  // ── Assessment scale (Holistic Development) ───────────────────────────────
+  // Returns the school's configured levels/skills, or sensible defaults when it
+  // hasn't set any yet (so the section is usable out of the box).
+
+  async getAssessmentScale(schoolId: string) {
+    const [levels, skills] = await Promise.all([
+      this.prisma.holisticProficiencyLevel.findMany({ where: { schoolId }, orderBy: { sequence: 'asc' } }),
+      this.prisma.holisticSkill.findMany({ where: { schoolId }, orderBy: { sequence: 'asc' } }),
+    ]);
+    return {
+      levels: levels.length > 0 ? levels : DEFAULT_LEVELS.map((l) => ({ id: l.code, ...l })),
+      skills: skills.length > 0 ? skills : DEFAULT_SKILLS.map((s, i) => ({ id: `default-${i}`, ...s })),
+      isDefault: levels.length === 0 && skills.length === 0,
+    };
+  }
+
+  async updateAssessmentScale(schoolId: string, dto: UpdateAssessmentScaleDto) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.holisticProficiencyLevel.deleteMany({ where: { schoolId } });
+      await tx.holisticSkill.deleteMany({ where: { schoolId } });
+      if (dto.levels.length > 0) {
+        await tx.holisticProficiencyLevel.createMany({
+          data: dto.levels.map((l, i) => ({
+            schoolId, code: l.code, label: l.label, description: l.description ?? null, sequence: l.sequence ?? i,
+          })),
+        });
+      }
+      if (dto.skills.length > 0) {
+        await tx.holisticSkill.createMany({
+          data: dto.skills.map((s, i) => ({
+            schoolId, label: s.label, groupLabel: s.groupLabel ?? null, sequence: s.sequence ?? i,
+          })),
+        });
+      }
+      const [levels, skills] = await Promise.all([
+        tx.holisticProficiencyLevel.findMany({ where: { schoolId }, orderBy: { sequence: 'asc' } }),
+        tx.holisticSkill.findMany({ where: { schoolId }, orderBy: { sequence: 'asc' } }),
+      ]);
+      return { levels, skills, isDefault: false };
     });
   }
 }
