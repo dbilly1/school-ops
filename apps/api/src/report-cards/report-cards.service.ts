@@ -19,7 +19,7 @@ type SubjectResult = {
   examPercent: number | null;
   sbaScore: number; // sbaPercent scaled to the SBA weight (e.g. 0–50)
   examScore: number; // examPercent scaled to the exam weight (e.g. 0–50)
-  total: number; // 0–100
+  total: number | null; // 0–100, or null when the subject has no scores yet
   gradeLabel: string | null;
   remark: string | null;
 };
@@ -33,6 +33,13 @@ export class ReportCardsService {
   ) {}
 
   // ── Computation ───────────────────────────────────────────
+
+  // Aggregate = average of subjects that actually have a score (unscored
+  // subjects are listed on the card but excluded here).
+  private aggregateOf(subjects: SubjectResult[]): number {
+    const scored = subjects.filter((r) => r.total !== null) as Array<SubjectResult & { total: number }>;
+    return scored.length > 0 ? this.round(scored.reduce((s, r) => s + r.total, 0) / scored.length) : 0;
+  }
 
   private round(n: number, dp = 1): number {
     const f = 10 ** dp;
@@ -85,7 +92,32 @@ export class ReportCardsService {
     const hasConfiguredWeights = categoryWeights.size > 0;
     const results: SubjectResult[] = [];
 
-    for (const [subjectId, acc] of bySubject) {
+    // List every subject the class/grade level takes (so unscored courses still
+    // appear, blank), unioned with any subject the student happens to have scores
+    // in. Subjects with no scores get a blank row and are excluded from the
+    // aggregate (their total is null).
+    const subjectNames = new Map<string, string>();
+    if (gradeLevelId) {
+      const gradeSubjects = await this.prisma.gradeLevelSubject.findMany({
+        where: { gradeLevelId },
+        include: { subject: { select: { id: true, name: true } } },
+      });
+      for (const gs of gradeSubjects) subjectNames.set(gs.subject.id, gs.subject.name);
+    }
+    for (const [id, acc] of bySubject) if (!subjectNames.has(id)) subjectNames.set(id, acc.name);
+
+    for (const [subjectId, name] of subjectNames) {
+      const acc = bySubject.get(subjectId);
+      if (!acc) {
+        // No scores recorded yet — show the subject with blanks.
+        results.push({
+          subjectId, subject: name,
+          sbaRaw: 0, sbaTotal: 0, sbaPercent: null,
+          examRaw: 0, examTotal: 0, examPercent: null,
+          sbaScore: 0, examScore: 0, total: null, gradeLabel: null, remark: null,
+        });
+        continue;
+      }
       // SBA percent = weighted average of each contributing category's percent.
       // Default (no config): every present category weighted equally. With
       // config: only categories that have a weight contribute.
@@ -108,7 +140,7 @@ export class ReportCardsService {
 
       // Combine. If a subject only has one side recorded so far, use it at full
       // weight so mid-term reports aren't dragged down by a missing exam.
-      let total: number;
+      let total: number | null = null;
       let sbaScore = 0;
       let examScore = 0;
       if (sbaPercent !== null && examPercent !== null) {
@@ -121,15 +153,13 @@ export class ReportCardsService {
       } else if (examPercent !== null) {
         examScore = examPercent;
         total = examPercent;
-      } else {
-        continue; // no usable data
       }
 
-      const band = await this.grading.deriveBand(schoolId, Math.round(total), gradeLevelId);
+      const band = total !== null ? await this.grading.deriveBand(schoolId, Math.round(total), gradeLevelId) : null;
 
       results.push({
         subjectId,
-        subject: acc.name,
+        subject: name,
         sbaRaw: this.round(sbaRaw),
         sbaTotal: this.round(sbaTotal),
         sbaPercent: sbaPercent !== null ? this.round(sbaPercent) : null,
@@ -138,7 +168,7 @@ export class ReportCardsService {
         examPercent: examPercent !== null ? this.round(examPercent) : null,
         sbaScore: this.round(sbaScore),
         examScore: this.round(examScore),
-        total: this.round(total),
+        total: total !== null ? this.round(total) : null,
         gradeLabel: band?.label ?? null,
         remark: band?.remark ?? null,
       });
@@ -182,9 +212,7 @@ export class ReportCardsService {
         const subjects = await this.computeSubjects(
           schoolId, student.id, dto.termId, cls.gradeLevelId, categoryWeights, sbaWeight, examWeight,
         );
-        const aggregate = subjects.length > 0
-          ? this.round(subjects.reduce((s, r) => s + r.total, 0) / subjects.length)
-          : 0;
+        const aggregate = this.aggregateOf(subjects);
         return { studentId: student.id, subjects, aggregate };
       }),
     );
@@ -299,13 +327,12 @@ export class ReportCardsService {
     } else {
       const { sbaWeight, examWeight, categoryWeights } = await this.loadWeights(schoolId);
       subjects = await this.computeSubjects(schoolId, studentId, termId, gradeLevelId, categoryWeights, sbaWeight, examWeight);
-      const agg = subjects.length > 0 ? subjects.reduce((s, r) => s + r.total, 0) / subjects.length : 0;
-      overallGrade = await this.grading.deriveGrade(schoolId, Math.round(agg), gradeLevelId);
+      overallGrade = await this.grading.deriveGrade(schoolId, Math.round(this.aggregateOf(subjects)), gradeLevelId);
     }
 
     const aggregate = reportCard?.aggregate != null
       ? Number(reportCard.aggregate)
-      : subjects.length > 0 ? this.round(subjects.reduce((s, r) => s + r.total, 0) / subjects.length) : 0;
+      : this.aggregateOf(subjects);
 
     const attendance = await this.prisma.studentAttendanceRecord.findMany({
       where: { schoolId, studentId, ...(term.startDate && term.endDate ? { date: { gte: term.startDate, lte: term.endDate } } : {}) },

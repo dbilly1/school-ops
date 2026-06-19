@@ -35,7 +35,7 @@ export type ReportCardData = {
     examPercent: number | null;
     sbaScore: number;
     examScore: number;
-    total: number;
+    total: number | null;
     gradeLabel: string | null;
     remark: string | null;
   }[];
@@ -240,7 +240,7 @@ function SubjectsTable({ data, accent, filledHeader }: { data: ReportCardData; a
             <td className={`${BORDER} px-3 py-1.5`}>{s.subject}</td>
             <td className={`${BORDER} px-3 py-1.5 text-center`}>{s.sbaPercent != null ? s.sbaScore : '—'}</td>
             <td className={`${BORDER} px-3 py-1.5 text-center`}>{s.examPercent != null ? s.examScore : '—'}</td>
-            <td className={`${BORDER} px-3 py-1.5 text-center font-semibold`}>{s.total}</td>
+            <td className={`${BORDER} px-3 py-1.5 text-center font-semibold`}>{s.total != null ? s.total : '—'}</td>
             {showGrade && <td className={`${BORDER} px-3 py-1.5 text-center font-semibold`}>{s.gradeLabel ?? '—'}</td>}
             {showGrade && <td className={`${BORDER} px-3 py-1.5`}>{s.remark ?? ''}</td>}
           </tr>

@@ -359,7 +359,7 @@ export class ReportCardPdfService {
         if (col.key === 'subject') value = s.subject;
         else if (col.key === 'sba') value = s.sbaPercent != null ? `${s.sbaScore}` : '—';
         else if (col.key === 'exam') value = s.examPercent != null ? `${s.examScore}` : '—';
-        else if (col.key === 'total') value = `${s.total}`;
+        else if (col.key === 'total') value = s.total != null ? `${s.total}` : '—';
         else if (col.key === 'gradeLabel') value = s.gradeLabel ?? '-';
         doc.text(value, x + 6, y + 6, { width: col.width - 12 });
         x += col.width;
