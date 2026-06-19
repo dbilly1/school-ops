@@ -4,5 +4,8 @@
   --accent: #065f46;
   --accent-hover: #047857;
   --accent-tint: #d1fae5;
+  /* Always a dark shade of the current accent (live-derived; fallback first for
+     browsers without color-mix). */
   --accent-dark: #022c22;
+  --accent-dark: color-mix(in srgb, var(--accent) 58%, #000);
 }
