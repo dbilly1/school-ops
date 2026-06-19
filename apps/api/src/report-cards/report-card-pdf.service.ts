@@ -94,6 +94,14 @@ export class ReportCardPdfService {
         .font('Helvetica').text(data.term.academicYear.name);
       doc.font('Helvetica-Bold').text(`Term: `, 320, doc.y, { continued: true })
         .font('Helvetica').text(data.term.name);
+      if (data.vacationDate) {
+        doc.font('Helvetica-Bold').text(`Vacation: `, 320, doc.y, { continued: true })
+          .font('Helvetica').text(this.fmtDate(data.vacationDate));
+      }
+      if (data.nextTermReopens) {
+        doc.font('Helvetica-Bold').text(`Next Term Begins: `, 320, doc.y, { continued: true })
+          .font('Helvetica').text(this.fmtDate(data.nextTermReopens));
+      }
       doc.moveDown(1.5);
     }
 
@@ -109,7 +117,7 @@ export class ReportCardPdfService {
     // ── Overall summary ─────────────────────────────────────
     const summaryParts = [`Overall: ${data.aggregate}%`];
     if (showGradeLabel && data.overallGrade) summaryParts.push(`Grade: ${data.overallGrade}`);
-    if (showPosition && data.position) summaryParts.push(`Position: ${data.position}${data.classSize ? ` of ${data.classSize}` : ''}`);
+    if (showPosition && data.position) summaryParts.push(`Position: ${this.ordinal(data.position)}`);
     doc.fontSize(10).font('Helvetica-Bold').fillColor('#000').text(summaryParts.join('    •    '));
     doc.moveDown(1);
 
@@ -282,8 +290,8 @@ export class ReportCardPdfService {
   private drawInfoBox(doc: PDFKit.PDFDocument, data: any) {
     const rows: [string, string][] = [
       [`Name: ${data.student.firstName} ${data.student.lastName}`, `Class: ${data.className ?? '-'}`],
-      [`Academic Year/Term: ${data.term.academicYear.name} - ${data.term.name}`, `Date: ${this.fmtDate(new Date().toISOString())}`],
-      [`Class Teacher: ${data.classTeacherName ?? '-'}`, `School Reopens: ${this.fmtDate(data.nextTermReopens) || '-'}`],
+      [`Academic Year/Term: ${data.term.academicYear.name} - ${data.term.name}`, `Vacation: ${this.fmtDate(data.vacationDate) || '-'}`],
+      [`Class Teacher: ${data.classTeacherName ?? '-'}`, `Next Term Begins: ${this.fmtDate(data.nextTermReopens) || '-'}`],
     ];
     const startX = 50, colW = 247.5, rowH = 18;
     let y = doc.y;
@@ -298,10 +306,16 @@ export class ReportCardPdfService {
     doc.y = y;
   }
 
-  private fmtDate(value?: string | null): string {
+  private fmtDate(value?: string | Date | null): string {
     if (!value) return '';
     const d = new Date(value);
     return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+
+  private ordinal(n: number): string {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
   }
 
   private drawSubjectsTable(

@@ -349,6 +349,7 @@ export class ReportCardsService {
       term: { id: term.id, name: term.name, academicYear: term.academicYear },
       className: assignment?.class.name ?? null,
       classTeacherName,
+      vacationDate: term.endDate ?? null,
       nextTermReopens: nextTerm?.startDate ?? null,
       config,
       subjects,

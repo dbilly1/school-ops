@@ -183,6 +183,9 @@ export default function ReportCardConfigPage() {
         .filter(([, v]) => v !== '' && !isNaN(parseFloat(v)))
         .map(([category, v]) => ({ category, weight: parseFloat(v) }));
       await staffApi.patch('/school/report-card-config/category-weights', { weights });
+      // Reflect the persisted record so the saved layout/toggles always stick.
+      const fresh = await staffApi.get<ReportCardConfig>('/school/report-card-config');
+      setConfig({ ...fresh, sbaWeight: Number(fresh.sbaWeight), examWeight: Number(fresh.examWeight) });
       setAlert({ type: 'success', message: 'Report card settings saved.' });
     } catch (err) {
       setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to save.' });

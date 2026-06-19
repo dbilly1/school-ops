@@ -12,6 +12,7 @@ export type ReportCardData = {
   term: { id: string; name: string; academicYear: { id: string; name: string } };
   className: string | null;
   classTeacherName?: string | null;
+  vacationDate?: string | null;
   nextTermReopens?: string | null;
   config: {
     showRawScore?: boolean;
@@ -72,6 +73,13 @@ function fmtDate(value?: string | null): string {
   return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+// 1 → 1st, 2 → 2nd, 3 → 3rd, 11 → 11th, etc.
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+}
+
 export function ReportCardDocument({ data, school }: { data: ReportCardData; school: SchoolHeader }) {
   const accent = school.primaryColor || '#1a56db';
   const cfg = data.config ?? {};
@@ -107,14 +115,16 @@ function StandardLayout({ data, school, accent, scaleOn, metricsOn }: LayoutProp
         <p><span className="font-semibold">Student ID:</span> {data.student.studentId}</p>
         <p><span className="font-semibold">Term:</span> {data.term.name}</p>
         {data.className && <p><span className="font-semibold">Class:</span> {data.className}</p>}
+        {fmtDate(data.vacationDate) && <p><span className="font-semibold">Vacation:</span> {fmtDate(data.vacationDate)}</p>}
+        {fmtDate(data.nextTermReopens) && <p><span className="font-semibold">Next Term Begins:</span> {fmtDate(data.nextTermReopens)}</p>}
       </div>
 
       <SubjectsTable data={data} accent={accent} filledHeader />
       <Summary data={data} cfg={cfg} />
       {(cfg.showAttendanceSummary ?? true) && <Attendance data={data} accent={accent} />}
-      {scaleOn && <AssessmentScaleTable data={data} accent={accent} />}
-      {scaleOn && <HolisticTable data={data} accent={accent} />}
-      {metricsOn && <MetricsTable data={data} accent={accent} />}
+      {scaleOn && <div className="mt-6"><AssessmentScaleTable data={data} accent={accent} /></div>}
+      {scaleOn && <div className="mt-6"><HolisticTable data={data} accent={accent} /></div>}
+      {metricsOn && <div className="mt-6"><MetricsTable data={data} accent={accent} /></div>}
       {(cfg.showBehaviourScores ?? false) && <Conduct data={data} accent={accent} />}
       {(cfg.showTeacherComments ?? true) && <RemarkBox accent={accent} label="Class Teacher's Comments" text={data.conduct?.teacherRemarks} />}
       {(cfg.showPrincipalComments ?? true) && <RemarkBox accent={accent} label="Head Teacher's Comments" text={data.conduct?.headTeacherRemarks} />}
@@ -160,11 +170,11 @@ function HolisticLayout({ data, school, accent, scaleOn, metricsOn }: LayoutProp
             </tr>
             <tr>
               <Cell><b>Academic Year/Term:</b> {data.term.academicYear.name} – {data.term.name}</Cell>
-              <Cell><b>Date:</b> {fmtDate(new Date().toISOString())}</Cell>
+              <Cell><b>Vacation:</b> {fmtDate(data.vacationDate) || '—'}</Cell>
             </tr>
             <tr>
               <Cell><b>Class Teacher:</b> {data.classTeacherName ?? '—'}</Cell>
-              <Cell><b>School Reopens:</b> {fmtDate(data.nextTermReopens) || '—'}</Cell>
+              <Cell><b>Next Term Begins:</b> {fmtDate(data.nextTermReopens) || '—'}</Cell>
             </tr>
           </tbody>
         </table>
@@ -251,7 +261,7 @@ function Summary({ data, cfg }: { data: ReportCardData; cfg: NonNullable<ReportC
       <span>Overall: {data.aggregate}%</span>
       {showGrade && data.overallGrade && <span>Grade: {data.overallGrade}</span>}
       {showPosition && data.position != null && (
-        <span>Position: {data.position}{data.classSize ? ` of ${data.classSize}` : ''}</span>
+        <span>Position: {ordinal(data.position)}</span>
       )}
       {data.conduct?.promotedTo && <span>Promoted to: {data.conduct.promotedTo}</span>}
     </div>
