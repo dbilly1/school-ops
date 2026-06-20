@@ -17,11 +17,6 @@ type StudentRecord = {
   existingRecordId: string | null;
 };
 
-type StaffRecord = {
-  user: { id: string; firstName: string; lastName: string; roles: { role: string }[] };
-  status: AttendanceStatus | null;
-};
-
 const STATUS_CONFIG: Record<AttendanceStatus, { label: string; color: string; bg: string }> = {
   PRESENT: { label: 'Present', color: '#22c55e', bg: '#f0fdf4' },
   LATE:    { label: 'Late',    color: '#f59e0b', bg: '#fffbeb' },
@@ -634,130 +629,10 @@ function StudentAttendanceTab({ assignedClassIds, restricted }: {
   );
 }
 
-// ── Staff attendance tab ──────────────────────────────────────────────────────
-
-function StaffAttendanceTab() {
-  const today = new Date().toISOString().split('T')[0];
-  const [date, setDate]       = useState(today);
-  const [statuses, setStatuses] = useState<Record<string, AttendanceStatus>>({});
-  const [saving, setSaving]   = useState(false);
-  const [alert, setAlert]     = useState<{ type: 'error' | 'success'; message: string } | null>(null);
-
-  const fetchRecords = useCallback(
-    () => staffApi.get<StaffRecord[]>(`/school/attendance/staff?date=${date}`).catch(() => []),
-    [date],
-  );
-  const { data: records, loading, refetch } = useApi(fetchRecords);
-
-  const [initialised, setInitialised] = useState(false);
-  if (!loading && records && !initialised) {
-    const init: Record<string, AttendanceStatus> = {};
-    records.forEach(r => { if (r.status) init[r.user.id] = r.status; });
-    setStatuses(init);
-    setInitialised(true);
-  }
-
-  function handleDateChange(d: string) {
-    setDate(d);
-    setInitialised(false);
-    setStatuses({});
-  }
-
-  async function save() {
-    if (!records) return;
-    setAlert(null); setSaving(true);
-    try {
-      const entries = records.map(r => ({
-        userId: r.user.id,
-        date,
-        status: statuses[r.user.id] ?? 'ABSENT',
-      }));
-      await staffApi.post('/school/attendance/staff', { records: entries });
-      setAlert({ type: 'success', message: `Staff attendance saved.` });
-      refetch();
-    } catch (err) {
-      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to save.' });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex items-center gap-3 mb-5">
-        <input type="date" value={date} onChange={e => handleDateChange(e.target.value)} max={today}
-          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
-          onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
-          onBlur={e => e.currentTarget.style.boxShadow = ''} />
-      </div>
-
-      {alert && <div className="mb-4"><Alert type={alert.type} message={alert.message} /></div>}
-
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Staff member</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Roles</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Attendance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && Array.from({length:6}).map((_,i) => (
-              <tr key={i} className="border-b border-slate-50">
-                <td colSpan={3} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td>
-              </tr>
-            ))}
-            {!loading && records?.map(record => (
-              <tr key={record.user.id} className="border-b border-slate-50 hover:bg-slate-50/40 transition">
-                <td className="px-4 py-3">
-                  <p className="text-sm font-medium text-slate-800">
-                    {record.user.firstName} {record.user.lastName}
-                  </p>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {record.user.roles.map(r => (
-                      <span key={r.role} className="text-[10px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded capitalize">
-                        {r.role.replace('_', ' ').toLowerCase()}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <StatusToggle
-                    status={statuses[record.user.id] ?? null}
-                    onChange={s => setStatuses(p => ({ ...p, [record.user.id]: s }))}
-                  />
-                </td>
-              </tr>
-            ))}
-            {!loading && (!records || records.length === 0) && (
-              <tr><td colSpan={3} className="px-4 py-12 text-center text-sm text-slate-400">No staff found.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {records && records.length > 0 && (
-        <div className="mt-4 flex justify-end">
-          <SaveButton loading={saving} onClick={save} label="Save attendance" />
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AttendancePage() {
-  const scope  = useTeacherScope();
-  const [tab, setTab] = useState<'students' | 'staff'>('students');
-
-  // Restricted teachers only see the students tab
-  const availableTabs = scope.restricted
-    ? (['students'] as const)
-    : (['students', 'staff'] as const);
+  const scope = useTeacherScope();
 
   return (
     <div>
@@ -768,28 +643,11 @@ export default function AttendancePage() {
         </div>
       </div>
 
-      {/* Tab switcher — hide when only one tab is available */}
-      {!scope.restricted && (
-        <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-xl w-fit">
-          {availableTabs.map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={cn(
-                'px-5 py-1.5 rounded-lg text-sm font-medium transition capitalize',
-                tab === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700',
-              )}>
-              {t}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {(tab === 'students' || scope.restricted) && (
-        <StudentAttendanceTab
-          assignedClassIds={scope.classTeacherClassIds}
-          restricted={scope.restricted}
-        />
-      )}
-      {tab === 'staff' && !scope.restricted && <StaffAttendanceTab />}
+      {/* Staff attendance removed for now — student attendance only. */}
+      <StudentAttendanceTab
+        assignedClassIds={scope.classTeacherClassIds}
+        restricted={scope.restricted}
+      />
     </div>
   );
 }
