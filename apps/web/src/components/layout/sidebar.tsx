@@ -35,6 +35,7 @@ const icons = {
   academics:     'M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z',
   attendance:    'M9 11l3 3L22 4 M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
   finance:       'M12 1v22 M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
+  expenses:      'M6 2h12a1 1 0 0 1 1 1v18l-3-2-3 2-3-2-3 2V3a1 1 0 0 1 1-1z M9 8h6 M9 12h6 M9 16h4',
   feeding:       'M18 8h1a4 4 0 0 1 0 8h-1 M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z M6 1v3 M10 1v3 M14 1v3',
   transport:     'M1 3h15v13H1z M16 8h4l3 3v5h-7V8z M5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z M18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
   communication: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
@@ -136,7 +137,8 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: 'Finance & Ops',
     items: [
-      { label: 'Finance',   href: '/school/finance',   iconPath: icons.finance,   featureKey: 'finance',      roles: OWNER_ADMIN_ACCOUNTANT },
+      { label: 'Fees',      href: '/school/finance',   iconPath: icons.finance,   featureKey: 'finance',      roles: OWNER_ADMIN_ACCOUNTANT },
+      { label: 'Expenses',  href: '/school/expenses',  iconPath: icons.expenses,  featureKey: 'finance',      roles: OWNER_ADMIN_ACCOUNTANT },
       { label: 'Feeding',   href: '/school/feeding',   iconPath: icons.feeding,   featureKey: 'feeding_fees', roles: OWNER_ADMIN_ACCOUNTANT },
       { label: 'Transport', href: '/school/transport', iconPath: icons.transport, featureKey: 'transport',    roles: OWNER_ADMIN_TRANSPORT  },
     ],

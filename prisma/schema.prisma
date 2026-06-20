@@ -256,6 +256,9 @@ model School {
   assessmentCategoryWeights AssessmentCategoryWeight[]
   holisticProficiencyLevels HolisticProficiencyLevel[]
   holisticSkills           HolisticSkill[]
+  expenseCategories        ExpenseCategory[]
+  expenses                 Expense[]
+  expenseBudgets           ExpenseBudget[]
 
   @@map("schools")
 }
@@ -397,6 +400,7 @@ model User {
   feedingRecorded     FeedingPayment[]         @relation("FeedingRecordedBy")
   transportRecorded   TransportPayment[]       @relation("TransportRecordedBy")
   paymentsRecorded    Payment[]                @relation("PaymentRecordedBy")
+  expensesRecorded    Expense[]                @relation("ExpenseRecordedBy")
 
   @@unique([schoolId, email])
   @@map("users")
@@ -507,6 +511,8 @@ model Term {
   feeStructures   FeeStructure[]
   invoices        Invoice[]
   reportCards     ReportCard[]
+  expenses        Expense[]
+  expenseBudgets  ExpenseBudget[]
 
   @@unique([academicYearId, sequence])
   @@index([schoolId])
@@ -1101,6 +1107,68 @@ model Payment {
   @@index([schoolId])
   @@index([invoiceId])
   @@map("payments")
+}
+
+// ============================================================
+// EXPENSES (school outflow)
+// ============================================================
+
+model ExpenseCategory {
+  id         String   @id @default(uuid())
+  schoolId   String
+  name       String
+  isArchived Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  school   School          @relation(fields: [schoolId], references: [id])
+  expenses Expense[]
+  budgets  ExpenseBudget[]
+
+  @@unique([schoolId, name])
+  @@map("expense_categories")
+}
+
+model Expense {
+  id          String   @id @default(uuid())
+  schoolId    String
+  categoryId  String
+  termId      String
+  amount      Decimal
+  expenseDate DateTime
+  payee       String?
+  method      String?
+  reference   String?
+  notes       String?
+  recordedBy  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school         School          @relation(fields: [schoolId], references: [id])
+  category       ExpenseCategory @relation(fields: [categoryId], references: [id])
+  term           Term            @relation(fields: [termId], references: [id])
+  recordedByUser User            @relation("ExpenseRecordedBy", fields: [recordedBy], references: [id])
+
+  @@index([schoolId])
+  @@index([categoryId])
+  @@index([termId])
+  @@map("expenses")
+}
+
+model ExpenseBudget {
+  id         String   @id @default(uuid())
+  schoolId   String
+  categoryId String
+  termId     String
+  amount     Decimal
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  school   School          @relation(fields: [schoolId], references: [id])
+  category ExpenseCategory @relation(fields: [categoryId], references: [id])
+  term     Term            @relation(fields: [termId], references: [id])
+
+  @@unique([schoolId, categoryId, termId])
+  @@map("expense_budgets")
 }
 
 // ============================================================

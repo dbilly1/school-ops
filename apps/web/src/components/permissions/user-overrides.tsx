@@ -39,6 +39,7 @@ const FEATURES = [
     { key: 'receipts', label: 'Receipts' },
     { key: 'outstanding_balance_tracking', label: 'Outstanding balance tracking' },
     { key: 'discount_management', label: 'Discount management' },
+    { key: 'expense_management', label: 'Expense management' },
   ]},
   { key: 'feeding_fees', label: 'Feeding Fees', subFeatures: [
     { key: 'fee_collection', label: 'Daily fee collection' },

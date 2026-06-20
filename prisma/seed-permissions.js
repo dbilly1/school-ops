@@ -102,6 +102,11 @@ const DEFAULTS = [
   ['ACCOUNTANT', 'finance', 'discount_management',         'CREATE', true ],
   ['ACCOUNTANT', 'finance', 'discount_management',         'EDIT',   true ],
   ['ACCOUNTANT', 'finance', 'discount_management',         'DELETE', false],
+  // Expense management — denied by default; School Owner grants per role/user.
+  ['ACCOUNTANT', 'finance', 'expense_management',          'VIEW',   false],
+  ['ACCOUNTANT', 'finance', 'expense_management',          'CREATE', false],
+  ['ACCOUNTANT', 'finance', 'expense_management',          'EDIT',   false],
+  ['ACCOUNTANT', 'finance', 'expense_management',          'DELETE', false],
   // Feeding fees
   ['ACCOUNTANT', 'feeding_fees', null, 'VIEW',   true ],
   ['ACCOUNTANT', 'feeding_fees', null, 'CREATE', true ],

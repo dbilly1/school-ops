@@ -52,6 +52,7 @@ const FEATURES = [
       { key: 'receipts',                   label: 'Receipts',                   defaultOn: true  },
       { key: 'outstanding_balance_tracking', label: 'Outstanding balance tracking', defaultOn: true },
       { key: 'discount_management',        label: 'Discount management',        defaultOn: false },
+      { key: 'expense_management',         label: 'Expense management',         defaultOn: true  },
     ],
   },
   {

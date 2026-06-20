@@ -46,6 +46,7 @@ async function main() {
     { featureKey: 'finance', subFeatureKey: 'receipts', defaultEnabled: true },
     { featureKey: 'finance', subFeatureKey: 'outstanding_balance_tracking', defaultEnabled: false },
     { featureKey: 'finance', subFeatureKey: 'discount_management', defaultEnabled: false },
+    { featureKey: 'finance', subFeatureKey: 'expense_management', defaultEnabled: true },
     { featureKey: 'finance', subFeatureKey: 'feeding_fees', defaultEnabled: false },
     { featureKey: 'finance', subFeatureKey: 'transport_fees', defaultEnabled: false },
     { featureKey: 'student_portal', subFeatureKey: 'attendance_view', defaultEnabled: true },
@@ -89,6 +90,12 @@ async function main() {
   }
   for (const pkg of packages) {
     const keys = new Set(pkg.features.map((f) => `${f.featureKey}:${f.subFeatureKey ?? ''}`));
+    // Expense management — where finance is in the package. The resolver checks
+    // package availability BEFORE the owner/admin bypass, so without this the
+    // expense routes would deny everyone (same reasoning as fee_collection).
+    if (keys.has('finance:')) {
+      await ensurePkgFeature(pkg.id, 'finance', 'expense_management');
+    }
     // Transport fee collection — where transport is in the package.
     if (keys.has('transport:')) {
       await ensurePkgFeature(pkg.id, 'transport', 'fee_collection');

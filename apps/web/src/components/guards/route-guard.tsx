@@ -30,6 +30,7 @@ const RULES: Rule[] = [
   { prefix: '/school/academics',     roles: OWNER_ADMIN_TEACHER,    featureKey: 'academics'     },
   { prefix: '/school/attendance',    roles: OWNER_ADMIN_TEACHER,    featureKey: 'attendance'    },
   { prefix: '/school/finance',       roles: OWNER_ADMIN_ACCOUNTANT, featureKey: 'finance'       },
+  { prefix: '/school/expenses',      roles: OWNER_ADMIN_ACCOUNTANT, featureKey: 'finance'       },
   { prefix: '/school/feeding',       roles: OWNER_ADMIN_ACCOUNTANT, featureKey: 'feeding_fees'  },
   { prefix: '/school/transport',     roles: OWNER_ADMIN_TRANSPORT,  featureKey: 'transport'     },
   { prefix: '/school/communication',                                featureKey: 'communication' },
