@@ -88,6 +88,44 @@ function EmptyRow({ text }: { text: string }) {
   return <p className="text-sm text-slate-400 italic py-3 text-center">{text}</p>;
 }
 
+// ── Attendance nudge ────────────────────────────────────────────────────────────
+// Surfaces classes that haven't marked attendance today. Scoped server-side:
+// admins see all classes, a teacher sees only their own. Silent on non-school days.
+
+type CoverageResponse = {
+  schoolDayCount: number;
+  classes: { id: string; name: string; missingCount: number }[];
+};
+
+function AttendanceNudge() {
+  const today = new Date().toISOString().split('T')[0];
+  const fetchCoverage = useCallback(
+    () => staffApi.get<CoverageResponse>(`/school/attendance/coverage?start=${today}&end=${today}`).catch(() => null),
+    [today],
+  );
+  const { data } = useApi(fetchCoverage);
+
+  if (!data || data.schoolDayCount === 0) return null; // non-school day / no active term
+  const missing = data.classes.filter(c => c.missingCount > 0);
+  if (missing.length === 0) return null;
+
+  const shown = missing.slice(0, 3).map(c => c.name).join(', ');
+  const extra = missing.length - 3;
+
+  return (
+    <Link href="/school/attendance"
+      className="flex items-center gap-3 mb-6 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 hover:bg-amber-100 transition">
+      <span className="text-base">⚠️</span>
+      <p className="text-sm text-amber-800">
+        <span className="font-semibold">
+          {missing.length} {missing.length === 1 ? 'class hasn’t' : 'classes haven’t'} marked attendance today
+        </span>
+        <span className="text-amber-700"> — {shown}{extra > 0 ? ` +${extra} more` : ''}</span>
+      </p>
+    </Link>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -112,6 +150,8 @@ export default function DashboardPage() {
           {data?.academics.activeTerm && <span> · {data.academics.activeTerm}</span>}
         </p>
       </div>
+
+      <AttendanceNudge />
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

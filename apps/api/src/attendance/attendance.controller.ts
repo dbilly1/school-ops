@@ -15,6 +15,19 @@ export class AttendanceController {
   constructor(private attendanceService: AttendanceService) {}
 
   // Student
+  @Get('coverage')
+  @RequirePermission('attendance', 'VIEW')
+  getCoverage(
+    @CurrentUser() user: any,
+    @Query('start') start: string,
+    @Query('end') end: string,
+  ) {
+    return this.attendanceService.getCoverage(user.schoolId, start, end, {
+      id: user.id,
+      roles: user.roles,
+    });
+  }
+
   @Get('class/:classId')
   @RequirePermission('attendance', 'VIEW')
   getClassAttendance(

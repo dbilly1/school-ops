@@ -128,6 +128,87 @@ export class AttendanceService {
     });
   }
 
+  // ── Coverage ──────────────────────────────────────────────
+  // Which classes have / haven't had attendance marked across a date range.
+  // Admins see every class; a restricted teacher sees only the classes they
+  // class-teach. "Marked" for a day = at least one record exists for that
+  // class+date, which matches bulkMark (it writes a row per student on save).
+  // Returns every calendar day in range typed (school/weekend/holiday/off) so the
+  // UI can render a day-grid that strikes non-school days, plus per-class marked /
+  // missing summaries for longer ranges. Missing only ever counts school days.
+  async getCoverage(schoolId: string, startStr: string, endStr: string, caller: Caller) {
+    const restricted = this.teacherScope.isRestricted(caller.roles);
+    const scopedClassIds = restricted
+      ? await this.teacherScope.classTeacherClassIdsForUser(caller.id)
+      : null;
+
+    // Parse + clamp the range to a sane span (max ~1 year) to bound the scan.
+    const today = new Date().toISOString().slice(0, 10);
+    let start = /^\d{4}-\d{2}-\d{2}$/.test(startStr) ? startStr : today;
+    let end = /^\d{4}-\d{2}-\d{2}$/.test(endStr) ? endStr : today;
+    if (start > end) [start, end] = [end, start];
+
+    let startDate = new Date(`${start}T00:00:00.000Z`);
+    const endDate = new Date(`${end}T23:59:59.999Z`);
+
+    // Cap the span at ~1 year so an extreme custom range can't blow up the scan.
+    const MAX_DAYS = 366;
+    if ((endDate.getTime() - startDate.getTime()) / 86_400_000 > MAX_DAYS) {
+      startDate = new Date(endDate.getTime() - MAX_DAYS * 86_400_000);
+      start = startDate.toISOString().slice(0, 10);
+    }
+
+    const { termStart, termEnd, days } = await this.calendar.classifyDaysInRange(schoolId, startDate, endDate);
+    const schoolDays = days.filter((d) => d.type === 'school').map((d) => d.date);
+    const schoolDaySet = new Set(schoolDays);
+
+    const base = { restricted, start, end, termStart, termEnd, days, schoolDayCount: schoolDays.length };
+
+    if ((scopedClassIds && scopedClassIds.length === 0) || schoolDays.length === 0) {
+      return { ...base, classes: [] };
+    }
+
+    const classes = await this.prisma.class.findMany({
+      where: { schoolId, ...(scopedClassIds ? { id: { in: scopedClassIds } } : {}) },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+
+    const records = await this.prisma.studentAttendanceRecord.findMany({
+      where: {
+        schoolId,
+        date: { gte: startDate, lte: endDate },
+        ...(scopedClassIds ? { classId: { in: scopedClassIds } } : {}),
+      },
+      select: { classId: true, date: true },
+      distinct: ['classId', 'date'],
+    });
+
+    // class → set of school-day dates that have records
+    const markedByClass = new Map<string, Set<string>>();
+    for (const r of records) {
+      const d = r.date.toISOString().slice(0, 10);
+      if (!schoolDaySet.has(d)) continue;
+      (markedByClass.get(r.classId) ?? markedByClass.set(r.classId, new Set()).get(r.classId)!).add(d);
+    }
+
+    return {
+      ...base,
+      classes: classes.map((c) => {
+        const marked = markedByClass.get(c.id) ?? new Set<string>();
+        const missingDates = schoolDays.filter((d) => !marked.has(d));
+        return {
+          id: c.id,
+          name: c.name,
+          markedDates: schoolDays.filter((d) => marked.has(d)),
+          missingDates,
+          markedCount: schoolDays.length - missingDates.length,
+          missingCount: missingDates.length,
+        };
+      }),
+    };
+  }
+
   // ── Staff Attendance ──────────────────────────────────────
 
   async markStaffAttendance(schoolId: string, dto: MarkStaffAttendanceDto, markedBy: string) {
