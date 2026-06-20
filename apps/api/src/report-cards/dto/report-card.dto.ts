@@ -21,6 +21,19 @@ export class PublishReportCardsDto {
   studentIds?: string[];
 }
 
+export class CancelReportCardsDto {
+  @IsString()
+  termId!: string;
+
+  @IsString()
+  classId!: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  studentIds?: string[];
+}
+
 export class UpdateReportCardDto {
   @IsString()
   @IsOptional()

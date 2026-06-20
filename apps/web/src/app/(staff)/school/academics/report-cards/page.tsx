@@ -17,6 +17,7 @@ type ReportCard = {
   student: { firstName: string; lastName: string; studentId: string };
   termId: string;
   status: CardStatus;
+  stale: boolean;
   publishedAt: string | null;
   generatedAt: string | null;
   aggregate: number | null;
@@ -44,6 +45,14 @@ function StatusChip({ status }: { status: CardStatus }) {
   );
 }
 
+function StaleChip() {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-orange-600" title="Scores changed since this card was generated. Regenerate to update it.">
+      <span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> Stale
+    </span>
+  );
+}
+
 function ReportCardRow({ card, onPreview }: { card: ReportCard; onPreview: () => void }) {
   return (
     <tr onClick={onPreview} className="border-b border-slate-50 hover:bg-slate-50/60 transition cursor-pointer">
@@ -64,7 +73,12 @@ function ReportCardRow({ card, onPreview }: { card: ReportCard; onPreview: () =>
           {card.generatedAt ? new Date(card.generatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
         </span>
       </td>
-      <td className="px-4 py-3.5"><StatusChip status={card.status} /></td>
+      <td className="px-4 py-3.5">
+        <div className="flex items-center gap-2">
+          <StatusChip status={card.status} />
+          {card.stale && <StaleChip />}
+        </div>
+      </td>
       <td className="px-4 py-3.5 text-right whitespace-nowrap">
         <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>Preview →</span>
       </td>
@@ -80,6 +94,7 @@ export default function ReportCardsPage() {
   const [termId, setTermId]     = useState('');
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [alert, setAlert]       = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
   const fetchClasses = useCallback(() => staffApi.get<{ id: string; name: string }[]>('/school/grade-structure/classes'), []);
@@ -105,6 +120,7 @@ export default function ReportCardsPage() {
   const generatedCount   = cards?.filter(c => c.status !== 'NOT_GENERATED').length ?? 0;
   const publishedCount   = cards?.filter(c => c.status === 'PUBLISHED').length ?? 0;
   const unpublishedCount = cards?.filter(c => c.status === 'DRAFT').length ?? 0;
+  const staleCount       = cards?.filter(c => c.stale).length ?? 0;
 
   function openPreview(studentId: string) {
     router.push(`/school/academics/report-cards/${studentId}?termId=${activeTermId}`);
@@ -133,13 +149,33 @@ export default function ReportCardsPage() {
     if (!draftCount) return;
     setAlert(null); setPublishing(true);
     try {
-      await staffApi.post('/school/report-cards/publish', { classId: activeClassId, termId: activeTermId });
-      setAlert({ type: 'success', message: `${draftCount} report card${draftCount !== 1 ? 's' : ''} published. Students and parents will be notified.` });
+      const res = await staffApi.post<{ published: number; skipped: number }>('/school/report-cards/publish', { classId: activeClassId, termId: activeTermId });
+      const skipped = res?.skipped ?? 0;
+      setAlert({
+        type: 'success',
+        message: `${res?.published ?? draftCount} report card${(res?.published ?? draftCount) !== 1 ? 's' : ''} published. Students and parents will be notified.`
+          + (skipped ? ` ${skipped} skipped (not generated yet).` : ''),
+      });
       refetch();
     } catch (err) {
       setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to publish.' });
     } finally {
       setPublishing(false);
+    }
+  }
+
+  async function discardDrafts() {
+    if (!activeTermId || !activeClassId || !unpublishedCount) return;
+    if (!window.confirm(`Discard ${unpublishedCount} draft report card${unpublishedCount !== 1 ? 's' : ''}? This clears the generated scores and positions (any saved remarks are kept). Published cards are not affected.`)) return;
+    setAlert(null); setDiscarding(true);
+    try {
+      const res = await staffApi.post<{ cancelled: number }>('/school/report-cards/cancel', { classId: activeClassId, termId: activeTermId });
+      setAlert({ type: 'success', message: `${res?.cancelled ?? 0} report card${(res?.cancelled ?? 0) !== 1 ? 's' : ''} discarded.` });
+      refetch();
+    } catch (err) {
+      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to discard.' });
+    } finally {
+      setDiscarding(false);
     }
   }
 
@@ -189,6 +225,16 @@ export default function ReportCardsPage() {
 
           {unpublishedCount > 0 && (
             <button
+              onClick={discardDrafts}
+              disabled={discarding}
+              className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition disabled:opacity-50"
+            >
+              {discarding ? 'Discarding…' : 'Discard drafts'}
+            </button>
+          )}
+
+          {unpublishedCount > 0 && (
+            <button
               onClick={publishAll}
               disabled={publishing}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition disabled:opacity-50"
@@ -199,6 +245,17 @@ export default function ReportCardsPage() {
               {publishing ? 'Publishing…' : `Publish ${unpublishedCount} draft${unpublishedCount !== 1 ? 's' : ''}`}
             </button>
           )}
+        </div>
+      )}
+
+      {/* Stale warning */}
+      {staleCount > 0 && (
+        <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+          <span className="mt-0.5 text-orange-500">⚠</span>
+          <p className="text-sm text-orange-800">
+            <span className="font-semibold">{staleCount} report card{staleCount !== 1 ? 's are' : ' is'} out of date.</span>{' '}
+            Scores changed after {staleCount !== 1 ? 'they were' : 'it was'} generated. Click <span className="font-medium">Regenerate</span> to refresh {staleCount !== 1 ? 'them' : 'it'} with the latest scores.
+          </p>
         </div>
       )}
 

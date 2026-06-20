@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { Prisma, AssessmentCategory } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GradingService } from '../school-setup/grading/grading.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isExamCategory } from '../assessments/assessment-category.util';
 import { DEFAULT_LEVELS, DEFAULT_SKILLS } from '../school-setup/report-card-config/report-card-config.service';
-import { GenerateReportCardsDto, PublishReportCardsDto, UpdateReportCardDto } from './dto/report-card.dto';
+import { CancelReportCardsDto, GenerateReportCardsDto, PublishReportCardsDto, UpdateReportCardDto } from './dto/report-card.dto';
 
 // Per-subject computed terminal result.
 type SubjectResult = {
@@ -44,6 +45,45 @@ export class ReportCardsService {
   private round(n: number, dp = 1): number {
     const f = 10 ** dp;
     return Math.round(n * f) / f;
+  }
+
+  // ── Staleness signature ───────────────────────────────────
+  // A snapshot is "stale" when the scores feeding it change after generation.
+  // We capture a signature of those scores at generate time and recompute it on
+  // read; a mismatch means the card needs regenerating.
+
+  private hashScores(scores: { assessmentId: string; rawScore: Prisma.Decimal | number }[]): string {
+    const sig = scores
+      .map((s) => `${s.assessmentId}:${Number(s.rawScore)}`)
+      .sort()
+      .join('|');
+    return createHash('sha1').update(sig).digest('hex');
+  }
+
+  // Current source-hash for one student in one term.
+  private async currentSourceHash(schoolId: string, studentId: string, termId: string): Promise<string> {
+    const scores = await this.prisma.assessmentScore.findMany({
+      where: { studentId, assessment: { schoolId, termId } },
+      select: { assessmentId: true, rawScore: true },
+    });
+    return this.hashScores(scores);
+  }
+
+  // Source-hashes for many students in one term, keyed by studentId (one query).
+  private async sourceHashesForStudents(schoolId: string, studentIds: string[], termId: string): Promise<Map<string, string>> {
+    const scores = await this.prisma.assessmentScore.findMany({
+      where: { studentId: { in: studentIds }, assessment: { schoolId, termId } },
+      select: { studentId: true, assessmentId: true, rawScore: true },
+    });
+    const byStudent = new Map<string, { assessmentId: string; rawScore: Prisma.Decimal }[]>();
+    for (const s of scores) {
+      const arr = byStudent.get(s.studentId) ?? [];
+      arr.push(s);
+      byStudent.set(s.studentId, arr);
+    }
+    const out = new Map<string, string>();
+    for (const id of studentIds) out.set(id, this.hashScores(byStudent.get(id) ?? []));
+    return out;
   }
 
   // Compute every subject's terminal result for one student in one term.
@@ -206,6 +246,13 @@ export class ReportCardsService {
       include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
     });
 
+    // Signature of each student's scores at this moment, so the snapshot can be
+    // flagged stale later if scores change.
+    const sourceHashes = await this.sourceHashesForStudents(
+      schoolId, assignments.map((a) => a.student.id), dto.termId,
+    );
+    const generatedAt = new Date();
+
     // First pass: compute every student's subjects + aggregate.
     const computed = await Promise.all(
       assignments.map(async ({ student }) => {
@@ -231,22 +278,18 @@ export class ReportCardsService {
 
     for (const c of computed) {
       const overallGrade = await this.grading.deriveGrade(schoolId, Math.round(c.aggregate), cls.gradeLevelId);
+      const snapshot = {
+        data: { subjects: c.subjects, overallGrade } as unknown as Prisma.InputJsonValue,
+        aggregate: c.aggregate,
+        position: positionByStudent.get(c.studentId) ?? null,
+        classSize,
+        generatedAt,
+        sourceHash: sourceHashes.get(c.studentId) ?? null,
+      };
       await this.prisma.reportCard.upsert({
         where: { studentId_termId: { studentId: c.studentId, termId: dto.termId } },
-        update: {
-          data: { subjects: c.subjects, overallGrade } as unknown as Prisma.InputJsonValue,
-          aggregate: c.aggregate,
-          position: positionByStudent.get(c.studentId) ?? null,
-          classSize,
-        },
-        create: {
-          studentId: c.studentId,
-          termId: dto.termId,
-          data: { subjects: c.subjects, overallGrade } as unknown as Prisma.InputJsonValue,
-          aggregate: c.aggregate,
-          position: positionByStudent.get(c.studentId) ?? null,
-          classSize,
-        },
+        update: snapshot,
+        create: { studentId: c.studentId, termId: dto.termId, ...snapshot },
       });
     }
 
@@ -270,19 +313,32 @@ export class ReportCardsService {
       orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
     });
 
+    // Current score signatures, to flag generated cards whose scores have since
+    // changed (one query for the whole class).
+    const currentHashes = await this.sourceHashesForStudents(
+      schoolId, assignments.map((a) => a.student.id), termId,
+    );
+
     // Return every student in the class with their report-card status, so the UI
-    // can list (and preview) all of them — generated or not.
+    // can list (and preview) all of them — generated or not. A card is only
+    // "generated" once it has a snapshot (data); a bare row (e.g. saved remarks
+    // with no snapshot) still counts as NOT_GENERATED.
     return assignments.map(({ student }) => {
       const rc = student.reportCards[0] ?? null;
-      const status = !rc ? 'NOT_GENERATED' : rc.publishedAt ? 'PUBLISHED' : 'DRAFT';
+      const generated = !!rc?.data;
+      const status = !generated ? 'NOT_GENERATED' : rc!.publishedAt ? 'PUBLISHED' : 'DRAFT';
+      // A null hash means the card predates staleness tracking — leave it
+      // untracked (not flagged) until it's regenerated.
+      const stale = generated && rc!.sourceHash != null && rc!.sourceHash !== currentHashes.get(student.id);
       return {
         id: rc?.id ?? null,
         studentId: student.id,
         student: { firstName: student.firstName, lastName: student.lastName, studentId: student.studentId },
         termId,
         status,
+        stale,
         publishedAt: rc?.publishedAt ?? null,
-        generatedAt: rc?.createdAt ?? null,
+        generatedAt: rc?.generatedAt ?? rc?.createdAt ?? null,
         aggregate: rc?.aggregate != null ? Number(rc.aggregate) : null,
         position: rc?.position ?? null,
         classSize: rc?.classSize ?? null,
@@ -333,6 +389,12 @@ export class ReportCardsService {
     const aggregate = reportCard?.aggregate != null
       ? Number(reportCard.aggregate)
       : this.aggregateOf(subjects);
+
+    // A generated snapshot is stale if its scores have changed since generation.
+    // A null hash means the card predates staleness tracking — treat as not stale.
+    const stale = reportCard?.data && reportCard.sourceHash != null
+      ? reportCard.sourceHash !== (await this.currentSourceHash(schoolId, studentId, termId))
+      : false;
 
     const attendance = await this.prisma.studentAttendanceRecord.findMany({
       where: { schoolId, studentId, ...(term.startDate && term.endDate ? { date: { gte: term.startDate, lte: term.endDate } } : {}) },
@@ -398,6 +460,8 @@ export class ReportCardsService {
           }
         : null,
       publishedAt: reportCard?.publishedAt ?? null,
+      generatedAt: reportCard?.generatedAt ?? reportCard?.createdAt ?? null,
+      stale,
       attendance: { totalDays, presentDays, absentDays: totalDays - presentDays, rate: totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0 },
     };
   }
@@ -430,15 +494,27 @@ export class ReportCardsService {
         academicYearId: term.academicYearId,
         ...(dto.studentIds ? { studentId: { in: dto.studentIds } } : {}),
       },
-      include: { student: { select: { id: true, firstName: true, lastName: true } } },
+      include: {
+        student: {
+          select: {
+            id: true, firstName: true, lastName: true,
+            reportCards: { where: { termId: dto.termId }, select: { data: true } },
+          },
+        },
+      },
     });
 
+    // Only publish cards that actually have a generated snapshot — publishing a
+    // card with no snapshot would expose a live, unfrozen result.
     let published = 0;
+    let skipped = 0;
     for (const { student } of assignments) {
-      await this.prisma.reportCard.upsert({
+      const hasSnapshot = student.reportCards[0]?.data != null;
+      if (!hasSnapshot) { skipped++; continue; }
+
+      await this.prisma.reportCard.update({
         where: { studentId_termId: { studentId: student.id, termId: dto.termId } },
-        update: { publishedAt: new Date() },
-        create: { studentId: student.id, termId: dto.termId, publishedAt: new Date() },
+        data: { publishedAt: new Date() },
       });
 
       // Notify via student portal
@@ -451,6 +527,53 @@ export class ReportCardsService {
       published++;
     }
 
-    return { published, termId: dto.termId, classId: dto.classId };
+    return { published, skipped, termId: dto.termId, classId: dto.classId };
+  }
+
+  // Cancel a generation: discard the computed snapshot so the card returns to
+  // NOT_GENERATED, while preserving any hand-entered remarks / conduct /
+  // holistic ratings. Published cards are left untouched (unpublish first).
+  async cancelGenerate(schoolId: string, dto: CancelReportCardsDto) {
+    const term = await this.prisma.term.findFirst({ where: { id: dto.termId, schoolId } });
+    if (!term) throw new NotFoundException('Term not found');
+
+    const assignments = await this.prisma.studentClassAssignment.findMany({
+      where: {
+        classId: dto.classId,
+        academicYearId: term.academicYearId,
+        ...(dto.studentIds ? { studentId: { in: dto.studentIds } } : {}),
+      },
+      include: {
+        student: {
+          select: {
+            id: true,
+            reportCards: { where: { termId: dto.termId }, select: { data: true, publishedAt: true } },
+          },
+        },
+      },
+    });
+
+    let cancelled = 0;
+    let skipped = 0;
+    for (const { student } of assignments) {
+      const rc = student.reportCards[0];
+      // Nothing to cancel, or published (must be unpublished first).
+      if (!rc?.data || rc.publishedAt) { if (rc?.publishedAt) skipped++; continue; }
+
+      await this.prisma.reportCard.update({
+        where: { studentId_termId: { studentId: student.id, termId: dto.termId } },
+        data: {
+          data: Prisma.DbNull,
+          aggregate: null,
+          position: null,
+          classSize: null,
+          generatedAt: null,
+          sourceHash: null,
+        },
+      });
+      cancelled++;
+    }
+
+    return { cancelled, skipped, termId: dto.termId, classId: dto.classId };
   }
 }

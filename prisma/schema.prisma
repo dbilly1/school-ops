@@ -1408,6 +1408,11 @@ model ReportCard {
   aggregate   Decimal?
   position    Int?
   classSize   Int?
+  // When the snapshot was last (re)generated, and a signature of the scores it
+  // was built from — used to flag a card as stale when scores change after it
+  // was generated.
+  generatedAt DateTime?
+  sourceHash  String?
   // Per-student Holistic Development ratings: { [skillId]: levelCode }.
   holistic    Json?
   // GES "Attitudes, Interests & Conduct" section + remarks.

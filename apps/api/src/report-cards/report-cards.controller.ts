@@ -3,7 +3,7 @@ import { Response } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ReportCardsService } from './report-cards.service';
 import { ReportCardPdfService } from './report-card-pdf.service';
-import { GenerateReportCardsDto, PublishReportCardsDto, UpdateReportCardDto } from './dto/report-card.dto';
+import { CancelReportCardsDto, GenerateReportCardsDto, PublishReportCardsDto, UpdateReportCardDto } from './dto/report-card.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../permissions/permissions.guard';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
@@ -66,6 +66,12 @@ export class ReportCardsController {
   @RequirePermission('academics', 'EDIT', 'report_cards')
   publish(@CurrentUser() user: any, @Body() dto: PublishReportCardsDto) {
     return this.reportCardsService.publish(user.schoolId, dto, user.id);
+  }
+
+  @Post('cancel')
+  @RequirePermission('academics', 'EDIT', 'report_cards')
+  cancelGenerate(@CurrentUser() user: any, @Body() dto: CancelReportCardsDto) {
+    return this.reportCardsService.cancelGenerate(user.schoolId, dto);
   }
 
   @Patch('student/:studentId')

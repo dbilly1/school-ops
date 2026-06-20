@@ -125,6 +125,14 @@ function PreviewInner({ studentId }: { studentId: string }) {
           ) : (
             <p className="mb-3 text-center text-xs font-medium text-amber-500 print:hidden">● Draft preview — not yet published</p>
           )}
+          {data.stale && (
+            <div className="mb-3 mx-auto max-w-[820px] flex items-start gap-2.5 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 print:hidden">
+              <span className="mt-0.5 text-orange-500">⚠</span>
+              <p className="text-sm text-orange-800">
+                <span className="font-semibold">This report card is out of date.</span> Scores have changed since it was generated — regenerate it from the class report-cards list to refresh the figures shown here.
+              </p>
+            </div>
+          )}
           <div id="report-paper" className="rounded-xl shadow-sm overflow-hidden">
             <ReportCardDocument data={data} school={school ?? { name: '' }} />
           </div>
