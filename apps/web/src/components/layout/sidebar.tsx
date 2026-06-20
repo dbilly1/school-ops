@@ -9,21 +9,6 @@ import { FeatureState } from '@schoolops/types';
 import { cn } from '@/lib/cn';
 import { OWNER_ADMIN, OWNER_ADMIN_TEACHER, OWNER_ADMIN_ACCOUNTANT, OWNER_ADMIN_TRANSPORT } from '@/lib/staff-roles';
 
-// Darken a #rgb / #rrggbb colour toward black — a true dark shade of the school
-// colour, computed in JS so there's no CSS-variable resolution to go wrong.
-function railColor(hex: string | null | undefined, factor = 0.5): string {
-  const fallback = '#0f172a';
-  if (!hex) return fallback;
-  const m = hex.replace('#', '');
-  const full = m.length === 3 ? m.split('').map(c => c + c).join('') : m;
-  if (!/^[0-9a-fA-F]{6}$/.test(full)) return fallback;
-  const n = parseInt(full, 16);
-  const r = Math.round(((n >> 16) & 255) * factor);
-  const g = Math.round(((n >> 8) & 255) * factor);
-  const b = Math.round((n & 255) * factor);
-  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-}
-
 // ── Icons (inline SVG — no icon library dependency) ───────────────────────────
 
 function Icon({ d, className }: { d: string; className?: string }) {
@@ -253,7 +238,7 @@ export function Sidebar() {
   return (
     <aside
       className="w-60 shrink-0 hidden lg:flex flex-col h-full"
-      style={{ backgroundColor: railColor(branding?.primaryColor ?? '#065f46') }}
+      style={{ backgroundColor: branding?.primaryColor || '#065f46' }}
     >
       <SidebarBody />
     </aside>
@@ -276,7 +261,7 @@ export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () =>
           'absolute inset-y-0 left-0 w-60 flex flex-col shadow-xl transition-transform duration-300',
           open ? 'translate-x-0' : '-translate-x-full',
         )}
-        style={{ backgroundColor: railColor(branding?.primaryColor ?? '#065f46') }}
+        style={{ backgroundColor: branding?.primaryColor || '#065f46' }}
       >
         <SidebarBody />
       </aside>
