@@ -27,6 +27,7 @@ type StaffAuthState = {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshBranding: () => Promise<void>;
   markOnboardingComplete: () => void;
   isOwner: boolean;
   isAdmin: boolean;
@@ -146,7 +147,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   return (
     <StaffAuthContext.Provider value={{
       user, branding, loading,
-      login, logout, markOnboardingComplete,
+      login, logout, refreshBranding: fetchBranding, markOnboardingComplete,
       isOwner, isAdmin, hasRole,
     }}>
       {children}

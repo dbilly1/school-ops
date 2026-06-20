@@ -69,6 +69,18 @@ export function useFeature(featureKey: string): FeatureResult {
 // instead of popping in one-by-one as individual /state requests resolve.
 
 const allFeaturesCache = new Map<string, Map<string, FeatureState>>(); // schoolId -> key->state
+const FEATURES_STORAGE = 'so_staff_features';
+
+function readStoredFeatures(schoolId: string): Map<string, FeatureState> | null {
+  try {
+    const raw = localStorage.getItem(`${FEATURES_STORAGE}_${schoolId}`);
+    if (!raw) return null;
+    return new Map(Object.entries(JSON.parse(raw) as Record<string, FeatureState>));
+  } catch { return null; }
+}
+function writeStoredFeatures(schoolId: string, map: Map<string, FeatureState>) {
+  try { localStorage.setItem(`${FEATURES_STORAGE}_${schoolId}`, JSON.stringify(Object.fromEntries(map))); } catch {}
+}
 
 export function useAllFeatures(): { states: Map<string, FeatureState>; loading: boolean } {
   const { user } = useStaffAuth();
@@ -77,26 +89,34 @@ export function useAllFeatures(): { states: Map<string, FeatureState>; loading: 
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      if (!user) { setLoading(false); return; }
+    if (!user) { setLoading(false); return; }
 
-      const cached = allFeaturesCache.get(user.schoolId);
-      if (cached) { setStates(cached); setLoading(false); return; }
-
+    // Render instantly from cache (memory, then localStorage), then revalidate in
+    // the background — so the sidebar doesn't wait on /school/features each load.
+    const cached = allFeaturesCache.get(user.schoolId) ?? readStoredFeatures(user.schoolId);
+    if (cached) {
+      allFeaturesCache.set(user.schoolId, cached);
+      setStates(cached);
+      setLoading(false);
+    } else {
       setLoading(true);
+    }
+
+    (async () => {
       try {
         const list = await staffApi.get<{ featureKey: string; state: FeatureState }[]>('/school/features');
         const map = new Map(list.map(f => [f.featureKey, f.state]));
         allFeaturesCache.set(user.schoolId, map);
-        // Seed the per-key cache so any useFeature() elsewhere resolves instantly.
+        writeStoredFeatures(user.schoolId, map);
         for (const [k, s] of map) featureCache.set(`${user.schoolId}:${k}`, s);
         if (!cancelled) setStates(map);
       } catch {
-        if (!cancelled) setStates(new Map());
+        if (!cancelled && !cached) setStates(new Map());
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
+
     return () => { cancelled = true; };
   }, [user]);
 

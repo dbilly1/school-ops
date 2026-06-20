@@ -47,7 +47,7 @@ function resizeImageToDataUrl(file: File, max = 256): Promise<string> {
 }
 
 export default function ProfileSettingsPage() {
-  const { branding } = useStaffAuth();
+  const { branding, refreshBranding } = useStaffAuth();
 
   const [form, setForm] = useState<SchoolProfile>({
     name: '', country: '', address: null, phone: null, primaryColor: null, logoUrl: null,
@@ -103,6 +103,8 @@ export default function ProfileSettingsPage() {
         primaryColor: form.primaryColor,
         logoUrl:      form.logoUrl, // string data-URL/URL, or null to clear
       });
+      // Refresh the cached branding so the sidebar/logo/colour update everywhere.
+      await refreshBranding();
       setAlert({ type: 'success', message: 'Profile saved successfully.' });
     } catch (err) {
       setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to save.' });
