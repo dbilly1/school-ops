@@ -233,12 +233,13 @@ function SidebarBody() {
 }
 
 // Desktop rail — hidden below lg (the mobile drawer takes over there).
+// Uses var(--accent) so it tracks the live colour (the profile page updates
+// --accent the instant a colour is picked), not just on save.
 export function Sidebar() {
-  const { branding } = useStaffAuth();
   return (
     <aside
       className="w-60 shrink-0 hidden lg:flex flex-col h-full"
-      style={{ backgroundColor: branding?.primaryColor || '#065f46' }}
+      style={{ backgroundColor: 'var(--accent, #065f46)' }}
     >
       <SidebarBody />
     </aside>
@@ -247,7 +248,6 @@ export function Sidebar() {
 
 // Mobile slide-in drawer with backdrop.
 export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { branding } = useStaffAuth();
   return (
     <div className={cn('lg:hidden fixed inset-0 z-50', open ? '' : 'pointer-events-none')} aria-hidden={!open}>
       {/* Backdrop */}
@@ -261,7 +261,7 @@ export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () =>
           'absolute inset-y-0 left-0 w-60 flex flex-col shadow-xl transition-transform duration-300',
           open ? 'translate-x-0' : '-translate-x-full',
         )}
-        style={{ backgroundColor: branding?.primaryColor || '#065f46' }}
+        style={{ backgroundColor: 'var(--accent, #065f46)' }}
       >
         <SidebarBody />
       </aside>
