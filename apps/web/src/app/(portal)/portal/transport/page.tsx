@@ -4,81 +4,93 @@ import { useCallback } from 'react';
 import { portalApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 
-type TransportInfo = {
-  route: { name: string; dailyRate: number };
-  vehicle: { make: string; model: string; plateNumber: string; capacity: number } | null;
-  driver: { name: string; phone: string | null } | null;
-  pickupPoints: { name: string; order: number }[];
-};
+// /portal/transport returns the StudentTransportAssignment with a nested
+// transportRoute (route + vehicle + driver + pickupPoints), or null.
+type Transport = {
+  transportRoute: {
+    name: string;
+    dailyRate: number | string;
+    vehicle: { plateNumber: string; model: string | null } | null;
+    driver: { name: string; phone: string | null } | null;
+    pickupPoints: { name: string; sequence: number }[];
+  };
+} | null;
 
 export default function PortalTransportPage() {
-  const fetchTransport = useCallback(() =>
-    portalApi.get<TransportInfo | null>('/portal/transport').catch(() => null), []);
+  const fetchTransport = useCallback(
+    () => portalApi.get<Transport>('/portal/transport').catch(() => null),
+    [],
+  );
   const { data, loading } = useApi(fetchTransport);
+
+  const route = data?.transportRoute ?? null;
 
   return (
     <div className="space-y-4">
-      <div>
+      <header>
         <h1 className="text-lg font-bold text-slate-900">Transport</h1>
-        <p className="text-xs text-slate-400 mt-0.5">Your transport details</p>
-      </div>
+        <p className="text-xs text-slate-400 mt-0.5">Your route, bus and pickup details</p>
+      </header>
 
-      {loading && <div className="space-y-3">{[1,2].map(i => <div key={i} className="h-24 bg-slate-100 rounded-xl animate-pulse" />)}</div>}
+      {loading && <div className="space-y-3">{[1, 2].map(i => <div key={i} className="h-24 bg-slate-100 rounded-2xl animate-pulse" />)}</div>}
 
-      {!loading && !data && (
-        <div className="bg-white rounded-xl border border-slate-100 px-4 py-12 text-center text-sm text-slate-400">
-          You are not assigned to a transport route.
+      {!loading && !route && (
+        <div className="bg-white rounded-2xl border border-slate-100 px-4 py-12 text-center">
+          <p className="text-2xl mb-3">🚌</p>
+          <p className="text-sm font-medium text-slate-600">No transport route</p>
+          <p className="text-xs text-slate-400 mt-1">You’re not assigned to a school bus route.</p>
         </div>
       )}
 
-      {!loading && data && (
+      {!loading && route && (
         <div className="space-y-3">
-          {/* Route */}
-          <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-4">
-            <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Route</p>
-            <p className="text-base font-bold text-slate-900">{data.route.name}</p>
-            <p className="text-sm text-slate-500 mt-0.5">GHS {data.route.dailyRate} per day</p>
+          {/* Route header card */}
+          <div className="rounded-2xl px-5 py-5 text-white" style={{ backgroundColor: 'var(--accent)' }}>
+            <p className="text-xs font-medium uppercase tracking-widest opacity-70">Route</p>
+            <p className="text-xl font-bold mt-1">{route.name}</p>
+            <p className="text-sm opacity-80 mt-0.5">GHS {Number(route.dailyRate)} per day</p>
           </div>
 
           {/* Vehicle */}
-          {data.vehicle && (
-            <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-4">
+          {route.vehicle && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Vehicle</p>
-              <p className="text-sm font-semibold text-slate-800">
-                {data.vehicle.make} {data.vehicle.model}
-              </p>
-              <p className="text-sm font-mono text-slate-500">{data.vehicle.plateNumber}</p>
-              <p className="text-xs text-slate-400 mt-0.5">Capacity: {data.vehicle.capacity} seats</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-800">{route.vehicle.model ?? 'School bus'}</p>
+                <p className="text-sm font-mono text-slate-500">{route.vehicle.plateNumber}</p>
+              </div>
             </div>
           )}
 
           {/* Driver */}
-          {data.driver && (
-            <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-4">
+          {route.driver && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Driver</p>
-              <p className="text-sm font-semibold text-slate-800">{data.driver.name}</p>
-              {data.driver.phone && (
-                <a href={`tel:${data.driver.phone}`} className="text-sm font-medium" style={{ color: 'var(--accent)' }}>
-                  {data.driver.phone}
-                </a>
-              )}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-800">{route.driver.name}</p>
+                {route.driver.phone && (
+                  <a href={`tel:${route.driver.phone}`} className="text-sm font-medium" style={{ color: 'var(--accent)' }}>
+                    {route.driver.phone}
+                  </a>
+                )}
+              </div>
             </div>
           )}
 
           {/* Pickup points */}
-          {data.pickupPoints.length > 0 && (
-            <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-4">
+          {route.pickupPoints.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Pickup stops</p>
-              <div className="space-y-2">
-                {data.pickupPoints.sort((a,b) => a.order - b.order).map((pt, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <div
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0"
-                      style={{ backgroundColor: 'var(--accent)' }}
-                    >
-                      {i + 1}
+              <div className="space-y-1">
+                {[...route.pickupPoints].sort((a, b) => a.sequence - b.sequence).map((pt, i, arr) => (
+                  <div key={`${pt.name}-${pt.sequence}`} className="flex items-stretch gap-3">
+                    <div className="flex flex-col items-center">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0" style={{ backgroundColor: 'var(--accent)' }}>
+                        {i + 1}
+                      </div>
+                      {i < arr.length - 1 && <div className="w-px flex-1 bg-slate-200 my-0.5" />}
                     </div>
-                    <span className="text-sm text-slate-700">{pt.name}</span>
+                    <span className="text-sm text-slate-700 pt-0.5 pb-2">{pt.name}</span>
                   </div>
                 ))}
               </div>
