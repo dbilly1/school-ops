@@ -62,7 +62,9 @@ export default function PortalReportCardsPage() {
         </div>
       )}
 
-      {!loading && data?.map(card => (
+      {!loading && data && data.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {data.map(card => (
         <div key={card.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-4 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-slate-800 truncate">{card.term.name}</p>
@@ -82,7 +84,9 @@ export default function PortalReportCardsPage() {
             {downloading === card.termId ? 'Downloading…' : '↓ PDF'}
           </button>
         </div>
-      ))}
+          ))}
+        </div>
+      )}
     </div>
   );
 }

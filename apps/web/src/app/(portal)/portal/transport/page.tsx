@@ -51,29 +51,31 @@ export default function PortalTransportPage() {
             <p className="text-sm opacity-80 mt-0.5">GHS {Number(route.dailyRate)} per day</p>
           </div>
 
-          {/* Vehicle */}
-          {route.vehicle && (
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Vehicle</p>
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-800">{route.vehicle.model ?? 'School bus'}</p>
-                <p className="text-sm font-mono text-slate-500">{route.vehicle.plateNumber}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Driver */}
-          {route.driver && (
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Driver</p>
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-800">{route.driver.name}</p>
-                {route.driver.phone && (
-                  <a href={`tel:${route.driver.phone}`} className="text-sm font-medium" style={{ color: 'var(--accent)' }}>
-                    {route.driver.phone}
-                  </a>
-                )}
-              </div>
+          {/* Vehicle + driver — side by side on larger screens */}
+          {(route.vehicle || route.driver) && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {route.vehicle && (
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Vehicle</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-800">{route.vehicle.model ?? 'School bus'}</p>
+                    <p className="text-sm font-mono text-slate-500">{route.vehicle.plateNumber}</p>
+                  </div>
+                </div>
+              )}
+              {route.driver && (
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Driver</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-800">{route.driver.name}</p>
+                    {route.driver.phone && (
+                      <a href={`tel:${route.driver.phone}`} className="text-sm font-medium" style={{ color: 'var(--accent)' }}>
+                        {route.driver.phone}
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

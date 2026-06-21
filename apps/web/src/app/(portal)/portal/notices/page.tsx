@@ -31,7 +31,9 @@ export default function PortalNoticesPage() {
         </div>
       )}
 
-      {!loading && data?.map(notice => (
+      {!loading && data && data.length > 0 && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {data.map(notice => (
         <div key={notice.id} className="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-4">
           <div className="flex items-start justify-between mb-2">
             <h3 className="text-sm font-semibold text-slate-900 leading-tight flex-1 pr-2">{notice.title}</h3>
@@ -41,7 +43,9 @@ export default function PortalNoticesPage() {
           </div>
           <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">{notice.body}</p>
         </div>
-      ))}
+          ))}
+        </div>
+      )}
     </div>
   );
 }

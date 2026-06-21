@@ -1,116 +1,217 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { portalApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 
-// /portal/attendance returns { records, summary } — not a bare array.
-type AttendanceRecord = {
-  date: string;
-  status: 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
-};
+type Status = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
+type AttendanceRecord = { date: string; status: Status };
 type AttendanceResponse = {
   records: AttendanceRecord[];
   summary: { total: number; present: number; absent: number; rate: number };
 };
+type Term = {
+  id: string;
+  name: string;
+  academicYearName: string;
+  startDate: string | null;
+  endDate: string | null;
+  isActive: boolean;
+};
 
 const EMPTY: AttendanceResponse = { records: [], summary: { total: 0, present: 0, absent: 0, rate: 0 } };
 
-const STATUS_CONFIG: Record<AttendanceRecord['status'], { label: string; color: string; bg: string }> = {
-  PRESENT: { label: 'Present', color: '#16a34a', bg: '#f0fdf4' },
-  LATE:    { label: 'Late',    color: '#d97706', bg: '#fffbeb' },
-  ABSENT:  { label: 'Absent',  color: '#dc2626', bg: '#fef2f2' },
-  EXCUSED: { label: 'Excused', color: '#64748b', bg: '#f8fafc' },
+const STATUS_CONFIG: Record<Status, { label: string; color: string; fg: string }> = {
+  PRESENT: { label: 'Present', color: '#16a34a', fg: '#fff' },
+  LATE:    { label: 'Late',    color: '#f59e0b', fg: '#fff' },
+  ABSENT:  { label: 'Absent',  color: '#dc2626', fg: '#fff' },
+  EXCUSED: { label: 'Excused', color: '#cbd5e1', fg: '#334155' },
 };
 
+const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const pad = (n: number) => String(n).padStart(2, '0');
+const keyOf = (y: number, m: number, d: number) => `${y}-${pad(m + 1)}-${pad(d)}`;
+
 export default function PortalAttendancePage() {
-  const today      = new Date().toISOString().split('T')[0];
-  const monthStart = today.slice(0, 8) + '01';
-  const [startDate, setStartDate] = useState(monthStart);
-  const [endDate, setEndDate]     = useState(today);
+  // Terms (for the filter).
+  const fetchTerms = useCallback(() => portalApi.get<Term[]>('/portal/terms').catch(() => []), []);
+  const { data: terms } = useApi(fetchTerms);
+
+  const [selectedTermId, setSelectedTermId] = useState<string | null>(null);
+  const activeTerm = useMemo(() => {
+    if (!terms || terms.length === 0) return null;
+    if (selectedTermId) return terms.find(t => t.id === selectedTermId) ?? null;
+    return terms.find(t => t.isActive) ?? terms[0];
+  }, [terms, selectedTermId]);
+
+  // Attendance for the selected term's date range.
+  const start = activeTerm?.startDate?.slice(0, 10) ?? null;
+  const end   = activeTerm?.endDate?.slice(0, 10) ?? null;
 
   const fetchAttendance = useCallback(
-    () => portalApi
-      .get<AttendanceResponse>(`/portal/attendance?startDate=${startDate}&endDate=${endDate}`)
-      .catch(() => EMPTY),
-    [startDate, endDate],
+    () => (start && end)
+      ? portalApi.get<AttendanceResponse>(`/portal/attendance?startDate=${start}&endDate=${end}`).catch(() => EMPTY)
+      : Promise.resolve(EMPTY),
+    [start, end],
   );
-  const { data, loading } = useApi(fetchAttendance, `${startDate}|${endDate}`);
+  const { data, loading } = useApi(fetchAttendance, `${start}|${end}`);
 
   const summary = data?.summary ?? EMPTY.summary;
-  const records = data?.records ?? [];
-  const rateColor = summary.rate >= 80 ? '#16a34a' : summary.rate >= 60 ? '#d97706' : '#dc2626';
+  const statusByDate = useMemo(() => {
+    const m = new Map<string, Status>();
+    for (const r of data?.records ?? []) m.set(r.date.slice(0, 10), r.status);
+    return m;
+  }, [data]);
+
+  const months = useMemo(() => (start && end ? monthsBetween(start, end) : []), [start, end]);
+  const rateColor = summary.rate >= 80 ? '#16a34a' : summary.rate >= 60 ? '#f59e0b' : '#dc2626';
 
   return (
     <div className="space-y-5">
       <header>
         <h1 className="text-lg font-bold text-slate-900">Attendance</h1>
-        <p className="text-xs text-slate-400 mt-0.5">Your attendance record</p>
+        <p className="text-xs text-slate-400 mt-0.5">Day-by-day record for the selected term</p>
       </header>
 
-      {/* Date range */}
-      <div className="flex items-center gap-2">
-        <input type="date" value={startDate} max={endDate} onChange={e => setStartDate(e.target.value)}
-          className="flex-1 px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
-          onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
-          onBlur={e => e.currentTarget.style.boxShadow = ''} />
-        <span className="text-slate-400 text-xs">to</span>
-        <input type="date" value={endDate} max={today} onChange={e => setEndDate(e.target.value)}
-          className="flex-1 px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
-          onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
-          onBlur={e => e.currentTarget.style.boxShadow = ''} />
-      </div>
+      {/* Term filter */}
+      {terms && terms.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
+          {terms.map(t => {
+            const active = t.id === activeTerm?.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setSelectedTermId(t.id)}
+                className="px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap border transition shrink-0"
+                style={active
+                  ? { backgroundColor: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff' }
+                  : { borderColor: '#e2e8f0', color: '#475569', backgroundColor: '#fff' }}
+              >
+                {t.name} <span className="opacity-60">· {t.academicYearName}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Summary */}
-      {!loading && summary.total > 0 && (
+      {!loading && (
         <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-3 py-4 text-center">
-            <p className="text-[11px] text-slate-400">Rate</p>
-            <p className="text-2xl font-bold" style={{ color: rateColor }}>{summary.rate}%</p>
-          </div>
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-3 py-4 text-center">
-            <p className="text-[11px] text-slate-400">Present</p>
-            <p className="text-2xl font-bold text-emerald-600">{summary.present}</p>
-          </div>
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-3 py-4 text-center">
-            <p className="text-[11px] text-slate-400">Absent</p>
-            <p className="text-2xl font-bold text-red-500">{summary.absent}</p>
-          </div>
+          <Stat label="Rate" value={`${summary.rate}%`} color={rateColor} />
+          <Stat label="Present" value={summary.present} color="#16a34a" />
+          <Stat label="Absent" value={summary.absent} color="#dc2626" />
         </div>
       )}
 
-      {/* Records */}
-      {loading && (
-        <div className="space-y-2">{[1, 2, 3, 4].map(i => <div key={i} className="h-12 bg-slate-100 rounded-xl animate-pulse" />)}</div>
-      )}
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        {(Object.keys(STATUS_CONFIG) as Status[]).map(s => (
+          <div key={s} className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded" style={{ backgroundColor: STATUS_CONFIG[s].color }} />
+            <span className="text-[11px] text-slate-500">{STATUS_CONFIG[s].label}</span>
+          </div>
+        ))}
+      </div>
 
-      {!loading && records.length === 0 && (
+      {loading && <div className="h-72 bg-slate-100 rounded-2xl animate-pulse" />}
+
+      {!loading && (!activeTerm || months.length === 0) && (
         <div className="bg-white rounded-2xl border border-slate-100 px-4 py-12 text-center">
           <p className="text-2xl mb-3">📅</p>
-          <p className="text-sm font-medium text-slate-600">No records for this period</p>
-          <p className="text-xs text-slate-400 mt-1">Try widening the date range above.</p>
+          <p className="text-sm font-medium text-slate-600">No term dates set</p>
+          <p className="text-xs text-slate-400 mt-1">The calendar appears once this term has start and end dates.</p>
         </div>
       )}
 
-      {!loading && records.length > 0 && (
-        <div className="space-y-2">
-          {[...records]
-            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-            .map(record => {
-              const cfg = STATUS_CONFIG[record.status];
-              return (
-                <div key={record.date} className="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-3 flex items-center justify-between">
-                  <p className="text-sm text-slate-700">
-                    {new Date(record.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
-                  </p>
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ color: cfg.color, backgroundColor: cfg.bg }}>
-                    {cfg.label}
-                  </span>
-                </div>
-              );
-            })}
+      {/* Calendar grid — responsive: 1 col on mobile, up to 3 on desktop */}
+      {!loading && months.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {months.map(({ year, month }) => (
+            <MonthGrid
+              key={`${year}-${month}`}
+              year={year}
+              month={month}
+              startKey={start!}
+              endKey={end!}
+              statusByDate={statusByDate}
+            />
+          ))}
         </div>
       )}
     </div>
   );
+}
+
+function Stat({ label, value, color }: { label: string; value: string | number; color: string }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-3 py-4 text-center">
+      <p className="text-[11px] text-slate-400">{label}</p>
+      <p className="text-2xl font-bold" style={{ color }}>{value}</p>
+    </div>
+  );
+}
+
+function MonthGrid({
+  year, month, startKey, endKey, statusByDate,
+}: {
+  year: number;
+  month: number;
+  startKey: string;
+  endKey: string;
+  statusByDate: Map<string, Status>;
+}) {
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const firstWeekday = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7; // Mon = 0
+  const monthName = new Date(Date.UTC(year, month, 1)).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
+  const cells: (number | null)[] = [
+    ...Array(firstWeekday).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+      <p className="text-sm font-semibold text-slate-800 mb-3">{monthName}</p>
+      <div className="grid grid-cols-7 gap-1.5">
+        {WEEKDAYS.map((d, i) => (
+          <div key={i} className="text-center text-[10px] font-medium text-slate-300">{d}</div>
+        ))}
+        {cells.map((day, i) => {
+          if (day === null) return <div key={`e${i}`} />;
+          const key = keyOf(year, month, day);
+          const inTerm = key >= startKey && key <= endKey;
+          const status = statusByDate.get(key);
+          const cfg = status ? STATUS_CONFIG[status] : null;
+          return (
+            <div
+              key={key}
+              title={status ? STATUS_CONFIG[status].label : undefined}
+              className="aspect-square rounded-lg flex items-center justify-center text-[11px] font-medium"
+              style={cfg
+                ? { backgroundColor: cfg.color, color: cfg.fg }
+                : { backgroundColor: inTerm ? '#f1f5f9' : 'transparent', color: inTerm ? '#94a3b8' : '#cbd5e1' }}
+            >
+              {day}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Inclusive list of {year, month} between two yyyy-mm-dd keys.
+function monthsBetween(startKey: string, endKey: string): { year: number; month: number }[] {
+  const [sy, sm] = startKey.split('-').map(Number);
+  const [ey, em] = endKey.split('-').map(Number);
+  const out: { year: number; month: number }[] = [];
+  let y = sy, m = sm - 1;
+  const endY = ey, endM = em - 1;
+  while (y < endY || (y === endY && m <= endM)) {
+    out.push({ year: y, month: m });
+    m++;
+    if (m > 11) { m = 0; y++; }
+    if (out.length > 24) break; // safety
+  }
+  return out;
 }

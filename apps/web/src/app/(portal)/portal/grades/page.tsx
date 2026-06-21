@@ -101,7 +101,7 @@ export default function PortalGradesPage() {
       )}
 
       {!loading && subjects.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {subjects.map(subject => (
             <div key={subject.subjectId} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="px-4 py-3 flex items-center justify-between border-b border-slate-50">

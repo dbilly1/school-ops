@@ -16,7 +16,7 @@ export default function PortalFeedingPage() {
   const { data, loading } = useApi(fetchBalance);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-md">
       <div>
         <h1 className="text-lg font-bold text-slate-900">Feeding</h1>
         <p className="text-xs text-slate-400 mt-0.5">Your feeding balance and status</p>

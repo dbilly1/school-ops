@@ -24,6 +24,11 @@ export class PortalController {
     return this.portalService.changePassword(user.id, dto);
   }
 
+  @Get('terms')
+  getTerms(@CurrentUser() user: any) {
+    return this.portalService.getTerms(user.schoolId);
+  }
+
   @Get('attendance')
   getAttendance(
     @CurrentUser() user: any,

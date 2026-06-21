@@ -136,7 +136,7 @@ export default function PortalShellLayout({ children }: { children: React.ReactN
           </p>
         </header>
 
-        <main className="flex-1 w-full max-w-3xl mx-auto px-4 py-5 lg:px-8 lg:py-8 pb-24 lg:pb-8">
+        <main className="flex-1 w-full max-w-5xl mx-auto px-4 py-5 lg:px-8 lg:py-8 pb-24 lg:pb-8">
           {children}
         </main>
 

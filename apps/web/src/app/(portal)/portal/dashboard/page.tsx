@@ -55,7 +55,7 @@ export default function PortalDashboard() {
       {/* Quick links grid */}
       <div>
         <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Quick access</p>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-3">
           {QUICK_LINKS.map(link => (
             <Link
               key={link.href}
@@ -76,7 +76,7 @@ export default function PortalDashboard() {
             <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Recent notices</p>
             <Link href="/portal/notices" className="text-xs font-medium" style={{ color: 'var(--accent)' }}>View all →</Link>
           </div>
-          <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {notices.slice(0, 3).map(n => (
               <div key={n.id} className="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-3">
                 <p className="text-sm font-medium text-slate-800">{n.title}</p>

@@ -98,6 +98,26 @@ export class PortalService {
     return student;
   }
 
+  // Terms (with their date ranges) for the attendance/grades term pickers.
+  async getTerms(schoolId: string) {
+    const terms = await this.prisma.term.findMany({
+      where: { schoolId },
+      select: {
+        id: true, name: true, startDate: true, endDate: true, isActive: true,
+        academicYear: { select: { name: true } },
+      },
+      orderBy: [{ startDate: 'desc' }],
+    });
+    return terms.map((t) => ({
+      id: t.id,
+      name: t.name,
+      startDate: t.startDate,
+      endDate: t.endDate,
+      isActive: t.isActive,
+      academicYearName: t.academicYear.name,
+    }));
+  }
+
   async getAttendance(studentId: string, schoolId: string, startDate?: string, endDate?: string) {
     const now = new Date();
     const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
