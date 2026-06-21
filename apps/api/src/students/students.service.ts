@@ -1,8 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { ConfigService } from '@nestjs/config';
+import { Prisma, StaffRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { TeacherScopeService } from '../staff/teacher-scope.service';
 import { retryOnUniqueViolation } from '../common/retry-unique';
 import { nextStudentId } from '../common/student-id';
 import { generateTempPassword } from '../common/password.util';
@@ -14,6 +16,7 @@ export class StudentsService {
     private prisma: PrismaService,
     private mail: MailService,
     private config: ConfigService,
+    private teacherScope: TeacherScopeService,
   ) {}
 
   // ── Create directly (bypass admissions) ──────────────────
@@ -84,27 +87,37 @@ export class StudentsService {
     );
   }
 
-  async findAll(schoolId: string, classId?: string, academicYearId?: string, studentCategoryId?: string) {
-    return this.prisma.student.findMany({
-      where: {
-        schoolId,
-        // 'none' = students with no category assigned; any other value filters to it
-        ...(studentCategoryId === 'none'
-          ? { studentCategoryId: null }
-          : studentCategoryId
-            ? { studentCategoryId }
-            : {}),
-        ...(classId || academicYearId
-          ? {
-              classAssignments: {
-                some: {
-                  ...(classId ? { classId } : {}),
-                  ...(academicYearId ? { academicYearId } : {}),
-                },
-              },
-            }
+  async findAll(
+    schoolId: string,
+    userId: string,
+    roles: StaffRole[],
+    classId?: string,
+    academicYearId?: string,
+    studentCategoryId?: string,
+  ) {
+    // Restricted teachers only see students in classes they teach (null = unrestricted).
+    const scope = await this.teacherScope.studentScopeFilter(userId, roles);
+    const base: Prisma.StudentWhereInput = {
+      schoolId,
+      // 'none' = students with no category assigned; any other value filters to it
+      ...(studentCategoryId === 'none'
+        ? { studentCategoryId: null }
+        : studentCategoryId
+          ? { studentCategoryId }
           : {}),
-      },
+      ...(classId || academicYearId
+        ? {
+            classAssignments: {
+              some: {
+                ...(classId ? { classId } : {}),
+                ...(academicYearId ? { academicYearId } : {}),
+              },
+            },
+          }
+        : {}),
+    };
+    return this.prisma.student.findMany({
+      where: scope ? { AND: [base, scope] } : base,
       select: {
         id: true, studentId: true, firstName: true, lastName: true,
         gender: true, enrolledAt: true, dateOfBirth: true, address: true,
@@ -124,9 +137,10 @@ export class StudentsService {
     });
   }
 
-  async findOne(schoolId: string, id: string) {
+  async findOne(schoolId: string, id: string, userId: string, roles: StaffRole[]) {
+    const scope = await this.teacherScope.studentScopeFilter(userId, roles);
     const student = await this.prisma.student.findFirst({
-      where: { id, schoolId },
+      where: scope ? { AND: [{ id, schoolId }, scope] } : { id, schoolId },
       include: {
         guardians: true,
         studentCategory: { select: { id: true, name: true } },
@@ -286,8 +300,11 @@ export class StudentsService {
   }
 
   // Performance tracking — all years
-  async getPerformanceHistory(schoolId: string, id: string) {
-    const student = await this.prisma.student.findFirst({ where: { id, schoolId } });
+  async getPerformanceHistory(schoolId: string, id: string, userId: string, roles: StaffRole[]) {
+    const scope = await this.teacherScope.studentScopeFilter(userId, roles);
+    const student = await this.prisma.student.findFirst({
+      where: scope ? { AND: [{ id, schoolId }, scope] } : { id, schoolId },
+    });
     if (!student) throw new NotFoundException('Student not found');
 
     const assignments = await this.prisma.studentClassAssignment.findMany({

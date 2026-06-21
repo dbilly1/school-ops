@@ -6,16 +6,20 @@ import {
   RolePermissionOverrideDto, UserPermissionOverrideDto,
 } from './dto/user.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { ManagementWriteGuard } from '../auth/guards/management-write.guard';
+import { StaffRolesGuard } from '../auth/guards/staff-roles.guard';
+import { RequireStaffRole } from '../auth/decorators/staff-roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { StaffRole } from '@prisma/client';
 
-// Writes restricted to Owner/Admin at the guard layer; the service applies the
-// finer-grained capability rules (Owner-only admin appointment, the
-// adminCanManagePermissions toggle, etc.).
+// Both reads and writes are restricted to the management roles; the service
+// applies the finer-grained capability rules (Owner-only admin/headmaster
+// appointment, the adminCanManagePermissions toggle, etc.). Headmaster is a
+// full user-manager but cannot appoint Owner/Admin/Headmaster, nor manage
+// permission overrides (those stay Owner/Admin — see UsersService).
 @ApiTags('Users')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, ManagementWriteGuard)
+@UseGuards(JwtAuthGuard, StaffRolesGuard)
+@RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
 @Controller('school/users')
 export class UsersController {
   constructor(private usersService: UsersService) {}

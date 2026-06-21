@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { useStaffAuth } from '@/contexts/staff-auth';
+import { assignableRoles } from '@/lib/staff-roles';
 import { FormField, Input, SaveButton, Alert } from '@/components/ui/settings-card';
 import { Modal } from '@/components/ui/modal';
 import { cn } from '@/lib/cn';
@@ -38,6 +39,7 @@ const ALL_ROLES = [
   { value: 'TEACHER',           label: 'Teacher'           },
   { value: 'ACCOUNTANT',        label: 'Accountant'        },
   { value: 'TRANSPORT_OFFICER', label: 'Transport Officer' },
+  { value: 'HEADMASTER',        label: 'Headmaster / Headmistress' },
   { value: 'SCHOOL_ADMIN',      label: 'School Admin'      },
 ];
 
@@ -136,7 +138,7 @@ function ProfileTab({ user, onSaved }: { user: UserDetail; onSaved: () => void }
 // ── Roles & Access tab ────────────────────────────────────────────────────────
 
 function RolesTab({ user, onSaved }: { user: UserDetail; onSaved: () => void }) {
-  const { isOwner } = useStaffAuth();
+  const { isOwner, isAdmin, isHeadmaster } = useStaffAuth();
   const router = useRouter();
   const currentRoles = user.roles.map(r => r.role);
   const [roles, setRoles]     = useState<string[]>(currentRoles);
@@ -145,9 +147,7 @@ function RolesTab({ user, onSaved }: { user: UserDetail; onSaved: () => void }) 
   const [alert, setAlert]     = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
   const isOwnerAccount = currentRoles.includes('SCHOOL_OWNER');
-  const availableRoles = isOwner && !isOwnerAccount
-    ? ALL_ROLES
-    : ALL_ROLES.filter(r => r.value !== 'SCHOOL_ADMIN');
+  const availableRoles = assignableRoles(ALL_ROLES, { isOwner, isAdmin, isHeadmaster });
 
   function toggleRole(role: string) {
     setRoles(r => r.includes(role) ? r.filter(x => x !== role) : [...r, role]);
@@ -204,7 +204,7 @@ function RolesTab({ user, onSaved }: { user: UserDetail; onSaved: () => void }) 
             ))}
           </div>
           {!isOwner && (
-            <p className="text-xs text-slate-400 mb-4">Only the School Owner can assign the School Admin role.</p>
+            <p className="text-xs text-slate-400 mb-4">Only the School Owner can assign the School Admin or Headmaster roles.</p>
           )}
           <SaveButton loading={saving} onClick={saveRoles} label="Update roles" />
         </div>
@@ -214,8 +214,8 @@ function RolesTab({ user, onSaved }: { user: UserDetail; onSaved: () => void }) 
         </div>
       )}
 
-      {/* User-level permission overrides */}
-      {!isOwnerAccount && (
+      {/* User-level permission overrides — managing permissions is Owner/Admin only */}
+      {!isOwnerAccount && (isOwner || isAdmin) && (
         <div className="pt-4 border-t border-slate-100">
           <div className="flex items-center justify-between">
             <div>

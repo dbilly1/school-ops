@@ -14,6 +14,8 @@ import {
 } from './dto/user.dto';
 import { StaffRole } from '@prisma/client';
 
+type ActorCaps = { isOwner: boolean; isAdmin: boolean; isHeadmaster: boolean };
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -39,32 +41,50 @@ export class UsersService {
     return {
       isOwner: roles.includes('SCHOOL_OWNER' as StaffRole),
       isAdmin: roles.includes('SCHOOL_ADMIN' as StaffRole),
+      isHeadmaster: roles.includes('HEADMASTER' as StaffRole),
     };
   }
 
-  private assertCanManageUsers(actor: { isOwner: boolean; isAdmin: boolean }) {
-    if (!actor.isOwner && !actor.isAdmin)
-      throw new ForbiddenException('Only the School Owner or a School Admin can manage users');
+  private assertCanManageUsers(actor: ActorCaps) {
+    if (!actor.isOwner && !actor.isAdmin && !actor.isHeadmaster)
+      throw new ForbiddenException('You are not permitted to manage users');
   }
 
-  // SCHOOL_OWNER can never be granted; SCHOOL_ADMIN only by the Owner.
-  private assertCanGrantRoles(
-    actor: { isOwner: boolean; isAdmin: boolean },
-    requestedRoles: StaffRole[],
-  ) {
+  // Finance & Ops roles — a Headmaster (academic head) may not grant these,
+  // since they have no access to the areas the roles unlock.
+  private static readonly FINANCE_OPS_ROLES: StaffRole[] = [
+    'ACCOUNTANT' as StaffRole,
+    'TRANSPORT_OFFICER' as StaffRole,
+  ];
+
+  // SCHOOL_OWNER can never be granted; SCHOOL_ADMIN and HEADMASTER only by the
+  // Owner (both are appoint-once, high-trust roles). A pure Headmaster (not also
+  // Owner/Admin) is further limited to academic roles only.
+  private assertCanGrantRoles(actor: ActorCaps, requestedRoles: StaffRole[]) {
     if (requestedRoles.includes('SCHOOL_OWNER' as StaffRole))
       throw new ForbiddenException('The School Owner role cannot be granted');
     if (requestedRoles.includes('SCHOOL_ADMIN' as StaffRole) && !actor.isOwner)
       throw new ForbiddenException('Only the School Owner can appoint a School Admin');
+    if (requestedRoles.includes('HEADMASTER' as StaffRole) && !actor.isOwner)
+      throw new ForbiddenException('Only the School Owner can appoint a Headmaster');
+
+    const actingAsHeadmaster = actor.isHeadmaster && !actor.isOwner && !actor.isAdmin;
+    if (
+      actingAsHeadmaster &&
+      requestedRoles.some((r) => UsersService.FINANCE_OPS_ROLES.includes(r))
+    )
+      throw new ForbiddenException(
+        'A Headmaster can only assign academic roles (e.g. Teacher), not Finance or Operations roles',
+      );
   }
 
-  // Acting on (delete/deactivate/reset) a School Admin is Owner-only.
-  private assertCanActOnTarget(
-    actor: { isOwner: boolean; isAdmin: boolean },
-    targetRoles: StaffRole[],
-  ) {
+  // Acting on (delete/deactivate/reset/role-change) a School Admin or Headmaster
+  // is Owner-only.
+  private assertCanActOnTarget(actor: ActorCaps, targetRoles: StaffRole[]) {
     if (targetRoles.includes('SCHOOL_ADMIN' as StaffRole) && !actor.isOwner)
       throw new ForbiddenException('Only the School Owner can manage a School Admin');
+    if (targetRoles.includes('HEADMASTER' as StaffRole) && !actor.isOwner)
+      throw new ForbiddenException('Only the School Owner can manage a Headmaster');
   }
 
   private async assertCanManagePermissions(schoolId: string, actorId: string) {
@@ -314,10 +334,11 @@ export class UsersService {
     if (user.roles.some((r) => r.role === 'SCHOOL_OWNER'))
       throw new ForbiddenException('Cannot modify roles of a School Owner');
 
-    // Appointing/removing a School Admin is Owner-only — block non-Owners from
-    // changing the roles of anyone who is currently a School Admin.
+    // Changing the roles of a current School Admin or Headmaster is Owner-only.
     if (user.roles.some((r) => r.role === 'SCHOOL_ADMIN') && !actor.isOwner)
       throw new ForbiddenException('Only the School Owner can modify a School Admin');
+    if (user.roles.some((r) => r.role === 'HEADMASTER') && !actor.isOwner)
+      throw new ForbiddenException('Only the School Owner can modify a Headmaster');
 
     const before = user.roles.map((r) => r.role);
 

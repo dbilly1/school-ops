@@ -31,6 +31,7 @@ type StaffAuthState = {
   markOnboardingComplete: () => void;
   isOwner: boolean;
   isAdmin: boolean;
+  isHeadmaster: boolean;
   hasRole: (role: string) => boolean;
 };
 
@@ -143,12 +144,13 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   const hasRole = useCallback((role: string) => user?.roles.includes(role) ?? false, [user]);
   const isOwner = hasRole('SCHOOL_OWNER');
   const isAdmin = hasRole('SCHOOL_ADMIN');
+  const isHeadmaster = hasRole('HEADMASTER');
 
   return (
     <StaffAuthContext.Provider value={{
       user, branding, loading,
       login, logout, refreshBranding: fetchBranding, markOnboardingComplete,
-      isOwner, isAdmin, hasRole,
+      isOwner, isAdmin, isHeadmaster, hasRole,
     }}>
       {children}
     </StaffAuthContext.Provider>

@@ -18,7 +18,7 @@ export class StudentsController {
   constructor(private studentsService: StudentsService) {}
 
   @Post()
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN)
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
   create(@CurrentUser() user: any, @Body() dto: CreateStudentDto) {
     return this.studentsService.create(user.schoolId, dto);
   }
@@ -30,34 +30,36 @@ export class StudentsController {
     @Query('academicYearId') academicYearId?: string,
     @Query('studentCategoryId') studentCategoryId?: string,
   ) {
-    return this.studentsService.findAll(user.schoolId, classId, academicYearId, studentCategoryId);
+    return this.studentsService.findAll(
+      user.schoolId, user.id, user.roles ?? [], classId, academicYearId, studentCategoryId,
+    );
   }
 
   @Post('bulk-category')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN)
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
   bulkAssignCategory(@CurrentUser() user: any, @Body() dto: BulkAssignCategoryDto) {
     return this.studentsService.bulkAssignCategory(user.schoolId, dto);
   }
 
   @Get(':id')
   findOne(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.studentsService.findOne(user.schoolId, id);
+    return this.studentsService.findOne(user.schoolId, id, user.id, user.roles ?? []);
   }
 
   @Patch(':id')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN)
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
   update(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateStudentDto) {
     return this.studentsService.update(user.schoolId, id, dto);
   }
 
   @Post(':id/guardians')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN)
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
   addGuardian(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: AddGuardianDto) {
     return this.studentsService.addGuardian(user.schoolId, id, dto);
   }
 
   @Delete(':id/guardians/:guardianId')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN)
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
   removeGuardian(
     @CurrentUser() user: any,
     @Param('id') id: string,
@@ -67,19 +69,19 @@ export class StudentsController {
   }
 
   @Post(':id/class-assignment')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN)
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
   assignClass(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: AssignClassDto) {
     return this.studentsService.assignClass(user.schoolId, id, dto);
   }
 
   @Patch(':id/reset-portal-password')
-  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN)
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
   resetPortalPassword(@CurrentUser() user: any, @Param('id') id: string) {
     return this.studentsService.resetPortalPassword(user.schoolId, id);
   }
 
   @Get(':id/performance')
   getPerformanceHistory(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.studentsService.getPerformanceHistory(user.schoolId, id);
+    return this.studentsService.getPerformanceHistory(user.schoolId, id, user.id, user.roles ?? []);
   }
 }

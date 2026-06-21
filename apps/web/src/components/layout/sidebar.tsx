@@ -7,7 +7,7 @@ import { useTeacherScope } from '@/hooks/use-teacher-scope';
 import { useAllFeatures } from '@/hooks/use-feature';
 import { FeatureState } from '@schoolops/types';
 import { cn } from '@/lib/cn';
-import { OWNER_ADMIN, OWNER_ADMIN_TEACHER, OWNER_ADMIN_ACCOUNTANT, OWNER_ADMIN_TRANSPORT } from '@/lib/staff-roles';
+import { OWNER_ADMIN, OWNER_ADMIN_HEAD, OWNER_ADMIN_HEAD_TEACHER, OWNER_ADMIN_ACCOUNTANT, OWNER_ADMIN_TRANSPORT } from '@/lib/staff-roles';
 
 // ── Icons (inline SVG — no icon library dependency) ───────────────────────────
 
@@ -122,16 +122,16 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: 'People',
     items: [
-      { label: 'Admissions', href: '/school/admissions', iconPath: icons.admissions, featureKey: 'admissions', roles: OWNER_ADMIN },
+      { label: 'Admissions', href: '/school/admissions', iconPath: icons.admissions, featureKey: 'admissions', roles: OWNER_ADMIN_HEAD },
       { label: 'Students',   href: '/school/students',   iconPath: icons.students },
-      { label: 'Staff',      href: '/school/staff',      iconPath: icons.staff,      roles: OWNER_ADMIN },
+      { label: 'Staff',      href: '/school/staff',      iconPath: icons.staff,      roles: OWNER_ADMIN_HEAD },
     ],
   },
   {
     section: 'Academics',
     items: [
-      { label: 'Academics',  href: '/school/academics',  iconPath: icons.academics,  featureKey: 'academics',  roles: OWNER_ADMIN_TEACHER },
-      { label: 'Attendance', href: '/school/attendance', iconPath: icons.attendance, featureKey: 'attendance', roles: OWNER_ADMIN_TEACHER, id: 'attendance' },
+      { label: 'Academics',  href: '/school/academics',  iconPath: icons.academics,  featureKey: 'academics',  roles: OWNER_ADMIN_HEAD_TEACHER },
+      { label: 'Attendance', href: '/school/attendance', iconPath: icons.attendance, featureKey: 'attendance', roles: OWNER_ADMIN_HEAD_TEACHER, id: 'attendance' },
     ],
   },
   {
@@ -152,8 +152,8 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: 'Insights',
     items: [
-      { label: 'Reports',     href: '/school/reports',     iconPath: icons.reports,     roles: OWNER_ADMIN },
-      { label: 'Progression', href: '/school/progression', iconPath: icons.students, roles: OWNER_ADMIN },
+      { label: 'Reports',     href: '/school/reports',     iconPath: icons.reports,     roles: OWNER_ADMIN_ACCOUNTANT },
+      { label: 'Progression', href: '/school/progression', iconPath: icons.students, roles: OWNER_ADMIN_HEAD },
       { label: 'Audit Logs',  href: '/school/audit-logs',  iconPath: icons.audit,    roles: OWNER_ADMIN },
     ],
   },

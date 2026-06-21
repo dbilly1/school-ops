@@ -12,7 +12,7 @@ import { StaffRole } from '@prisma/client';
 @ApiTags('Student Progression')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, StaffRolesGuard)
-@RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN)
+@RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
 @Controller('school/progression')
 export class ProgressionController {
   constructor(private progressionService: ProgressionService) {}

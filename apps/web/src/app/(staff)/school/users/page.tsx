@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { useStaffAuth } from '@/contexts/staff-auth';
+import { assignableRoles } from '@/lib/staff-roles';
 import { Modal } from '@/components/ui/modal';
 import { FormField, Input, SaveButton, Alert } from '@/components/ui/settings-card';
 
@@ -24,12 +25,14 @@ const ALL_ROLES = [
   { value: 'TEACHER',           label: 'Teacher'           },
   { value: 'ACCOUNTANT',        label: 'Accountant'        },
   { value: 'TRANSPORT_OFFICER', label: 'Transport Officer' },
+  { value: 'HEADMASTER',        label: 'Headmaster / Headmistress' },
   { value: 'SCHOOL_ADMIN',      label: 'School Admin'      },
 ];
 
 const ROLE_COLORS: Record<string, string> = {
   SCHOOL_OWNER:      '#065f46',
   SCHOOL_ADMIN:      '#1e40af',
+  HEADMASTER:        '#4338ca',
   TEACHER:           '#6d28d9',
   ACCOUNTANT:        '#b45309',
   TRANSPORT_OFFICER: '#0f766e',
@@ -50,7 +53,7 @@ function RoleBadge({ role }: { role: string }) {
 // ── Invite modal ──────────────────────────────────────────────────────────────
 
 function InviteModal({ open, onClose, onInvited }: { open: boolean; onClose: () => void; onInvited: () => void }) {
-  const { isOwner } = useStaffAuth();
+  const { isOwner, isAdmin, isHeadmaster } = useStaffAuth();
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', roles: [] as string[] });
   const [saving, setSaving] = useState(false);
   const [alert, setAlert]   = useState<{ type: 'error' | 'success'; message: string } | null>(null);
@@ -82,9 +85,7 @@ function InviteModal({ open, onClose, onInvited }: { open: boolean; onClose: () 
     }
   }
 
-  const availableRoles = isOwner
-    ? ALL_ROLES
-    : ALL_ROLES.filter(r => r.value !== 'SCHOOL_ADMIN');
+  const availableRoles = assignableRoles(ALL_ROLES, { isOwner, isAdmin, isHeadmaster });
 
   return (
     <Modal open={open} onClose={onClose} title="Invite staff member">

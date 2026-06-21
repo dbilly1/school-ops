@@ -53,11 +53,7 @@ const DEFAULTS = [
   ['TEACHER', 'students',   null, 'CREATE', false],
   ['TEACHER', 'students',   null, 'EDIT',   false],
   ['TEACHER', 'students',   null, 'DELETE', false],
-  // Reports
-  ['TEACHER', 'reports',    null, 'VIEW',   true ],
-  ['TEACHER', 'reports',    null, 'CREATE', false],
-  ['TEACHER', 'reports',    null, 'EDIT',   false],
-  ['TEACHER', 'reports',    null, 'DELETE', false],
+  // Reports — teachers do NOT get aggregate reports (management-only).
   // Communication
   ['TEACHER', 'communication', null,               'VIEW',   true ],
   ['TEACHER', 'communication', null,               'CREATE', false],
@@ -102,10 +98,11 @@ const DEFAULTS = [
   ['ACCOUNTANT', 'finance', 'discount_management',         'CREATE', true ],
   ['ACCOUNTANT', 'finance', 'discount_management',         'EDIT',   true ],
   ['ACCOUNTANT', 'finance', 'discount_management',         'DELETE', false],
-  // Expense management — denied by default; School Owner grants per role/user.
-  ['ACCOUNTANT', 'finance', 'expense_management',          'VIEW',   false],
-  ['ACCOUNTANT', 'finance', 'expense_management',          'CREATE', false],
-  ['ACCOUNTANT', 'finance', 'expense_management',          'EDIT',   false],
+  // Expense management — accountants manage school outflow by default (DELETE
+  // stays Owner/Admin-only, matching the other finance sub-features).
+  ['ACCOUNTANT', 'finance', 'expense_management',          'VIEW',   true ],
+  ['ACCOUNTANT', 'finance', 'expense_management',          'CREATE', true ],
+  ['ACCOUNTANT', 'finance', 'expense_management',          'EDIT',   true ],
   ['ACCOUNTANT', 'finance', 'expense_management',          'DELETE', false],
   // Feeding fees
   ['ACCOUNTANT', 'feeding_fees', null, 'VIEW',   true ],

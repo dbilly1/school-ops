@@ -4,6 +4,10 @@ import { FeatureFlagsService } from '../feature-flags/feature-flags.service';
 import { PermissionCacheService } from '../cache/permission-cache.service';
 import { PermissionAction, StaffRole } from '@prisma/client';
 
+// Finance & Ops features the Headmaster (academic head) is NOT granted by the
+// blanket bypass below. Keep in sync with the Finance/Ops sidebar section.
+const HEADMASTER_EXCLUDED_FEATURES = new Set(['finance', 'feeding_fees', 'transport']);
+
 interface PermissionCheckInput {
   userId: string;
   schoolId: string;
@@ -69,6 +73,16 @@ export class PermissionsService {
 
     // Step 4 — School Owner and School Admin bypass all remaining checks
     if (roles.includes('SCHOOL_OWNER' as StaffRole) || roles.includes('SCHOOL_ADMIN' as StaffRole)) {
+      return true;
+    }
+
+    // Step 4b — Headmaster is the academic head: full access to every feature
+    // EXCEPT the Finance & Ops features (fees, feeding, transport), which fall
+    // through to the normal role-default/override path (none → denied).
+    if (
+      roles.includes('HEADMASTER' as StaffRole) &&
+      !HEADMASTER_EXCLUDED_FEATURES.has(featureKey)
+    ) {
       return true;
     }
 

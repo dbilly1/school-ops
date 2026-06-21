@@ -6,7 +6,8 @@ import { useStaffAuth } from '@/contexts/staff-auth';
 import { useFeature } from '@/hooks/use-feature';
 import {
   OWNER_ADMIN,
-  OWNER_ADMIN_TEACHER,
+  OWNER_ADMIN_HEAD,
+  OWNER_ADMIN_HEAD_TEACHER,
   OWNER_ADMIN_ACCOUNTANT,
   OWNER_ADMIN_TRANSPORT,
 } from '@/lib/staff-roles';
@@ -25,19 +26,20 @@ type Rule = { prefix: string; roles?: string[]; featureKey?: string };
 // students, account, onboarding) is allowed for any authenticated staff member,
 // which keeps the redirect target always reachable (no loops).
 const RULES: Rule[] = [
-  { prefix: '/school/admissions',    roles: OWNER_ADMIN,            featureKey: 'admissions'    },
-  { prefix: '/school/staff',         roles: OWNER_ADMIN                                          },
-  { prefix: '/school/academics',     roles: OWNER_ADMIN_TEACHER,    featureKey: 'academics'     },
-  { prefix: '/school/attendance',    roles: OWNER_ADMIN_TEACHER,    featureKey: 'attendance'    },
-  { prefix: '/school/finance',       roles: OWNER_ADMIN_ACCOUNTANT, featureKey: 'finance'       },
-  { prefix: '/school/expenses',      roles: OWNER_ADMIN_ACCOUNTANT, featureKey: 'finance'       },
-  { prefix: '/school/feeding',       roles: OWNER_ADMIN_ACCOUNTANT, featureKey: 'feeding_fees'  },
-  { prefix: '/school/transport',     roles: OWNER_ADMIN_TRANSPORT,  featureKey: 'transport'     },
-  { prefix: '/school/communication',                                featureKey: 'communication' },
-  { prefix: '/school/reports',       roles: OWNER_ADMIN                                          },
-  { prefix: '/school/progression',   roles: OWNER_ADMIN                                          },
-  { prefix: '/school/audit-logs',    roles: OWNER_ADMIN                                          },
-  { prefix: '/school/settings',      roles: OWNER_ADMIN                                          },
+  { prefix: '/school/admissions',    roles: OWNER_ADMIN_HEAD,         featureKey: 'admissions'    },
+  { prefix: '/school/staff',         roles: OWNER_ADMIN_HEAD                                        },
+  { prefix: '/school/users',         roles: OWNER_ADMIN_HEAD                                        },
+  { prefix: '/school/academics',     roles: OWNER_ADMIN_HEAD_TEACHER, featureKey: 'academics'     },
+  { prefix: '/school/attendance',    roles: OWNER_ADMIN_HEAD_TEACHER, featureKey: 'attendance'    },
+  { prefix: '/school/finance',       roles: OWNER_ADMIN_ACCOUNTANT,   featureKey: 'finance'       },
+  { prefix: '/school/expenses',      roles: OWNER_ADMIN_ACCOUNTANT,   featureKey: 'finance'       },
+  { prefix: '/school/feeding',       roles: OWNER_ADMIN_ACCOUNTANT,   featureKey: 'feeding_fees'  },
+  { prefix: '/school/transport',     roles: OWNER_ADMIN_TRANSPORT,    featureKey: 'transport'     },
+  { prefix: '/school/communication',                                  featureKey: 'communication' },
+  { prefix: '/school/reports',       roles: OWNER_ADMIN_ACCOUNTANT                                 },
+  { prefix: '/school/progression',   roles: OWNER_ADMIN_HEAD                                        },
+  { prefix: '/school/audit-logs',    roles: OWNER_ADMIN                                            },
+  { prefix: '/school/settings',      roles: OWNER_ADMIN                                            },
 ];
 
 function matchRule(pathname: string): Rule | undefined {

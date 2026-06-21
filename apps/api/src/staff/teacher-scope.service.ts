@@ -19,8 +19,28 @@ export class TeacherScopeService {
     return (
       roles.includes(StaffRole.TEACHER) &&
       !roles.includes(StaffRole.SCHOOL_OWNER) &&
-      !roles.includes(StaffRole.SCHOOL_ADMIN)
+      !roles.includes(StaffRole.SCHOOL_ADMIN) &&
+      !roles.includes(StaffRole.HEADMASTER)
     );
+  }
+
+  // ── Student visibility: the classes whose students a restricted teacher may
+  //    see — every class they class-teach or subject-teach. Used to scope the
+  //    student roster/detail reads so a teacher can't browse the whole school.
+  async studentScopeFilter(
+    userId: string,
+    roles: StaffRole[],
+  ): Promise<Prisma.StudentWhereInput | null> {
+    if (!this.isRestricted(roles)) return null;
+    const staffProfileId = await this.staffProfileId(userId);
+    if (!staffProfileId) return { id: '__none__' };
+
+    const classTeacherIds = await this.classTeacherClassIds(staffProfileId);
+    const subjectClassIds = (await this.subjectClassPairs(staffProfileId)).map((p) => p.classId);
+    const classIds = [...new Set([...classTeacherIds, ...subjectClassIds])];
+    if (classIds.length === 0) return { id: '__none__' };
+
+    return { classAssignments: { some: { classId: { in: classIds } } } };
   }
 
   private async staffProfileId(userId: string): Promise<string | null> {
