@@ -19,14 +19,20 @@ const NAV = [
   { label: 'Feeding',     href: '/portal/feeding',      icon: '🍽' },
 ];
 
+// Routes under /portal that must render WITHOUT a logged-in user. The login page
+// lives inside this shell, so without this exemption the "no user" gate below
+// blanks it out and redirects it to itself.
+const PUBLIC_PORTAL_PATHS = ['/portal/login'];
+
 export default function PortalShellLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, logout } = usePortalAuth();
   const router   = useRouter();
   const pathname = usePathname();
+  const isPublic = PUBLIC_PORTAL_PATHS.includes(pathname);
 
   useEffect(() => {
-    if (!loading && !user) router.replace('/portal/login');
-  }, [loading, user, router]);
+    if (!isPublic && !loading && !user) router.replace('/portal/login');
+  }, [isPublic, loading, user, router]);
 
   // Force password change on first login
   useEffect(() => {
@@ -34,6 +40,10 @@ export default function PortalShellLayout({ children }: { children: React.ReactN
       router.replace('/portal/change-password');
     }
   }, [loading, user, pathname, router]);
+
+  // Public routes (login) render bare — they bring their own full-screen layout
+  // and must not be gated behind authentication.
+  if (isPublic) return <>{children}</>;
 
   if (loading) {
     return (
