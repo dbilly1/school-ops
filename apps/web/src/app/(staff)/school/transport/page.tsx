@@ -49,6 +49,141 @@ const STATUS_CONFIG: Record<DailyFeeStatus, { label: string; color: string; bg: 
 
 type Tab = 'routes' | 'vehicles' | 'drivers' | 'fees';
 
+// ── Assign students modal (searchable, multi-select) ───────────────────────────
+
+function AssignStudentsModal({ route, students, open, onClose, onAssigned }: {
+  route: Route;
+  students: Student[];
+  open: boolean;
+  onClose: () => void;
+  onAssigned: () => void;
+}) {
+  const [search, setSearch]   = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  // Reset state whenever the modal (re)opens.
+  useEffect(() => {
+    if (open) { setSearch(''); setSelected([]); setError(null); }
+  }, [open]);
+
+  const assignedIds = new Set(route.studentAssignments.map(a => a.student.id));
+  const available   = students.filter(s => !assignedIds.has(s.id));
+
+  const q = search.trim().toLowerCase();
+  const filtered = available.filter(s =>
+    !q || `${s.firstName} ${s.lastName} ${s.studentId}`.toLowerCase().includes(q),
+  );
+
+  const allVisibleSelected = filtered.length > 0 && filtered.every(s => selected.includes(s.id));
+
+  function toggle(id: string) {
+    setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  }
+
+  function toggleAllVisible() {
+    const visibleIds = filtered.map(s => s.id);
+    setSelected(s => allVisibleSelected
+      ? s.filter(id => !visibleIds.includes(id))
+      : [...new Set([...s, ...visibleIds])]);
+  }
+
+  async function assign() {
+    if (selected.length === 0) return;
+    setSaving(true); setError(null);
+    try {
+      for (const studentId of selected) {
+        await staffApi.post('/school/transport/assignments', { studentId, transportRouteId: route.id });
+      }
+      onAssigned(); onClose();
+    } catch (err) {
+      setError((err as ApiError).message ?? 'Failed to assign students.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Assign students — ${route.name}`}>
+      <div className="space-y-4">
+        {error && <Alert type="error" message={error} />}
+
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search by name or student ID…"
+          autoFocus
+          className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none"
+          onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+          onBlur={e => e.currentTarget.style.boxShadow = ''}
+        />
+
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-slate-400">
+            {selected.length > 0 ? `${selected.length} selected` : `${available.length} available`}
+          </span>
+          {filtered.length > 0 && (
+            <button type="button" onClick={toggleAllVisible} className="font-medium transition" style={{ color: 'var(--accent)' }}>
+              {allVisibleSelected ? 'Clear visible' : 'Select all visible'}
+            </button>
+          )}
+        </div>
+
+        <div className="max-h-72 overflow-y-auto -mx-1 px-1 divide-y divide-slate-50 border border-slate-100 rounded-lg">
+          {filtered.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-8">
+              {available.length === 0 ? 'All students are already on this route.' : 'No students match your search.'}
+            </p>
+          ) : filtered.map(s => {
+            const checked = selected.includes(s.id);
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => toggle(s.id)}
+                className="w-full flex items-center gap-3 px-2.5 py-2 text-left hover:bg-slate-50 transition"
+              >
+                <span
+                  className="shrink-0 w-4 h-4 rounded border flex items-center justify-center"
+                  style={checked
+                    ? { backgroundColor: 'var(--accent)', borderColor: 'var(--accent)' }
+                    : { borderColor: '#cbd5e1' }}
+                >
+                  {checked && (
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </span>
+                <span className="text-sm text-slate-700 min-w-0 truncate">
+                  {s.lastName}, {s.firstName}
+                  <span className="ml-2 text-xs font-mono text-slate-400">{s.studentId}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex justify-end gap-3 pt-1">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <SaveButton
+            loading={saving}
+            onClick={assign}
+            label={selected.length > 0 ? `Assign ${selected.length} student${selected.length !== 1 ? 's' : ''}` : 'Assign students'}
+          />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Routes tab ────────────────────────────────────────────────────────────────
 
 function RoutesTab() {
@@ -72,10 +207,7 @@ function RoutesTab() {
   // Student assignment
   const fetchStudents = useCallback(() => staffApi.get<Student[]>('/school/students'), []);
   const { data: students } = useApi(fetchStudents);
-  const [assigningRoute, setAssigningRoute] = useState('');
-  const [assignStudentId, setAssignStudentId] = useState('');
-  const [assigning, setAssigning] = useState(false);
-  const [assignError, setAssignError] = useState<string | null>(null);
+  const [assignModalRoute, setAssignModalRoute] = useState<Route | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
 
   async function createRoute() {
@@ -97,20 +229,8 @@ function RoutesTab() {
     }
   }
 
-  async function assignStudent(routeId: string) {
-    if (!assignStudentId) return;
-    setAssignError(null); setAssigning(true);
-    try {
-      await staffApi.post('/school/transport/assignments', { studentId: assignStudentId, transportRouteId: routeId });
-      setAssignStudentId(''); setAssigningRoute(''); refetch();
-    } catch (err) {
-      setAssignError((err as ApiError).message ?? 'Failed to assign student.');
-    } finally {
-      setAssigning(false);
-    }
-  }
-
-  async function removeAssignment(studentId: string) {
+  async function removeAssignment(studentId: string, studentName: string, routeName: string) {
+    if (!confirm(`Remove ${studentName} from ${routeName}? Their daily transport fees will stop being tracked on this route.`)) return;
     setRemoving(studentId);
     try {
       await staffApi.delete(`/school/transport/assignments/${studentId}`);
@@ -132,89 +252,73 @@ function RoutesTab() {
         </button>
       </div>
 
-      {loading && <div className="space-y-3">{[1,2].map(i => <div key={i} className="h-32 bg-slate-100 rounded-2xl animate-pulse" />)}</div>}
+      {loading && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-44 bg-slate-100 rounded-xl animate-pulse" />)}
+        </div>
+      )}
 
-      <div className="space-y-4">
-        {routes?.map(route => (
-          <div key={route.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-            <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
-              <div>
-                <p className="text-sm font-semibold text-slate-800">{route.name}</p>
-                <div className="flex items-center gap-3 mt-1 flex-wrap text-xs text-slate-500">
-                  <span>GHS {route.dailyRate}/day</span>
-                  {route.vehicle && <span>{route.vehicle.plateNumber} ({route.vehicle.make} {route.vehicle.model})</span>}
-                  {route.driver  && <span>Driver: {route.driver.name}</span>}
-                  <span className="font-medium" style={{ color: 'var(--accent)' }}>{route._count.studentAssignments} students</span>
+      {!loading && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {routes?.map(route => (
+            <div key={route.id} className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-col">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800 truncate">{route.name}</p>
+                  <div className="flex items-center gap-x-2 gap-y-0.5 mt-1 flex-wrap text-xs text-slate-500">
+                    <span>GHS {route.dailyRate}/day</span>
+                    {route.vehicle && <span>· {route.vehicle.plateNumber}</span>}
+                    {route.driver  && <span>· {route.driver.name}</span>}
+                  </div>
                 </div>
+                <span className="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-50" style={{ color: 'var(--accent)' }}>
+                  {route._count.studentAssignments}
+                </span>
               </div>
-            </div>
 
-            {/* Pickup points */}
-            {route.pickupPoints.length > 0 && (
-              <div className="px-5 py-3 border-b border-slate-50 flex flex-wrap gap-2">
-                {route.pickupPoints.sort((a,b) => a.order - b.order).map(p => (
-                  <span key={p.id} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded">{p.name}</span>
+              {/* Pickup points */}
+              {route.pickupPoints.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {route.pickupPoints.sort((a,b) => a.order - b.order).map(p => (
+                    <span key={p.id} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-500 rounded-lg">{p.name}</span>
+                  ))}
+                </div>
+              )}
+
+              {/* Assigned students */}
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {route.studentAssignments.length === 0 ? (
+                  <span className="text-xs text-slate-300 italic">No students assigned</span>
+                ) : route.studentAssignments.map(({ id, student }) => (
+                  <div key={id} className="flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded-lg text-xs text-slate-600">
+                    <span>{student.lastName}, {student.firstName}</span>
+                    <button
+                      onClick={() => removeAssignment(student.id, `${student.firstName} ${student.lastName}`, route.name)}
+                      disabled={removing === student.id}
+                      className="text-slate-300 hover:text-red-400 transition disabled:opacity-40"
+                    >
+                      ×
+                    </button>
+                  </div>
                 ))}
               </div>
-            )}
 
-            {/* Assigned students */}
-            <div className="px-5 py-3 border-b border-slate-50">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
-                Assigned students
-              </p>
-              {route.studentAssignments.length === 0 ? (
-                <p className="text-sm text-slate-400">No students assigned yet.</p>
-              ) : (
-                <ul className="divide-y divide-slate-50">
-                  {route.studentAssignments.map(({ id, student }) => (
-                    <li key={id} className="flex items-center justify-between py-1.5">
-                      <span className="text-sm text-slate-700">
-                        {student.lastName}, {student.firstName}
-                        <span className="ml-2 text-xs font-mono text-slate-400">{student.studentId}</span>
-                      </span>
-                      <button onClick={() => removeAssignment(student.id)} disabled={removing === student.id}
-                        className="text-xs text-red-400 hover:text-red-600 transition disabled:opacity-50">
-                        {removing === student.id ? '…' : 'Remove'}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {/* Assign student */}
-            <div className="px-5 py-3 flex gap-2">
-              <select
-                value={assigningRoute === route.id ? assignStudentId : ''}
-                onChange={e => { setAssigningRoute(route.id); setAssignStudentId(e.target.value); setAssignError(null); }}
-                className="flex-1 text-sm px-3 py-1.5 border border-slate-200 rounded-lg outline-none text-slate-700"
+              {/* Assign students */}
+              <button
+                onClick={() => setAssignModalRoute(route)}
+                className="mt-auto text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition"
               >
-                <option value="">Assign student to this route…</option>
-                {students?.map(s => <option key={s.id} value={s.id}>{s.lastName}, {s.firstName} ({s.studentId})</option>)}
-              </select>
-              {assigningRoute === route.id && assignStudentId && (
-                <button onClick={() => assignStudent(route.id)} disabled={assigning}
-                  className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg transition disabled:opacity-50"
-                  style={{ backgroundColor: 'var(--accent)' }}>
-                  {assigning ? '…' : 'Assign'}
-                </button>
-              )}
+                + Add students
+              </button>
             </div>
-            {assigningRoute === route.id && assignError && (
-              <div className="px-5 pb-3 -mt-1">
-                <Alert type="error" message={assignError} />
-              </div>
-            )}
-          </div>
-        ))}
+          ))}
 
-        {!loading && (!routes || routes.length === 0) && (
-          <div className="bg-white rounded-2xl border border-slate-100 px-6 py-12 text-center text-sm text-slate-400">
-            No routes yet.
-          </div>
-        )}
-      </div>
+          {(!routes || routes.length === 0) && (
+            <p className="col-span-3 text-sm text-slate-400 text-center py-12">No routes yet.</p>
+          )}
+        </div>
+      )}
 
       <Modal open={showNew} onClose={() => setShowNew(false)} title="Add transport route">
         <div className="space-y-4">
@@ -246,6 +350,16 @@ function RoutesTab() {
           </div>
         </div>
       </Modal>
+
+      {assignModalRoute && (
+        <AssignStudentsModal
+          route={assignModalRoute}
+          students={students ?? []}
+          open={!!assignModalRoute}
+          onClose={() => setAssignModalRoute(null)}
+          onAssigned={refetch}
+        />
+      )}
     </div>
   );
 }
@@ -253,6 +367,7 @@ function RoutesTab() {
 // ── Vehicles tab ──────────────────────────────────────────────────────────────
 
 function VehiclesTab() {
+  const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState({ make:'', model:'', plateNumber:'', capacity:'50' });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState<string | null>(null);
@@ -266,7 +381,7 @@ function VehiclesTab() {
     try {
       await staffApi.post('/school/transport/vehicles', { ...form, capacity: parseInt(form.capacity) });
       setForm({ make:'', model:'', plateNumber:'', capacity:'50' });
-      refetch();
+      setShowNew(false); refetch();
     } catch (err) {
       setError((err as ApiError).message ?? 'Failed.');
     } finally {
@@ -282,7 +397,16 @@ function VehiclesTab() {
 
   return (
     <div className="space-y-4">
-      {error && <Alert type="error" message={error} />}
+      <div className="flex justify-end">
+        <button onClick={() => { setError(null); setShowNew(true); }}
+          className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition"
+          style={{ backgroundColor: 'var(--accent)' }}
+          onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--accent-hover)'}
+          onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--accent)'}>
+          + Add vehicle
+        </button>
+      </div>
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
         <table className="w-full min-w-[560px]">
           <thead>
@@ -314,18 +438,20 @@ function VehiclesTab() {
         </table>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-5">
-        <p className="text-sm font-semibold text-slate-700 mb-4">Add vehicle</p>
-        <div className="grid grid-cols-4 gap-3">
-          <FormField label="Make"><Input value={form.make} onChange={e => setForm(f => ({ ...f, make: e.target.value }))} placeholder="e.g. Toyota" /></FormField>
-          <FormField label="Model"><Input value={form.model} onChange={e => setForm(f => ({ ...f, model: e.target.value }))} placeholder="e.g. Hiace" /></FormField>
-          <FormField label="Plate number"><Input value={form.plateNumber} onChange={e => setForm(f => ({ ...f, plateNumber: e.target.value }))} placeholder="GR-1234-20" /></FormField>
-          <FormField label="Capacity"><Input type="number" value={form.capacity} onChange={e => setForm(f => ({ ...f, capacity: e.target.value }))} /></FormField>
+      <Modal open={showNew} onClose={() => setShowNew(false)} title="Add vehicle">
+        <div className="space-y-4">
+          {error && <Alert type="error" message={error} />}
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Make" required><Input value={form.make} onChange={e => setForm(f => ({ ...f, make: e.target.value }))} placeholder="e.g. Toyota" /></FormField>
+            <FormField label="Model" required><Input value={form.model} onChange={e => setForm(f => ({ ...f, model: e.target.value }))} placeholder="e.g. Hiace" /></FormField>
+            <FormField label="Plate number" required><Input value={form.plateNumber} onChange={e => setForm(f => ({ ...f, plateNumber: e.target.value }))} placeholder="GR-1234-20" /></FormField>
+            <FormField label="Capacity"><Input type="number" value={form.capacity} onChange={e => setForm(f => ({ ...f, capacity: e.target.value }))} /></FormField>
+          </div>
+          <div className="flex justify-end">
+            <SaveButton loading={saving} onClick={create} label="Add vehicle" />
+          </div>
         </div>
-        <div className="flex justify-end mt-3">
-          <SaveButton loading={saving} onClick={create} label="Add vehicle" />
-        </div>
-      </div>
+      </Modal>
     </div>
   );
 }
@@ -333,6 +459,7 @@ function VehiclesTab() {
 // ── Drivers tab ───────────────────────────────────────────────────────────────
 
 function DriversTab() {
+  const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState({ name:'', phone:'', licenseNumber:'' });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState<string | null>(null);
@@ -346,7 +473,7 @@ function DriversTab() {
     try {
       await staffApi.post('/school/transport/drivers', { name: form.name, phone: form.phone || null, licenseNumber: form.licenseNumber || null });
       setForm({ name:'', phone:'', licenseNumber:'' });
-      refetch();
+      setShowNew(false); refetch();
     } catch (err) {
       setError((err as ApiError).message ?? 'Failed.');
     } finally {
@@ -362,7 +489,16 @@ function DriversTab() {
 
   return (
     <div className="space-y-4">
-      {error && <Alert type="error" message={error} />}
+      <div className="flex justify-end">
+        <button onClick={() => { setError(null); setShowNew(true); }}
+          className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition"
+          style={{ backgroundColor: 'var(--accent)' }}
+          onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--accent-hover)'}
+          onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--accent)'}>
+          + Add driver
+        </button>
+      </div>
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <table className="w-full">
           <thead>
@@ -393,17 +529,19 @@ function DriversTab() {
         </table>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-5">
-        <p className="text-sm font-semibold text-slate-700 mb-4">Add driver</p>
-        <div className="grid grid-cols-3 gap-3">
+      <Modal open={showNew} onClose={() => setShowNew(false)} title="Add driver">
+        <div className="space-y-4">
+          {error && <Alert type="error" message={error} />}
           <FormField label="Full name" required><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Driver name" /></FormField>
-          <FormField label="Phone"><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+233 20 000 0000" /></FormField>
-          <FormField label="License number"><Input value={form.licenseNumber} onChange={e => setForm(f => ({ ...f, licenseNumber: e.target.value }))} placeholder="License #" /></FormField>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Phone"><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+233 20 000 0000" /></FormField>
+            <FormField label="License number"><Input value={form.licenseNumber} onChange={e => setForm(f => ({ ...f, licenseNumber: e.target.value }))} placeholder="License #" /></FormField>
+          </div>
+          <div className="flex justify-end">
+            <SaveButton loading={saving} onClick={create} label="Add driver" />
+          </div>
         </div>
-        <div className="flex justify-end mt-3">
-          <SaveButton loading={saving} onClick={create} label="Add driver" />
-        </div>
-      </div>
+      </Modal>
     </div>
   );
 }
