@@ -31,6 +31,25 @@ export class ReportsController {
     return this.reportsService.attendanceReport(user.schoolId, startDate, endDate, classId);
   }
 
+  @Get('attendance/daily')
+  attendanceDaily(
+    @CurrentUser() user: any,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Query('classId') classId?: string,
+  ) {
+    return this.reportsService.attendanceDaily(user.schoolId, startDate, endDate, classId);
+  }
+
+  @Get('attendance/coverage')
+  attendanceCoverage(
+    @CurrentUser() user: any,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.reportsService.attendanceCoverage(user.schoolId, startDate, endDate);
+  }
+
   @Get('academics')
   academics(
     @CurrentUser() user: any,
@@ -48,6 +67,16 @@ export class ReportsController {
   @Get('transport')
   transport(@CurrentUser() user: any) {
     return this.reportsService.transportReport(user.schoolId);
+  }
+
+  @Get('transport/daily')
+  transportDaily(
+    @CurrentUser() user: any,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Query('routeId') routeId?: string,
+  ) {
+    return this.reportsService.transportDaily(user.schoolId, startDate, endDate, routeId);
   }
 
   @Get('feeding')
