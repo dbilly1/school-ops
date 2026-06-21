@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { portalApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { EmptyState } from '@/components/portal/empty-state';
 
 type Status = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
 type AttendanceRecord = { date: string; status: Status };
@@ -116,11 +117,7 @@ export default function PortalAttendancePage() {
       {loading && <div className="h-72 bg-slate-100 rounded-2xl animate-pulse" />}
 
       {!loading && (!activeTerm || months.length === 0) && (
-        <div className="bg-white rounded-2xl border border-slate-100 px-4 py-12 text-center">
-          <p className="text-2xl mb-3">📅</p>
-          <p className="text-sm font-medium text-slate-600">No term dates set</p>
-          <p className="text-xs text-slate-400 mt-1">The calendar appears once this term has start and end dates.</p>
-        </div>
+        <EmptyState icon="attendance" title="No term dates set" subtitle="The calendar appears once this term has start and end dates." />
       )}
 
       {/* Calendar grid — responsive: 1 col on mobile, up to 3 on desktop */}

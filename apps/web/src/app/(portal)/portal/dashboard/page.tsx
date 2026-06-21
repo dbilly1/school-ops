@@ -5,18 +5,19 @@ import Link from 'next/link';
 import { portalApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { usePortalAuth } from '@/contexts/portal-auth';
+import { PortalIcon, type PortalIconName } from '@/components/portal/icons';
 
 type Notice = { id: string; title: string; publishedAt: string };
 type Notification = { id: string; title: string; body: string; isRead: boolean; createdAt: string };
 
-const QUICK_LINKS = [
-  { label: 'Attendance',   href: '/portal/attendance',   icon: '📅' },
-  { label: 'Timetable',    href: '/portal/timetable',    icon: '🗓' },
-  { label: 'Grades',       href: '/portal/grades',       icon: '📊' },
-  { label: 'Reports',      href: '/portal/report-cards', icon: '📄' },
-  { label: 'Notices',      href: '/portal/notices',      icon: '📢' },
-  { label: 'Transport',    href: '/portal/transport',    icon: '🚌' },
-  { label: 'Feeding',      href: '/portal/feeding',      icon: '🍽' },
+const QUICK_LINKS: { label: string; href: string; icon: PortalIconName }[] = [
+  { label: 'Attendance',   href: '/portal/attendance',   icon: 'attendance' },
+  { label: 'Timetable',    href: '/portal/timetable',    icon: 'timetable' },
+  { label: 'Grades',       href: '/portal/grades',       icon: 'grades' },
+  { label: 'Reports',      href: '/portal/report-cards', icon: 'reports' },
+  { label: 'Notices',      href: '/portal/notices',      icon: 'notices' },
+  { label: 'Transport',    href: '/portal/transport',    icon: 'transport' },
+  { label: 'Feeding',      href: '/portal/feeding',      icon: 'feeding' },
 ];
 
 export default function PortalDashboard() {
@@ -43,8 +44,8 @@ export default function PortalDashboard() {
 
       {/* Unread notifications */}
       {unread > 0 && (
-        <Link href="/portal/notices" className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-100 shadow-sm">
-          <span className="text-lg">🔔</span>
+        <Link href="/portal/notices" className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-white border border-slate-100 shadow-sm">
+          <PortalIcon name="notices" className="w-5 h-5" style={{ color: 'var(--accent)' }} />
           <span className="text-sm font-medium text-slate-700">
             You have {unread} unread notification{unread !== 1 ? 's' : ''}
           </span>
@@ -60,9 +61,9 @@ export default function PortalDashboard() {
             <Link
               key={link.href}
               href={link.href}
-              className="flex flex-col items-center gap-1.5 py-3.5 bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition"
+              className="flex flex-col items-center gap-2 py-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition"
             >
-              <span className="text-2xl">{link.icon}</span>
+              <PortalIcon name={link.icon} className="w-6 h-6" style={{ color: 'var(--accent)' }} />
               <span className="text-[10px] font-medium text-slate-600 text-center leading-tight">{link.label}</span>
             </Link>
           ))}

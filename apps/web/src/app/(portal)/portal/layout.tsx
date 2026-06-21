@@ -5,19 +5,20 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { usePortalAuth } from '@/contexts/portal-auth';
 import { usePortalBranding } from '@/contexts/portal-branding';
+import { PortalIcon, type PortalIconName } from '@/components/portal/icons';
 import { cn } from '@/lib/cn';
 
 // ── Nav items ─────────────────────────────────────────────────────────────────
 
-const NAV = [
-  { label: 'Home',       href: '/portal/dashboard',    icon: '🏠' },
-  { label: 'Attendance', href: '/portal/attendance',   icon: '📅' },
-  { label: 'Timetable',  href: '/portal/timetable',    icon: '🗓' },
-  { label: 'Grades',     href: '/portal/grades',       icon: '📊' },
-  { label: 'Reports',    href: '/portal/report-cards', icon: '📄' },
-  { label: 'Notices',    href: '/portal/notices',      icon: '📢' },
-  { label: 'Transport',  href: '/portal/transport',    icon: '🚌' },
-  { label: 'Feeding',    href: '/portal/feeding',      icon: '🍽' },
+const NAV: { label: string; href: string; icon: PortalIconName }[] = [
+  { label: 'Home',       href: '/portal/dashboard',    icon: 'home' },
+  { label: 'Attendance', href: '/portal/attendance',   icon: 'attendance' },
+  { label: 'Timetable',  href: '/portal/timetable',    icon: 'timetable' },
+  { label: 'Grades',     href: '/portal/grades',       icon: 'grades' },
+  { label: 'Reports',    href: '/portal/report-cards', icon: 'reports' },
+  { label: 'Notices',    href: '/portal/notices',      icon: 'notices' },
+  { label: 'Transport',  href: '/portal/transport',    icon: 'transport' },
+  { label: 'Feeding',    href: '/portal/feeding',      icon: 'feeding' },
 ];
 
 // Routes under /portal that must render WITHOUT a logged-in user. The login page
@@ -37,7 +38,10 @@ function BrandMark({ size = 'sm' }: { size?: 'sm' | 'md' }) {
           {branding.name?.[0]?.toUpperCase() ?? 'S'}
         </div>
       )}
-      <span className="font-semibold text-slate-800 truncate">{branding.name ?? 'Student Portal'}</span>
+      <div className="min-w-0 leading-tight">
+        <p className="font-semibold text-slate-800 truncate text-sm">{branding.name ?? 'School'}</p>
+        <p className="text-[11px] text-slate-400">Student Portal</p>
+      </div>
     </div>
   );
 }
@@ -103,7 +107,7 @@ export default function PortalShellLayout({ children }: { children: React.ReactN
                 )}
                 style={active ? { backgroundColor: 'var(--accent-tint)', color: 'var(--accent-dark)' } : {}}
               >
-                <span className="text-lg leading-none">{item.icon}</span>
+                <PortalIcon name={item.icon} className="w-[18px] h-[18px]" />
                 <span>{item.label}</span>
               </Link>
             );
@@ -152,7 +156,7 @@ export default function PortalShellLayout({ children }: { children: React.ReactN
                   className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition min-w-[44px] shrink-0"
                   style={active ? { color: 'var(--accent)' } : { color: '#94a3b8' }}
                 >
-                  <span className="text-lg leading-none">{item.icon}</span>
+                  <PortalIcon name={item.icon} className="w-5 h-5" />
                   <span className="text-[9px] font-medium">{item.label}</span>
                 </Link>
               );

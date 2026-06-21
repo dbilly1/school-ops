@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { portalApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { EmptyState } from '@/components/portal/empty-state';
 
 type FeedingBalance =
   | { enrolled: false }
@@ -30,11 +31,7 @@ export default function PortalFeedingPage() {
       )}
 
       {!loading && data && !data.enrolled && (
-        <div className="bg-white rounded-2xl border border-slate-100 px-4 py-12 text-center">
-          <p className="text-2xl mb-3">🍽</p>
-          <p className="text-sm font-medium text-slate-600">Not enrolled in feeding</p>
-          <p className="text-xs text-slate-400 mt-1">Contact your school if this is unexpected.</p>
-        </div>
+        <EmptyState icon="feeding" title="Not enrolled in feeding" subtitle="Contact your school if this is unexpected." />
       )}
 
       {!loading && data?.enrolled && (

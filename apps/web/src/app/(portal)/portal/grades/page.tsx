@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { portalApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { EmptyState } from '@/components/portal/empty-state';
 
 // /portal/grades = the student's gradebook: every recorded assessment score,
 // flattened. We group it client-side by the selected term, then by subject.
@@ -93,11 +94,7 @@ export default function PortalGradesPage() {
       {loading && <div className="space-y-3">{[1, 2, 3].map(i => <div key={i} className="h-28 bg-slate-100 rounded-2xl animate-pulse" />)}</div>}
 
       {!loading && subjects.length === 0 && (
-        <div className="bg-white rounded-2xl border border-slate-100 px-4 py-12 text-center">
-          <p className="text-2xl mb-3">📊</p>
-          <p className="text-sm font-medium text-slate-600">No scores yet</p>
-          <p className="text-xs text-slate-400 mt-1">Assessment scores will appear here as your teachers record them.</p>
-        </div>
+        <EmptyState icon="grades" title="No scores yet" subtitle="Assessment scores will appear here as your teachers record them." />
       )}
 
       {!loading && subjects.length > 0 && (

@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { portalApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { EmptyState } from '@/components/portal/empty-state';
 
 // Matches the /portal/timetable backend shape: an object (not an array) with the
 // class/term context, the config (periods + breaks), and the flat slot list.
@@ -64,11 +65,7 @@ export default function PortalTimetablePage() {
       {loading && <div className="h-64 bg-slate-100 rounded-2xl animate-pulse" />}
 
       {!loading && !hasGrid && (
-        <div className="bg-white rounded-2xl border border-slate-100 px-4 py-12 text-center">
-          <p className="text-2xl mb-3">🗓</p>
-          <p className="text-sm font-medium text-slate-600">No timetable yet</p>
-          <p className="text-xs text-slate-400 mt-1">Your class schedule will appear here once it’s published.</p>
-        </div>
+        <EmptyState icon="timetable" title="No timetable yet" subtitle="Your class schedule will appear here once it’s published." />
       )}
 
       {hasGrid && (
