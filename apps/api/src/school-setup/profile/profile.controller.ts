@@ -3,6 +3,7 @@ import { IsBoolean } from 'class-validator';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
 import { UpdateSchoolProfileDto } from './dto/update-profile.dto';
+import { SetStudentIdPrefixDto } from './dto/student-id.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { ManagementWriteGuard } from '../../auth/guards/management-write.guard';
 import { StaffRolesGuard } from '../../auth/guards/staff-roles.guard';
@@ -49,5 +50,20 @@ export class ProfileController {
   @RequireStaffRole(StaffRole.SCHOOL_OWNER)
   setAdminPermissionToggle(@CurrentUser() user: any, @Body() dto: AdminPermissionToggleDto) {
     return this.profileService.setAdminPermissionToggle(user.schoolId, dto.allowed);
+  }
+
+  /** Current student-ID prefix, the name-derived suggestion, and whether any
+   *  students exist yet (so the UI can warn a change is new-students-only). */
+  @Get('settings/student-id')
+  getStudentIdConfig(@CurrentUser() user: any) {
+    return this.profileService.getStudentIdConfig(user.schoolId);
+  }
+
+  /** Owner-only: set the student-ID prefix. Affects future IDs only — existing
+   *  student IDs (which double as portal logins) are never renumbered. */
+  @Patch('settings/student-id')
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER)
+  setStudentIdPrefix(@CurrentUser() user: any, @Body() dto: SetStudentIdPrefixDto) {
+    return this.profileService.setStudentIdPrefix(user.schoolId, dto.prefix);
   }
 }

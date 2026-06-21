@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { retryOnUniqueViolation } from '../common/retry-unique';
+import { nextStudentId } from '../common/student-id';
 import { generateTempPassword } from '../common/password.util';
 import {
   CreateAdmissionDto, UpdateAdmissionStageDto,
@@ -125,18 +126,16 @@ export class AdmissionsService {
       if (formData[key] !== undefined) customFields[key] = formData[key];
     }
 
-    const year = new Date().getFullYear();
-
     // Generate portal password
     const tempPassword = this.generatePassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
 
-    // Generate the YYYY#### student ID inside a retried transaction so a unique
-    // collision under concurrent enrollments recomputes instead of failing.
+    // Allocate the human-readable student ID inside a retried transaction. The
+    // sequence is an atomic counter on the school, so this is collision-free;
+    // the retry only guards the rare case of a manually-edited prefix clashing.
     return retryOnUniqueViolation(() =>
       this.prisma.$transaction(async (tx) => {
-      const count = await tx.student.count({ where: { schoolId } });
-      const studentId = `${year}${String(count + 1).padStart(4, '0')}`;
+      const studentId = await nextStudentId(tx, schoolId);
 
       // Mark admission as enrolled
       await tx.admissionRecord.update({

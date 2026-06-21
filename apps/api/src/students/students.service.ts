@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { retryOnUniqueViolation } from '../common/retry-unique';
+import { nextStudentId } from '../common/student-id';
 import { generateTempPassword } from '../common/password.util';
 import { CreateStudentDto, UpdateStudentDto, AddGuardianDto, AssignClassDto, BulkAssignCategoryDto } from './dto/student.dto';
 
@@ -18,20 +19,18 @@ export class StudentsService {
   // ── Create directly (bypass admissions) ──────────────────
 
   async create(schoolId: string, dto: CreateStudentDto) {
-    const year = new Date().getFullYear();
-
     if (dto.studentCategoryId) await this.assertCategoryInSchool(schoolId, dto.studentCategoryId);
 
     // Generate portal credentials
     const tempPassword = this.generatePassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
 
-    // Generate the YYYY#### student ID inside a retried transaction so a unique
-    // collision under concurrent inserts recomputes instead of failing.
+    // Allocate the human-readable student ID inside a retried transaction. The
+    // sequence is an atomic counter on the school, so this is collision-free;
+    // the retry only guards the rare case of a manually-edited prefix clashing.
     return retryOnUniqueViolation(() =>
       this.prisma.$transaction(async (tx) => {
-      const count = await tx.student.count({ where: { schoolId } });
-      const studentId = `${year}${String(count + 1).padStart(4, '0')}`;
+      const studentId = await nextStudentId(tx, schoolId);
 
       const student = await tx.student.create({
         data: {

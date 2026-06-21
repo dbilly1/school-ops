@@ -8,6 +8,7 @@ import { staffApi } from '@/lib/api';
 import { StepFeatures }        from './steps/step-features';
 import { StepGradeStructure }  from './steps/step-grade-structure';
 import { StepCategories }      from './steps/step-categories';
+import { StepStudentId }       from './steps/step-student-id';
 import { StepGrading }         from './steps/step-grading';
 import { StepAcademicYear }    from './steps/step-academic-year';
 import { StepFeeding }         from './steps/step-feeding';
@@ -19,6 +20,7 @@ const STEPS = [
   { id: 'features',       label: 'Features'       },
   { id: 'grade-structure',label: 'Grade Structure' },
   { id: 'categories',     label: 'Student Types'   },
+  { id: 'student-id',     label: 'Student IDs'     },
   { id: 'grading',        label: 'Grading'         },
   { id: 'academic-year',  label: 'Academic Year'   },
   { id: 'feeding',        label: 'Feeding Fees'    },
@@ -153,6 +155,7 @@ export default function OnboardingPage() {
             {currentStep.id === 'features'        && <StepFeatures onNext={next} onSkip={skip} />}
             {currentStep.id === 'grade-structure' && <StepGradeStructure onNext={next} onBack={back} onSkip={skip} />}
             {currentStep.id === 'categories'      && <StepCategories onNext={next} onBack={back} onSkip={skip} />}
+            {currentStep.id === 'student-id'      && <StepStudentId onNext={next} onBack={back} onSkip={skip} />}
             {currentStep.id === 'grading'         && <StepGrading onNext={next} onBack={back} onSkip={skip} />}
             {currentStep.id === 'academic-year'   && <StepAcademicYear onNext={next} onBack={back} onSkip={skip} />}
             {currentStep.id === 'feeding'         && <StepFeeding onNext={next} onBack={back} onSkip={skip} />}

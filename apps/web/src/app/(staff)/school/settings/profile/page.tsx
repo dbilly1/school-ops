@@ -46,6 +46,85 @@ function resizeImageToDataUrl(file: File, max = 256): Promise<string> {
   });
 }
 
+// ── Student ID prefix (Owner-only) ────────────────────────────────────────────
+
+type StudentIdConfig = { prefix: string | null; suggested: string; hasStudents: boolean };
+
+function StudentIdCard() {
+  const { isOwner } = useStaffAuth();
+
+  const [config, setConfig] = useState<StudentIdConfig | null>(null);
+  const [prefix, setPrefix] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving]   = useState(false);
+  const [alert, setAlert]     = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+
+  useEffect(() => {
+    staffApi.get<StudentIdConfig>('/school/profile/settings/student-id')
+      .then(data => { setConfig(data); setPrefix(data.prefix ?? data.suggested); })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const valid = /^[A-Za-z0-9]{2,5}$/.test(prefix.trim());
+  const changed = config != null && prefix.trim().toUpperCase() !== (config.prefix ?? '').toUpperCase();
+
+  async function handleSave() {
+    if (!valid) { setAlert({ type: 'error', message: 'Prefix must be 2–5 letters or digits.' }); return; }
+    setAlert(null); setSaving(true);
+    try {
+      const res = await staffApi.patch<{ studentIdPrefix: string }>('/school/profile/settings/student-id', { prefix: prefix.trim().toUpperCase() });
+      setConfig(c => c ? { ...c, prefix: res.studentIdPrefix } : c);
+      setPrefix(res.studentIdPrefix);
+      setAlert({ type: 'success', message: 'Student ID prefix saved.' });
+    } catch (err) {
+      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to save.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <div className="h-40 bg-slate-100 rounded-2xl animate-pulse" />;
+
+  return (
+    <SettingsCard
+      title="Student IDs"
+      description="The prefix every student ID starts with — usually your school's initials. Student IDs are also used to sign in to the student portal."
+      footer={isOwner ? <SaveButton loading={saving} onClick={handleSave} disabled={!valid || !changed} /> : undefined}
+    >
+      <div className="space-y-4">
+        {alert && <Alert type={alert.type} message={alert.message} />}
+
+        {isOwner ? (
+          <FormField label="Prefix">
+            <div className="flex items-center gap-3">
+              <Input
+                value={prefix}
+                onChange={e => setPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5))}
+                placeholder="e.g. MIS"
+                className="w-40 font-mono tracking-wide"
+              />
+              <span className="text-sm text-slate-400">→</span>
+              <span className="text-sm font-mono font-semibold text-slate-700">{(prefix.trim().toUpperCase() || 'ABC')}0001</span>
+            </div>
+          </FormField>
+        ) : (
+          <div>
+            <p className="text-xs font-medium text-slate-500 mb-1">Current prefix</p>
+            <p className="text-sm font-mono font-semibold text-slate-800">{config?.prefix ?? config?.suggested}</p>
+            <p className="text-xs text-slate-400 mt-2">Only the school Owner can change this.</p>
+          </div>
+        )}
+
+        {isOwner && config?.hasStudents && (
+          <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
+            Changing the prefix only affects students added from now on. Existing student IDs — and the portal logins that use them — stay exactly as they are.
+          </div>
+        )}
+      </div>
+    </SettingsCard>
+  );
+}
+
 export default function ProfileSettingsPage() {
   const { branding, refreshBranding } = useStaffAuth();
 
@@ -264,6 +343,9 @@ export default function ProfileSettingsPage() {
           </div>
         </div>
       </SettingsCard>
+
+      {/* Student IDs */}
+      <StudentIdCard />
     </div>
   );
 }

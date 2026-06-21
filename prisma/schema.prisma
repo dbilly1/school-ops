@@ -206,6 +206,8 @@ model School {
   address            String?
   phone              String?
   email              String?
+  studentIdPrefix    String?             // Prefix for human-readable student IDs, e.g. "MIS". Defaults to school-name initials.
+  studentSeq         Int                 @default(0)  // Monotonic counter for student-ID sequence; only ever increments.
   packageId            String?
   subscriptionState    SubscriptionState   @default(TRIAL)
   onboardingComplete              Boolean   @default(false)
