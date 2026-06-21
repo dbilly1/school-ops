@@ -9,3 +9,13 @@
   --accent-dark: #022c22;
   --accent-dark: color-mix(in srgb, var(--accent) 58%, #000);
 }
+
+/* Hide the scrollbar while keeping the element scrollable (used by the mobile
+   portal tab bar). */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

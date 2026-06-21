@@ -1,4 +1,4 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Get, Body, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SchoolsService } from './schools.service';
 import { RegisterSchoolDto } from './dto/register-school.dto';
@@ -12,5 +12,11 @@ export class SchoolsController {
   @ApiOperation({ summary: 'Register a new school (public)' })
   register(@Body() dto: RegisterSchoolDto) {
     return this.schoolsService.register(dto);
+  }
+
+  @Get('branding')
+  @ApiOperation({ summary: 'Public branding (name/logo/colour) for a school by subdomain slug' })
+  getBranding(@Headers('x-school-slug') slug?: string) {
+    return this.schoolsService.getPublicBranding(slug);
   }
 }

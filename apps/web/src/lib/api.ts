@@ -171,7 +171,10 @@ export async function publicPost<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export async function publicGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+  const slug = getSchoolSlug();
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: slug ? { 'X-School-Slug': slug } : {},
+  });
   if (!res.ok) {
     let message = 'An error occurred';
     try { const b = await res.json(); message = b.message ?? message; } catch {}

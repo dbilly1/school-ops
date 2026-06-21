@@ -14,6 +14,17 @@ export class SchoolsService {
     private authService: AuthService,
   ) {}
 
+  // Public, unauthenticated branding lookup for a school's login/portal pages —
+  // resolved by subdomain slug. Returns only display-safe fields, or null.
+  async getPublicBranding(slug?: string) {
+    if (!slug) return null;
+    const school = await this.prisma.school.findUnique({
+      where: { slug },
+      select: { name: true, logoUrl: true, primaryColor: true },
+    });
+    return school ?? null;
+  }
+
   async register(dto: RegisterSchoolDto) {
     // Check email not already in use
     const existingUser = await this.prisma.user.findFirst({

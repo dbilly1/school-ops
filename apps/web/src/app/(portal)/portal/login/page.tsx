@@ -3,10 +3,12 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { publicPost, storeTokens, type ApiError } from '@/lib/api';
+import { usePortalBranding } from '@/contexts/portal-branding';
 import { PasswordInput } from '@/components/ui/password-input';
 
 export default function PortalLoginPage() {
   const router = useRouter();
+  const branding = usePortalBranding();
   const [studentId, setStudentId] = useState('');
   const [password, setPassword]   = useState('');
   const [error, setError]         = useState<string | null>(null);
@@ -33,15 +35,19 @@ export default function PortalLoginPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-6 py-12">
       <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="flex items-center justify-center gap-2.5 mb-8">
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold"
-            style={{ backgroundColor: 'var(--accent)' }}
-          >
-            S
-          </div>
-          <span className="text-lg font-bold text-slate-800">SchoolOps</span>
+        {/* School identity */}
+        <div className="flex flex-col items-center text-center gap-3 mb-8">
+          {branding.logoUrl ? (
+            <img src={branding.logoUrl} alt={branding.name ?? 'School logo'} className="w-14 h-14 rounded-2xl object-cover bg-white shadow-sm" />
+          ) : (
+            <div
+              className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-bold shadow-sm"
+              style={{ backgroundColor: 'var(--accent)' }}
+            >
+              {branding.name?.[0]?.toUpperCase() ?? 'S'}
+            </div>
+          )}
+          <span className="text-lg font-bold text-slate-800">{branding.name ?? 'Student Portal'}</span>
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-7 py-8">

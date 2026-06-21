@@ -38,6 +38,11 @@ export class PortalController {
     return this.portalService.getTimetable(user.id, user.schoolId);
   }
 
+  @Get('grades')
+  getGrades(@CurrentUser() user: any) {
+    return this.portalService.getGradebook(user.id, user.schoolId);
+  }
+
   @Get('report-cards')
   getReportCards(@CurrentUser() user: any) {
     return this.portalService.getReportCards(user.id, user.schoolId);

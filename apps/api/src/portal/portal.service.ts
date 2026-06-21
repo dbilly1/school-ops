@@ -3,6 +3,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportCardsService } from '../report-cards/report-cards.service';
 import { ReportCardPdfService } from '../report-cards/report-card-pdf.service';
+import { AssessmentsService } from '../assessments/assessments.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
@@ -11,7 +12,41 @@ export class PortalService {
     private prisma: PrismaService,
     private reportCards: ReportCardsService,
     private reportCardPdf: ReportCardPdfService,
+    private assessments: AssessmentsService,
   ) {}
+
+  // The student's own gradebook — every recorded assessment score, flattened and
+  // grouped client-side by term (selector) then subject. Reuses the staff
+  // gradebook query so the figures always match what teachers see.
+  async getGradebook(studentId: string, schoolId: string) {
+    const raw = await this.assessments.getScoresByStudent(schoolId, studentId);
+    const scores = raw.map((s) => ({
+      assessmentId: s.assessment.id,
+      title: s.assessment.title,
+      category: s.assessment.category,
+      date: s.assessment.assessmentDate,
+      subjectId: s.assessment.subject.id,
+      subjectName: s.assessment.subject.name,
+      termId: s.assessment.term.id,
+      termName: s.assessment.term.name,
+      rawScore: Number(s.rawScore),
+      totalScore: Number(s.assessment.totalScore),
+      percentage: s.percentage,
+      gradeLabel: s.gradeLabel,
+    }));
+
+    // Distinct terms, most-recent first (scores already ordered by date desc).
+    const terms: { id: string; name: string }[] = [];
+    const seen = new Set<string>();
+    for (const s of scores) {
+      if (!seen.has(s.termId)) {
+        seen.add(s.termId);
+        terms.push({ id: s.termId, name: s.termName });
+      }
+    }
+
+    return { terms, scores };
+  }
 
   // First-login / self-service password change for a student portal account.
   async changePassword(studentId: string, dto: ChangePasswordDto) {
