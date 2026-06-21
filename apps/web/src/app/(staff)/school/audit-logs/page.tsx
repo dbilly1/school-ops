@@ -3,8 +3,11 @@
 import { useState, useCallback } from 'react';
 import { staffApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { downloadCsv } from '@/lib/csv';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types (mirror apps/api/src/audit-viewer/audit-viewer.service.ts) ────────────
+
+type Actor = { id: string; firstName: string; lastName: string; email: string };
 
 type AuditLog = {
   id: string;
@@ -15,43 +18,90 @@ type AuditLog = {
   afterValue: Record<string, unknown> | null;
   ipAddress: string | null;
   createdAt: string;
-  actor: { id: string; firstName: string; lastName: string; email: string };
+  actor: Actor;
 };
 
 type AuditResponse = {
-  data: AuditLog[];
   total: number;
   page: number;
   pageSize: number;
-  pages: number;
+  totalPages: number;
+  logs: AuditLog[];
 };
+
+type AuditSummary = {
+  total: number;
+  todayCount: number;
+  byAction: { action: string; count: number }[];
+  recentActors: { actorId: string; createdAt: string; actor: Actor }[];
+};
+
+type UserLite = { id: string; firstName: string; lastName: string };
+
+// The enum lives in apps/api prisma schema (AuditAction).
+const ACTIONS = [
+  'CREATE', 'UPDATE', 'DELETE', 'LOGIN', 'LOGOUT',
+  'PERMISSION_CHANGE', 'FEATURE_TOGGLE', 'PROGRESSION',
+  'YEAR_ACTIVATION', 'TERM_ACTIVATION', 'GRANT_ISSUED',
+];
+
+const ENTITY_TYPES = [
+  'student', 'user', 'invoice', 'payment', 'assessment', 'assessment_score',
+  'attendance', 'feeding_payment', 'transport_payment', 'expense',
+  'role_permission_override', 'user_permission_override', 'school_feature',
+  'notice', 'announcement', 'report_card', 'academic_year', 'term',
+];
 
 const ACTION_COLORS: Record<string, string> = {
-  create: '#22c55e',
-  update: '#f59e0b',
-  delete: '#ef4444',
-  login:  '#3b82f6',
-  logout: '#94a3b8',
+  CREATE: '#22c55e', GRANT_ISSUED: '#22c55e',
+  UPDATE: '#f59e0b', FEATURE_TOGGLE: '#f59e0b', PERMISSION_CHANGE: '#f59e0b',
+  DELETE: '#ef4444',
+  LOGIN: '#3b82f6', PROGRESSION: '#3b82f6', YEAR_ACTIVATION: '#3b82f6', TERM_ACTIVATION: '#3b82f6',
+  LOGOUT: '#94a3b8',
 };
 
-function actionColor(action: string): string {
-  const lower = action.toLowerCase();
-  for (const [key, color] of Object.entries(ACTION_COLORS)) {
-    if (lower.includes(key)) return color;
-  }
-  return '#64748b';
+function actionColor(action: string) { return ACTION_COLORS[action] ?? '#64748b'; }
+function actionBg(action: string) { return actionColor(action) + '18'; }
+
+// ── Summary header ──────────────────────────────────────────────────────────────
+
+function SummaryHeader() {
+  const { data } = useApi(useCallback(() => staffApi.get<AuditSummary>('/school/audit-logs/summary').catch(() => null), []));
+  if (!data) return null;
+
+  const top = data.byAction.slice(0, 4);
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-5 py-4">
+        <p className="text-xs text-slate-400 mb-1">Total events</p>
+        <p className="text-2xl font-bold text-slate-800">{data.total.toLocaleString()}</p>
+      </div>
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-5 py-4">
+        <p className="text-xs text-slate-400 mb-1">Today</p>
+        <p className="text-2xl font-bold text-emerald-600">{data.todayCount.toLocaleString()}</p>
+      </div>
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-5 py-4 col-span-2">
+        <p className="text-xs text-slate-400 mb-2">Most common actions</p>
+        <div className="flex flex-wrap gap-1.5">
+          {top.length === 0 && <span className="text-sm text-slate-400">No activity yet.</span>}
+          {top.map(a => (
+            <span key={a.action} className="text-xs font-semibold px-2.5 py-1 rounded-full"
+              style={{ color: actionColor(a.action), backgroundColor: actionBg(a.action) }}>
+              {a.action} · {a.count}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function actionBg(action: string): string {
-  const c = actionColor(action);
-  return c + '18'; // ~10% opacity hex
-}
-
-// ── Log row ───────────────────────────────────────────────────────────────────
+// ── Log row ─────────────────────────────────────────────────────────────────────
 
 function LogRow({ log }: { log: AuditLog }) {
   const [expanded, setExpanded] = useState(false);
-  const hasDiff = log.beforeValue || log.afterValue;
+  const hasDiff = !!(log.beforeValue || log.afterValue);
 
   return (
     <>
@@ -60,10 +110,8 @@ function LogRow({ log }: { log: AuditLog }) {
         onClick={() => hasDiff && setExpanded(e => !e)}
       >
         <td className="px-4 py-3">
-          <span
-            className="text-xs font-semibold px-2.5 py-1 rounded-full"
-            style={{ color: actionColor(log.action), backgroundColor: actionBg(log.action) }}
-          >
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-full"
+            style={{ color: actionColor(log.action), backgroundColor: actionBg(log.action) }}>
             {log.action}
           </span>
         </td>
@@ -87,16 +135,14 @@ function LogRow({ log }: { log: AuditLog }) {
           {log.ipAddress && <span className="text-xs font-mono text-slate-400">{log.ipAddress}</span>}
         </td>
         <td className="px-4 py-3 text-right">
-          {hasDiff && (
-            <span className="text-xs text-slate-400">{expanded ? '▲' : '▼'}</span>
-          )}
+          {hasDiff && <span className="text-xs text-slate-400">{expanded ? '▲' : '▼'}</span>}
         </td>
       </tr>
 
       {expanded && hasDiff && (
         <tr className="border-b border-slate-50 bg-slate-50">
           <td colSpan={6} className="px-6 py-4">
-            <div className="grid grid-cols-2 gap-4 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               {log.beforeValue && (
                 <div>
                   <p className="font-semibold text-slate-500 mb-1 uppercase tracking-wide">Before</p>
@@ -121,60 +167,95 @@ function LogRow({ log }: { log: AuditLog }) {
   );
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── Page ────────────────────────────────────────────────────────────────────────
+
+const selectInput = 'px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none';
+const dateInput = selectInput;
+function focusRing(e: React.FocusEvent<HTMLElement>) { e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'; }
+function blurRing(e: React.FocusEvent<HTMLElement>) { e.currentTarget.style.boxShadow = ''; }
 
 export default function AuditLogsPage() {
   const today = new Date().toISOString().split('T')[0];
   const monthStart = today.slice(0, 8) + '01';
 
-  const [action, setAction]         = useState('');
+  const [action, setAction] = useState('');
+  const [actorId, setActorId] = useState('');
   const [entityType, setEntityType] = useState('');
-  const [startDate, setStartDate]   = useState(monthStart);
-  const [endDate, setEndDate]       = useState(today);
-  const [page, setPage]             = useState(1);
+  const [startDate, setStartDate] = useState(monthStart);
+  const [endDate, setEndDate] = useState(today);
+  const [page, setPage] = useState(1);
+
+  const { data: users } = useApi(useCallback(() => staffApi.get<UserLite[]>('/school/users').catch(() => []), []));
 
   const fetchLogs = useCallback(() => {
     const params = new URLSearchParams({ page: String(page), pageSize: '30' });
-    if (action)     params.set('action',     action);
+    if (action) params.set('action', action);
+    if (actorId) params.set('actorId', actorId);
     if (entityType) params.set('entityType', entityType);
-    if (startDate)  params.set('startDate',  startDate);
-    if (endDate)    params.set('endDate',    endDate);
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
     return staffApi.get<AuditResponse>(`/school/audit-logs?${params}`).catch(() => null);
-  }, [action, entityType, startDate, endDate, page]);
+  }, [action, actorId, entityType, startDate, endDate, page]);
 
-  const { data, loading } = useApi(fetchLogs);
+  const { data, loading } = useApi(fetchLogs, `${action}|${actorId}|${entityType}|${startDate}|${endDate}|${page}`);
 
-  const ENTITY_TYPES = [
-    'student', 'user', 'invoice', 'payment', 'assessment', 'assessment_score',
-    'attendance', 'feeding_payment', 'transport_payment', 'role_permission_override',
-    'user_permission_override', 'school_feature', 'notice', 'announcement',
-  ];
+  const hasFilters = !!(action || actorId || entityType);
+
+  function reset<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+
+  function exportCsv() {
+    if (!data?.logs?.length) return;
+    const rows = data.logs.map(l => [
+      new Date(l.createdAt).toLocaleString('en-GB'),
+      l.action, l.entityType, l.entityId,
+      `${l.actor.firstName} ${l.actor.lastName}`, l.actor.email,
+      l.ipAddress ?? '',
+    ]);
+    downloadCsv('audit-logs', ['Time', 'Action', 'Entity type', 'Entity ID', 'Actor', 'Email', 'IP'], rows);
+  }
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-bold text-slate-900">Audit Logs</h1>
-        <p className="text-sm text-slate-500 mt-0.5">All write operations are logged. Click any row with a before/after diff to expand it.</p>
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Audit Logs</h1>
+          <p className="text-sm text-slate-500 mt-0.5">Every write operation is logged. Click a row with a diff to expand its before/after.</p>
+        </div>
+        <button
+          onClick={exportCsv}
+          disabled={!data?.logs?.length}
+          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3" />
+          </svg>
+          Export page
+        </button>
       </div>
 
+      <SummaryHeader />
+
       {/* Filters */}
-      <div className="flex gap-3 mb-5 flex-wrap">
-        <input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }}
-          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
-          onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
-          onBlur={e => e.currentTarget.style.boxShadow = ''} />
+      <div className="flex gap-3 mb-5 flex-wrap items-center">
+        <input type="date" value={startDate} onChange={e => reset(setStartDate)(e.target.value)} className={dateInput} onFocus={focusRing} onBlur={blurRing} />
         <span className="text-slate-400 self-center text-sm">to</span>
-        <input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setPage(1); }}
-          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
-          onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
-          onBlur={e => e.currentTarget.style.boxShadow = ''} />
-        <select value={entityType} onChange={e => { setEntityType(e.target.value); setPage(1); }}
-          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
+        <input type="date" value={endDate} onChange={e => reset(setEndDate)(e.target.value)} className={dateInput} onFocus={focusRing} onBlur={blurRing} />
+        <select value={action} onChange={e => reset(setAction)(e.target.value)} className={selectInput}>
+          <option value="">All actions</option>
+          {ACTIONS.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <select value={actorId} onChange={e => reset(setActorId)(e.target.value)} className={selectInput}>
+          <option value="">All actors</option>
+          {users?.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+        </select>
+        <select value={entityType} onChange={e => reset(setEntityType)(e.target.value)} className={selectInput}>
           <option value="">All entity types</option>
           {ENTITY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
-        {(action || entityType) && (
-          <button onClick={() => { setAction(''); setEntityType(''); setPage(1); }}
+        {hasFilters && (
+          <button onClick={() => { setAction(''); setActorId(''); setEntityType(''); setPage(1); }}
             className="text-sm text-slate-400 hover:text-slate-700 transition">
             Clear filters
           </button>
@@ -197,43 +278,31 @@ export default function AuditLogsPage() {
           <tbody>
             {loading && Array.from({ length: 10 }).map((_, i) => (
               <tr key={i} className="border-b border-slate-50">
-                <td colSpan={6} className="px-4 py-3">
-                  <div className="h-7 bg-slate-100 rounded animate-pulse" />
-                </td>
+                <td colSpan={6} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td>
               </tr>
             ))}
-            {!loading && data?.data.map(log => <LogRow key={log.id} log={log} />)}
-            {!loading && (!data?.data || data.data.length === 0) && (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
-                No audit logs for this period.
-              </td></tr>
+            {!loading && data?.logs?.map(log => <LogRow key={log.id} log={log} />)}
+            {!loading && (!data?.logs || data.logs.length === 0) && (
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">No audit logs match these filters.</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
       {/* Pagination */}
-      {data && data.pages > 1 && (
+      {data && data.totalPages > 1 && (
         <div className="flex items-center justify-between mt-4">
           <p className="text-sm text-slate-400">
             Showing {((page - 1) * data.pageSize) + 1}–{Math.min(page * data.pageSize, data.total)} of {data.total}
           </p>
           <div className="flex gap-2">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition disabled:opacity-40"
-            >
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+              className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition disabled:opacity-40">
               ← Prev
             </button>
-            <span className="px-3 py-1.5 text-sm text-slate-500">
-              {page} / {data.pages}
-            </span>
-            <button
-              onClick={() => setPage(p => Math.min(data.pages, p + 1))}
-              disabled={page === data.pages}
-              className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition disabled:opacity-40"
-            >
+            <span className="px-3 py-1.5 text-sm text-slate-500">{page} / {data.totalPages}</span>
+            <button onClick={() => setPage(p => Math.min(data.totalPages, p + 1))} disabled={page === data.totalPages}
+              className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition disabled:opacity-40">
               Next →
             </button>
           </div>
