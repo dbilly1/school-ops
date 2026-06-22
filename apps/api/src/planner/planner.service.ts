@@ -3,6 +3,11 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePlannerEntryDto, UpdatePlannerEntryDto } from './dto/planner.dto';
 
+// Vibrant palette keys (mirrors apps/web/src/lib/planner-colors.ts, minus the
+// neutral "slate"). A task with no chosen colour gets a random one so the board
+// stays colourful.
+const RANDOM_COLORS = ['emerald', 'blue', 'amber', 'rose', 'violet'];
+
 // Personal planner — every query is scoped to the calling user (entries are
 // private). schoolId is also stored for tenant isolation, but ownership is by
 // userId. Class/subject tags are optional and validated against the school.
@@ -48,7 +53,7 @@ export class PlannerService {
         title,
         date: this.dayUtc(dto.date),
         notes: dto.notes?.trim() || null,
-        color: dto.color || null,
+        color: dto.color || RANDOM_COLORS[Math.floor(Math.random() * RANDOM_COLORS.length)],
         classId: dto.classId || null,
         subjectId: dto.subjectId || null,
         status: dto.status ?? undefined,

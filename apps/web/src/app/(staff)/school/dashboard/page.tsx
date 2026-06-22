@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import { useStaffAuth } from '@/contexts/staff-auth';
 import { staffApi } from '@/lib/api';
@@ -137,7 +137,8 @@ type PlannerEntry = {
   class: { name: string } | null; subject: { name: string } | null;
 };
 
-function TodaysPlan() {
+function TodaysPlanWidget() {
+  const [open, setOpen] = useState(true);
   const today = localKey(new Date());
   const fetchToday = useCallback(
     () => staffApi.get<PlannerEntry[]>(`/school/planner?start=${today}&end=${today}`).catch(() => []),
@@ -154,45 +155,70 @@ function TodaysPlan() {
 
   const entries = data ?? [];
   const done = entries.filter(e => e.status === 'DONE').length;
+  const pending = entries.length - done;
 
+  // Collapsed — a floating icon button (with a pending-count badge).
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="fixed bottom-5 right-5 z-40 w-12 h-12 rounded-full shadow-lg grid place-items-center text-white transition hover:scale-105"
+        style={{ backgroundColor: 'var(--accent)' }}
+        aria-label="Open today’s plan"
+        title="Today’s plan"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 2v4 M16 2v4 M3 10h18 M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M9 16l2 2 4-4" />
+        </svg>
+        {pending > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold grid place-items-center">{pending}</span>
+        )}
+      </button>
+    );
+  }
+
+  // Expanded — a compact overlay card in the lower-right corner.
   return (
-    <Panel
-      title="Today’s plan"
-      action={<Link href="/school/planner" className="text-xs font-medium" style={{ color: 'var(--accent)' }}>Open planner →</Link>}
-    >
-      {loading ? (
-        <div className="space-y-2">{[1, 2, 3].map(i => <div key={i} className="h-8 bg-slate-50 rounded-lg animate-pulse" />)}</div>
-      ) : entries.length === 0 ? (
-        <Link href="/school/planner" className="block text-sm text-slate-400 italic py-3 text-center hover:text-slate-600 transition">
-          Nothing planned for today — plan your day →
-        </Link>
-      ) : (
-        <>
-          <p className="text-xs text-slate-400 mb-2">{done} of {entries.length} done</p>
-          <div className="space-y-0.5">
+    <div className="fixed bottom-5 right-5 z-40 w-72 max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl border border-slate-200 shadow-xl flex flex-col max-h-[60vh]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+        <div>
+          <p className="text-sm font-bold text-slate-900">Today’s plan</p>
+          {entries.length > 0 && <p className="text-[11px] text-slate-400">{done} of {entries.length} done</p>}
+        </div>
+        <div className="flex items-center gap-1">
+          <Link href="/school/planner" className="text-xs font-medium px-2 py-1 rounded-md hover:bg-slate-50 transition" style={{ color: 'var(--accent)' }}>Open</Link>
+          <button onClick={() => setOpen(false)} className="w-7 h-7 grid place-items-center rounded-md text-slate-400 hover:bg-slate-100 transition" aria-label="Collapse">✕</button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scrollbar-slim p-2">
+        {loading ? (
+          <div className="space-y-2 p-1">{[1, 2, 3].map(i => <div key={i} className="h-8 bg-slate-50 rounded-lg animate-pulse" />)}</div>
+        ) : entries.length === 0 ? (
+          <Link href="/school/planner" className="block text-sm text-slate-400 italic py-6 text-center hover:text-slate-600 transition">
+            Nothing planned for today — plan your day →
+          </Link>
+        ) : (
+          <div className="space-y-1">
             {entries.map(e => {
               const cstyle = plannerStyle(e.color);
               const isDone = e.status === 'DONE';
               return (
-                <div key={e.id} className="flex items-center gap-2 py-1.5 px-2 -mx-2 rounded-lg hover:bg-slate-50 transition">
+                <div key={e.id} className={`flex items-center gap-2 py-1.5 px-2 rounded-lg transition ${cstyle ? cstyle.fill : ''} ${isDone ? 'opacity-60' : ''}`}>
                   <button onClick={() => toggle(e)}
                     className={`w-4 h-4 shrink-0 rounded border grid place-items-center transition ${isDone ? 'border-transparent text-white' : 'border-slate-300 hover:border-slate-400'}`}
                     style={isDone ? { backgroundColor: 'var(--accent)' } : {}}
                     aria-label={isDone ? 'Mark not done' : 'Mark done'}>
                     {isDone && <span className="text-[10px] leading-none">✓</span>}
                   </button>
-                  {cstyle && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${cstyle.dot}`} />}
-                  <span className={`text-sm min-w-0 truncate ${isDone ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{e.title}</span>
-                  {(e.class || e.subject) && (
-                    <span className="text-[10px] text-slate-400 shrink-0 ml-auto">{[e.class?.name, e.subject?.name].filter(Boolean).join(' · ')}</span>
-                  )}
+                  <span className={`text-sm min-w-0 truncate ${isDone ? 'line-through' : ''} ${cstyle ? cstyle.text : 'text-slate-700'}`}>{e.title}</span>
                 </div>
               );
             })}
           </div>
-        </>
-      )}
-    </Panel>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -250,10 +276,8 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Today's plan */}
-      <div className="mb-4">
-        <TodaysPlan />
-      </div>
+      {/* Today's plan — floating overlay (lower-right, collapsible to an icon) */}
+      <TodaysPlanWidget />
 
       {/* Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

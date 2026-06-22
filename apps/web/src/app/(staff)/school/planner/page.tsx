@@ -361,11 +361,10 @@ function EntryRow({ entry, onToggle, onEdit, onDelete }: {
   const done = entry.status === 'DONE';
   const cstyle = plannerStyle(entry.color);
   return (
-    <div className="group flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 transition">
-      {cstyle && <span className={`w-1 h-4 mt-0.5 rounded-full shrink-0 ${cstyle.bar}`} />}
+    <div className={`group flex items-start gap-2 px-2.5 py-2 rounded-lg transition ${cstyle ? cstyle.fill : 'hover:bg-slate-50'} ${done ? 'opacity-60' : ''}`}>
       <Checkbox done={done} onClick={() => onToggle(entry)} />
       <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onEdit(entry)}>
-        <p className={`text-sm leading-snug ${done ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{entry.title}</p>
+        <p className={`text-sm leading-snug ${done ? 'line-through' : ''} ${cstyle ? cstyle.text : 'text-slate-700'}`}>{entry.title}</p>
         {(entry.class || entry.subject) && (
           <div className="flex flex-wrap gap-1 mt-0.5">
             {entry.class && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{entry.class.name}</span>}
@@ -391,10 +390,9 @@ function MiniRow({ entry, onToggle }: { entry: PlannerEntry; onToggle: (e: Plann
   const done = entry.status === 'DONE';
   const cstyle = plannerStyle(entry.color);
   return (
-    <div className="flex items-start gap-1.5 px-1.5 py-1 rounded-md">
+    <div className={`flex items-start gap-1.5 px-2 py-1.5 rounded-md ${cstyle ? cstyle.fill : ''} ${done ? 'opacity-60' : ''}`}>
       <Checkbox done={done} onClick={e => { e.stopPropagation(); onToggle(entry); }} />
-      {cstyle && <span className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${cstyle.dot}`} />}
-      <p className={`text-xs leading-snug min-w-0 truncate ${done ? 'text-slate-400 line-through' : 'text-slate-600'}`}>{entry.title}</p>
+      <p className={`text-xs leading-snug min-w-0 truncate ${done ? 'line-through' : ''} ${cstyle ? cstyle.text : 'text-slate-600'}`}>{entry.title}</p>
     </div>
   );
 }
