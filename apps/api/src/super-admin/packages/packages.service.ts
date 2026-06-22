@@ -96,6 +96,8 @@ export class PackagesService {
       { featureKey: 'academics', subFeatureKey: 'grading' },
       { featureKey: 'academics', subFeatureKey: 'report_cards' },
       { featureKey: 'academics', subFeatureKey: 'transcripts' },
+      { featureKey: 'academics', subFeatureKey: 'lesson_notes' },
+      { featureKey: 'academics', subFeatureKey: 'lesson_note_review' },
       { featureKey: 'attendance', subFeatureKey: null },
       { featureKey: 'attendance', subFeatureKey: 'student_attendance' },
       { featureKey: 'attendance', subFeatureKey: 'staff_attendance' },

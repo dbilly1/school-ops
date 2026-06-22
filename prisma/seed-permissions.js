@@ -27,6 +27,14 @@ const DEFAULTS = [
   ['TEACHER', 'academics',  'report_cards',    'CREATE', false],
   ['TEACHER', 'academics',  'report_cards',    'EDIT',   false],
   ['TEACHER', 'academics',  'report_cards',    'DELETE', false],
+  // Lesson notes — teachers author + submit their own (DELETE stays off, like
+  // assessments). Reviewing (lesson_note_review) is NOT granted by default:
+  // it falls through to Owner/Admin/Headmaster bypass, or an explicit grant
+  // for a designated senior teacher.
+  ['TEACHER', 'academics',  'lesson_notes',    'VIEW',   true ],
+  ['TEACHER', 'academics',  'lesson_notes',    'CREATE', true ],
+  ['TEACHER', 'academics',  'lesson_notes',    'EDIT',   true ],
+  ['TEACHER', 'academics',  'lesson_notes',    'DELETE', false],
   ['TEACHER', 'academics',  'transcripts',     'VIEW',   true ],
   ['TEACHER', 'academics',  'transcripts',     'CREATE', false],
   ['TEACHER', 'academics',  'transcripts',     'EDIT',   false],

@@ -227,6 +227,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
           { label: 'Assessments',  href: '/school/academics/assessments'   },
           { label: 'Grade Book',   href: '/school/academics/grade-book'    },
           { label: 'Report Cards', href: '/school/academics/report-cards'  },
+          { label: 'Lesson Notes', href: '/school/academics/lesson-notes'  },
         ],
       },
       { label: 'Attendance', href: '/school/attendance', iconPath: icons.attendance, permId: 'attendance', id: 'attendance' },

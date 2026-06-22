@@ -31,6 +31,7 @@ import { ReportsModule } from './reports/reports.module';
 import { AuditViewerModule } from './audit-viewer/audit-viewer.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { PlannerModule } from './planner/planner.module';
+import { LessonNotesModule } from './lesson-notes/lesson-notes.module';
 import { MailModule } from './mail/mail.module';
 
 @Module({
@@ -72,6 +73,7 @@ import { MailModule } from './mail/mail.module';
     AuditViewerModule,
     DashboardModule,
     PlannerModule,
+    LessonNotesModule,
   ],
 })
 export class AppModule {}

@@ -38,6 +38,8 @@ async function main() {
     { featureKey: 'academics', subFeatureKey: 'grading', defaultEnabled: true },
     { featureKey: 'academics', subFeatureKey: 'report_cards', defaultEnabled: false },
     { featureKey: 'academics', subFeatureKey: 'transcripts', defaultEnabled: false },
+    { featureKey: 'academics', subFeatureKey: 'lesson_notes', defaultEnabled: true },
+    { featureKey: 'academics', subFeatureKey: 'lesson_note_review', defaultEnabled: true },
     { featureKey: 'attendance', subFeatureKey: 'student_attendance', defaultEnabled: true },
     { featureKey: 'attendance', subFeatureKey: 'staff_attendance', defaultEnabled: false },
     { featureKey: 'attendance', subFeatureKey: 'attendance_analytics', defaultEnabled: false },
@@ -99,6 +101,13 @@ async function main() {
     // Transport fee collection — where transport is in the package.
     if (keys.has('transport:')) {
       await ensurePkgFeature(pkg.id, 'transport', 'fee_collection');
+    }
+    // Lesson notes + review — where academics is in the package. (Resolver
+    // checks package availability before the owner/admin bypass, so without
+    // this the lesson-note routes would deny everyone.)
+    if (keys.has('academics:')) {
+      await ensurePkgFeature(pkg.id, 'academics', 'lesson_notes');
+      await ensurePkgFeature(pkg.id, 'academics', 'lesson_note_review');
     }
     // Feeding fee collection — where feeding is in the package (top-level
     // feeding_fees or the legacy finance:feeding_fees sub-feature). Ensure the

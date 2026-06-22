@@ -120,6 +120,15 @@ enum PlannerStatus {
   DONE
 }
 
+// Lesson-note review workflow. DRAFT = teacher editing; SUBMITTED = awaiting
+// review; APPROVED = vetted by a reviewer; RETURNED = sent back for revision.
+enum LessonNoteStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  RETURNED
+}
+
 enum CalendarEventType {
   HOLIDAY
   VACATION
@@ -268,6 +277,7 @@ model School {
   expenses                  Expense[]
   expenseBudgets            ExpenseBudget[]
   plannerEntries            PlannerEntry[]
+  lessonNotes               LessonNote[]
 
   @@map("schools")
 }
@@ -397,20 +407,22 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  school            School                   @relation(fields: [schoolId], references: [id])
-  roles             UserRole[]
-  refreshTokens     RefreshToken[]
-  staffProfile      StaffProfile?
-  roleOverridesSet  RolePermissionOverride[] @relation("OverrideSetBy")
-  userOverridesSet  UserPermissionOverride[] @relation("OverrideSetBy")
-  userOverrides     UserPermissionOverride[] @relation("OverrideTarget")
-  grantsIssued      SchoolFeatureGrant[]     @relation("GrantedByUser")
-  auditLogsActed    AuditLog[]               @relation("AuditActor")
-  feedingRecorded   FeedingPayment[]         @relation("FeedingRecordedBy")
-  transportRecorded TransportPayment[]       @relation("TransportRecordedBy")
-  paymentsRecorded  Payment[]                @relation("PaymentRecordedBy")
-  expensesRecorded  Expense[]                @relation("ExpenseRecordedBy")
-  plannerEntries    PlannerEntry[]
+  school              School                   @relation(fields: [schoolId], references: [id])
+  roles               UserRole[]
+  refreshTokens       RefreshToken[]
+  staffProfile        StaffProfile?
+  roleOverridesSet    RolePermissionOverride[] @relation("OverrideSetBy")
+  userOverridesSet    UserPermissionOverride[] @relation("OverrideSetBy")
+  userOverrides       UserPermissionOverride[] @relation("OverrideTarget")
+  grantsIssued        SchoolFeatureGrant[]     @relation("GrantedByUser")
+  auditLogsActed      AuditLog[]               @relation("AuditActor")
+  feedingRecorded     FeedingPayment[]         @relation("FeedingRecordedBy")
+  transportRecorded   TransportPayment[]       @relation("TransportRecordedBy")
+  paymentsRecorded    Payment[]                @relation("PaymentRecordedBy")
+  expensesRecorded    Expense[]                @relation("ExpenseRecordedBy")
+  plannerEntries      PlannerEntry[]
+  lessonNotesAuthored LessonNote[]             @relation("LessonNoteAuthor")
+  lessonNotesReviewed LessonNote[]             @relation("LessonNoteReviewer")
 
   @@unique([schoolId, email])
   @@map("users")
@@ -523,6 +535,7 @@ model Term {
   reportCards      ReportCard[]
   expenses         Expense[]
   expenseBudgets   ExpenseBudget[]
+  lessonNotes      LessonNote[]
 
   @@unique([academicYearId, sequence])
   @@index([schoolId])
@@ -593,6 +606,7 @@ model Class {
   attendanceRecords  StudentAttendanceRecord[]
   assessments        Assessment[]
   plannerEntries     PlannerEntry[]
+  lessonNotes        LessonNote[]
 
   @@unique([schoolId, name])
   @@map("classes")
@@ -686,6 +700,7 @@ model Subject {
   timetableSlots     TimetableSlot[]
   assessments        Assessment[]
   plannerEntries     PlannerEntry[]
+  lessonNotes        LessonNote[]
 
   @@unique([schoolId, name])
   @@map("subjects")
@@ -744,6 +759,43 @@ model PlannerEntry {
   @@index([userId, date])
   @@index([schoolId])
   @@map("planner_entries")
+}
+
+// Weekly lesson note — a formal artifact a teacher submits and a reviewer
+// (Headmaster/admin, or anyone granted academics:lesson_note_review) vets.
+// Content is a structured GES template stored as JSON (text-in-DB; no files):
+//   { strand, subStrand, contentStandard, indicators, objectives, resources,
+//     references, lessons: [{ day?, phase1Starter, phase2Main, phase3Plenary }] }
+// One note per teacher × class × subject × week (weekEnding).
+model LessonNote {
+  id             String           @id @default(uuid())
+  schoolId       String
+  authorId       String
+  classId        String
+  subjectId      String
+  termId         String
+  weekEnding     DateTime // GES week-ending date; the week key
+  title          String?
+  content        Json // structured GES template (header fields + lessons[])
+  status         LessonNoteStatus @default(DRAFT)
+  submittedAt    DateTime?
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  reviewComments String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  school   School  @relation(fields: [schoolId], references: [id])
+  author   User    @relation("LessonNoteAuthor", fields: [authorId], references: [id])
+  reviewer User?   @relation("LessonNoteReviewer", fields: [reviewedBy], references: [id])
+  class    Class   @relation(fields: [classId], references: [id])
+  subject  Subject @relation(fields: [subjectId], references: [id])
+  term     Term    @relation(fields: [termId], references: [id])
+
+  @@unique([authorId, classId, subjectId, weekEnding])
+  @@index([schoolId, status])
+  @@index([authorId])
+  @@map("lesson_notes")
 }
 
 // ============================================================

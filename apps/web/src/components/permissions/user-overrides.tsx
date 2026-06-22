@@ -27,6 +27,8 @@ const FEATURES = [
     { key: 'grading', label: 'Grading' },
     { key: 'report_cards', label: 'Report cards' },
     { key: 'transcripts', label: 'Transcripts' },
+    { key: 'lesson_notes', label: 'Lesson notes' },
+    { key: 'lesson_note_review', label: 'Lesson note review' },
   ]},
   { key: 'attendance', label: 'Attendance', subFeatures: [
     { key: 'student_attendance', label: 'Student attendance' },
