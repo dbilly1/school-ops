@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { Prisma, LessonNoteStatus } from '@prisma/client';
+import { Prisma, LessonNoteStatus, StaffRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { TeacherScopeService } from '../staff/teacher-scope.service';
 import { CreateLessonNoteDto, UpdateLessonNoteDto, ReviewLessonNoteDto } from './dto/lesson-note.dto';
 
 // Lesson notes are a submit → review → approve/return workflow. Authoring is
@@ -13,6 +14,7 @@ export class LessonNotesService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private teacherScope: TeacherScopeService,
   ) {}
 
   private dayUtc(dateStr: string): Date {
@@ -53,8 +55,11 @@ export class LessonNotesService {
     return note;
   }
 
-  async create(schoolId: string, userId: string, dto: CreateLessonNoteDto) {
+  async create(schoolId: string, userId: string, roles: StaffRole[], dto: CreateLessonNoteDto) {
     await this.assertRefs(schoolId, dto.classId, dto.subjectId, dto.termId);
+    // Class-teacher latitude: a restricted teacher may only author for a subject
+    // they teach in that class (or, as class teacher, any subject of their class).
+    await this.teacherScope.assertCanAuthorLessonNote(userId, roles, dto.subjectId, dto.classId);
     try {
       return await this.prisma.lessonNote.create({
         data: {

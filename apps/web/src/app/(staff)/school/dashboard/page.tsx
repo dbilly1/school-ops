@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useStaffAuth } from '@/contexts/staff-auth';
 import { staffApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { localKey } from '@/lib/date-range';
+import { plannerStyle } from '@/lib/planner-colors';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -126,6 +128,74 @@ function AttendanceNudge() {
   );
 }
 
+// ── Today's plan ──────────────────────────────────────────────────────────────
+// Personal planner tasks for today, surfaced for quick visibility. Reuses the
+// planner API (per-user, private); check tasks off straight from here.
+
+type PlannerEntry = {
+  id: string; title: string; status: 'PLANNED' | 'DONE'; color: string | null;
+  class: { name: string } | null; subject: { name: string } | null;
+};
+
+function TodaysPlan() {
+  const today = localKey(new Date());
+  const fetchToday = useCallback(
+    () => staffApi.get<PlannerEntry[]>(`/school/planner?start=${today}&end=${today}`).catch(() => []),
+    [today],
+  );
+  const { data, loading, refetch } = useApi(fetchToday, today);
+
+  async function toggle(e: PlannerEntry) {
+    try {
+      await staffApi.patch(`/school/planner/${e.id}`, { status: e.status === 'DONE' ? 'PLANNED' : 'DONE' });
+      refetch();
+    } catch { /* ignore */ }
+  }
+
+  const entries = data ?? [];
+  const done = entries.filter(e => e.status === 'DONE').length;
+
+  return (
+    <Panel
+      title="Today’s plan"
+      action={<Link href="/school/planner" className="text-xs font-medium" style={{ color: 'var(--accent)' }}>Open planner →</Link>}
+    >
+      {loading ? (
+        <div className="space-y-2">{[1, 2, 3].map(i => <div key={i} className="h-8 bg-slate-50 rounded-lg animate-pulse" />)}</div>
+      ) : entries.length === 0 ? (
+        <Link href="/school/planner" className="block text-sm text-slate-400 italic py-3 text-center hover:text-slate-600 transition">
+          Nothing planned for today — plan your day →
+        </Link>
+      ) : (
+        <>
+          <p className="text-xs text-slate-400 mb-2">{done} of {entries.length} done</p>
+          <div className="space-y-0.5">
+            {entries.map(e => {
+              const cstyle = plannerStyle(e.color);
+              const isDone = e.status === 'DONE';
+              return (
+                <div key={e.id} className="flex items-center gap-2 py-1.5 px-2 -mx-2 rounded-lg hover:bg-slate-50 transition">
+                  <button onClick={() => toggle(e)}
+                    className={`w-4 h-4 shrink-0 rounded border grid place-items-center transition ${isDone ? 'border-transparent text-white' : 'border-slate-300 hover:border-slate-400'}`}
+                    style={isDone ? { backgroundColor: 'var(--accent)' } : {}}
+                    aria-label={isDone ? 'Mark not done' : 'Mark done'}>
+                    {isDone && <span className="text-[10px] leading-none">✓</span>}
+                  </button>
+                  {cstyle && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${cstyle.dot}`} />}
+                  <span className={`text-sm min-w-0 truncate ${isDone ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{e.title}</span>
+                  {(e.class || e.subject) && (
+                    <span className="text-[10px] text-slate-400 shrink-0 ml-auto">{[e.class?.name, e.subject?.name].filter(Boolean).join(' · ')}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </Panel>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -178,6 +248,11 @@ export default function DashboardPage() {
             }
           />
         )}
+      </div>
+
+      {/* Today's plan */}
+      <div className="mb-4">
+        <TodaysPlan />
       </div>
 
       {/* Panels */}

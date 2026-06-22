@@ -48,6 +48,7 @@ export class PlannerService {
         title,
         date: this.dayUtc(dto.date),
         notes: dto.notes?.trim() || null,
+        color: dto.color || null,
         classId: dto.classId || null,
         subjectId: dto.subjectId || null,
         status: dto.status ?? undefined,
@@ -76,6 +77,7 @@ export class PlannerService {
     }
     if (dto.date !== undefined) data.date = this.dayUtc(dto.date);
     if (dto.notes !== undefined) data.notes = dto.notes.trim() || null;
+    if (dto.color !== undefined) data.color = dto.color || null;
     if (dto.status !== undefined) data.status = dto.status;
     if (dto.position !== undefined) data.position = dto.position;
     // Empty string clears the tag.

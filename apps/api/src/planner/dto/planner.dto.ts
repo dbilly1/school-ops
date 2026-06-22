@@ -15,6 +15,10 @@ export class CreatePlannerEntryDto {
 
   @IsString()
   @IsOptional()
+  color?: string;
+
+  @IsString()
+  @IsOptional()
   classId?: string;
 
   @IsString()
@@ -42,6 +46,10 @@ export class UpdatePlannerEntryDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsString()
+  @IsOptional()
+  color?: string;
 
   // Empty string clears the tag (set the FK to null).
   @IsString()

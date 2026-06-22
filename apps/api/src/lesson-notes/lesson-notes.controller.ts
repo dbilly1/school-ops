@@ -70,7 +70,7 @@ export class LessonNotesController {
   @Post()
   @RequirePermission('academics', 'CREATE', 'lesson_notes')
   create(@CurrentUser() user: any, @Body() dto: CreateLessonNoteDto) {
-    return this.lessonNotes.create(user.schoolId, user.id, dto);
+    return this.lessonNotes.create(user.schoolId, user.id, user.roles, dto);
   }
 
   @Patch(':id')

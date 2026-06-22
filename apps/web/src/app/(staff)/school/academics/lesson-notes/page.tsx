@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { useTeacherScope } from '@/hooks/use-teacher-scope';
 import { Alert } from '@/components/ui/settings-card';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -269,6 +270,7 @@ function NoteEditor({ note, termId, terms, classes, subjects, onClose, onSaved, 
   onError: (m: string) => void;
 }) {
   const readOnly = !!note && (note.status === 'SUBMITTED' || note.status === 'APPROVED');
+  const scope = useTeacherScope();
 
   const [classId, setClassId]     = useState(note?.classId ?? '');
   const [subjectId, setSubjectId] = useState(note?.subjectId ?? '');
@@ -278,6 +280,16 @@ function NoteEditor({ note, termId, terms, classes, subjects, onClose, onSaved, 
   const [c, setC] = useState<Content>(note?.content ?? {});
   const [lessons, setLessons] = useState<Lesson[]>(note?.content?.lessons?.length ? note.content.lessons : [{ ...EMPTY_LESSON }]);
   const [saving, setSaving] = useState(false);
+
+  // Scope the class/subject pickers to what a restricted teacher actually teaches
+  // (class-teacher latitude — backend enforces the same). When editing an existing
+  // note the selects are disabled, so we keep the full lists to display the value.
+  const restrict = scope.restricted && !note;
+  const classOptions = restrict ? classes.filter(c => scope.assignedClassIds.includes(c.id)) : classes;
+  const allowedSubjectIds = !restrict
+    ? null
+    : (classId && scope.isClassTeacherOf(classId) ? scope.recordableSubjectIds : (classId ? scope.subjectsForClass(classId) : scope.recordableSubjectIds));
+  const subjectOptions = allowedSubjectIds ? subjects.filter(s => allowedSubjectIds.includes(s.id)) : subjects;
 
   const field = (k: keyof Content) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setC(prev => ({ ...prev, [k]: e.target.value }));
@@ -328,16 +340,16 @@ function NoteEditor({ note, termId, terms, classes, subjects, onClose, onSaved, 
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <div>
             <label className={labelCls}>Class</label>
-            <select value={classId} onChange={e => setClassId(e.target.value)} disabled={readOnly || !!note} className={inputCls}>
+            <select value={classId} onChange={e => { setClassId(e.target.value); setSubjectId(''); }} disabled={readOnly || !!note} className={inputCls}>
               <option value="">Select…</option>
-              {classes.map(c2 => <option key={c2.id} value={c2.id}>{c2.name}</option>)}
+              {classOptions.map(c2 => <option key={c2.id} value={c2.id}>{c2.name}</option>)}
             </select>
           </div>
           <div>
             <label className={labelCls}>Subject</label>
             <select value={subjectId} onChange={e => setSubjectId(e.target.value)} disabled={readOnly || !!note} className={inputCls}>
               <option value="">Select…</option>
-              {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {subjectOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
           <div>

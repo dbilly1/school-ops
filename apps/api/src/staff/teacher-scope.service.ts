@@ -96,26 +96,49 @@ export class TeacherScopeService {
   ): Promise<void> {
     if (!this.isRestricted(roles)) return;
     const staffProfileId = await this.staffProfileId(userId);
-    if (!staffProfileId) throw new ForbiddenException('You can only manage assessments for your assigned subjects and classes');
+    if (!staffProfileId || !(await this.teachesSubjectInClass(staffProfileId, subjectId, classId)))
+      throw new ForbiddenException('You can only manage assessments for your assigned subjects and classes');
+  }
 
-    // Subject teacher: must teach this subject — in this class when one is given.
+  // ── Lesson notes: same class-teacher latitude as assessments — a subject
+  //    teacher may write for their subject in that class; a class teacher may
+  //    write for any subject on their class's grade level. ────────────────────
+  async assertCanAuthorLessonNote(
+    userId: string,
+    roles: StaffRole[],
+    subjectId: string,
+    classId: string,
+  ): Promise<void> {
+    if (!this.isRestricted(roles)) return;
+    const staffProfileId = await this.staffProfileId(userId);
+    if (!staffProfileId || !(await this.teachesSubjectInClass(staffProfileId, subjectId, classId)))
+      throw new ForbiddenException('You can only write lesson notes for classes and subjects you teach');
+  }
+
+  // Shared rule: does this teacher teach `subjectId` in `classId`? True when they
+  // subject-teach the subject in that class, OR class-teach the class and the
+  // subject is on its grade level. With no classId, falls back to any of their
+  // classes (subject-only / any-class-teacher).
+  private async teachesSubjectInClass(
+    staffProfileId: string,
+    subjectId: string,
+    classId?: string | null,
+  ): Promise<boolean> {
     const teachesSubject = await this.prisma.teacherSubjectAssignment.findFirst({
       where: { staffProfileId, subjectId, ...(classId ? { classId } : {}) },
       select: { id: true },
     });
-    if (teachesSubject) return;
+    if (teachesSubject) return true;
 
-    // Class teacher: must class-teach the target class (any of their classes when
-    // none is given) and the subject must be on that class's grade level.
     const classIds = await this.classTeacherClassIds(staffProfileId);
     if (classIds.length > 0 && (!classId || classIds.includes(classId))) {
       const match = await this.prisma.class.findFirst({
         where: { id: classId ?? { in: classIds }, gradeLevel: { subjects: { some: { subjectId } } } },
         select: { id: true },
       });
-      if (match) return;
+      if (match) return true;
     }
-    throw new ForbiddenException('You can only manage assessments for your assigned subjects and classes');
+    return false;
   }
 
   // ── List visibility: the where-filter for assessments a restricted teacher may

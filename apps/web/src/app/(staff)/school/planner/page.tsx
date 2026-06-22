@@ -5,6 +5,7 @@ import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { Alert } from '@/components/ui/settings-card';
 import { localKey, mondayOf } from '@/lib/date-range';
+import { PLANNER_COLOR_KEYS, PLANNER_PALETTE, plannerStyle } from '@/lib/planner-colors';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -15,6 +16,7 @@ type PlannerEntry = {
   date: string;          // ISO; the YYYY-MM-DD prefix is the planned day
   title: string;
   notes: string | null;
+  color: string | null;
   status: Status;
   position: number;
   classId: string | null;
@@ -357,8 +359,10 @@ function EntryRow({ entry, onToggle, onEdit, onDelete }: {
   onDelete: (e: PlannerEntry) => void;
 }) {
   const done = entry.status === 'DONE';
+  const cstyle = plannerStyle(entry.color);
   return (
     <div className="group flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 transition">
+      {cstyle && <span className={`w-1 h-4 mt-0.5 rounded-full shrink-0 ${cstyle.bar}`} />}
       <Checkbox done={done} onClick={() => onToggle(entry)} />
       <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onEdit(entry)}>
         <p className={`text-sm leading-snug ${done ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{entry.title}</p>
@@ -385,9 +389,11 @@ function EntryRow({ entry, onToggle, onEdit, onDelete }: {
 // the day, where it can be edited in the featured panel).
 function MiniRow({ entry, onToggle }: { entry: PlannerEntry; onToggle: (e: PlannerEntry) => void }) {
   const done = entry.status === 'DONE';
+  const cstyle = plannerStyle(entry.color);
   return (
     <div className="flex items-start gap-1.5 px-1.5 py-1 rounded-md">
       <Checkbox done={done} onClick={e => { e.stopPropagation(); onToggle(entry); }} />
+      {cstyle && <span className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${cstyle.dot}`} />}
       <p className={`text-xs leading-snug min-w-0 truncate ${done ? 'text-slate-400 line-through' : 'text-slate-600'}`}>{entry.title}</p>
     </div>
   );
@@ -409,13 +415,14 @@ function EntryModal({ entry, defaultDate, classes, subjects, onClose, onSaved, o
   const [notes, setNotes]   = useState(entry?.notes ?? '');
   const [classId, setClassId]     = useState(entry?.classId ?? '');
   const [subjectId, setSubjectId] = useState(entry?.subjectId ?? '');
+  const [color, setColor]   = useState(entry?.color ?? '');
   const [saving, setSaving] = useState(false);
 
   async function save() {
     if (!title.trim()) { onError('Title is required'); return; }
     setSaving(true);
     try {
-      const body = { title: title.trim(), date, notes, classId, subjectId };
+      const body = { title: title.trim(), date, notes, classId, subjectId, color };
       if (entry) await staffApi.patch(`/school/planner/${entry.id}`, body);
       else await staffApi.post('/school/planner', body);
       onSaved();
@@ -460,6 +467,18 @@ function EntryModal({ entry, defaultDate, classes, subjects, onClose, onSaved, o
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Notes <span className="text-slate-300">(optional)</span></label>
             <textarea rows={3} value={notes} onChange={e => setNotes(e.target.value)} className={inputCls} placeholder="Details, goals, what success looks like…" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1.5">Colour <span className="text-slate-300">(optional)</span></label>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setColor('')}
+                className={`w-7 h-7 rounded-full border grid place-items-center text-slate-400 transition ${color === '' ? 'ring-2 ring-slate-300 border-transparent' : 'border-slate-200 hover:border-slate-300'}`}
+                title="No colour">∅</button>
+              {PLANNER_COLOR_KEYS.map(k => (
+                <button key={k} type="button" onClick={() => setColor(k)} title={PLANNER_PALETTE[k].label}
+                  className={`w-7 h-7 rounded-full transition ${PLANNER_PALETTE[k].swatch} ${color === k ? 'ring-2 ring-offset-2 ring-slate-400' : 'hover:scale-110'}`} />
+              ))}
+            </div>
           </div>
         </div>
 

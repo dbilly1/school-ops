@@ -744,6 +744,7 @@ model PlannerEntry {
   date      DateTime // the day it's planned for (date-only; stored at UTC midnight)
   title     String
   notes     String?
+  color     String? // optional palette key (slate/emerald/blue/amber/rose/violet)
   status    PlannerStatus @default(PLANNED)
   position  Int           @default(0) // ordering within a day
   classId   String?
