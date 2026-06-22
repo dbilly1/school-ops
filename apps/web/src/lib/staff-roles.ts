@@ -25,6 +25,18 @@ export function assignableRoles<T extends { value: string }>(
   });
 }
 
+// Roles whose permission overrides are actually managed in the Role/User
+// permission matrices. Excluded by design (governed in code, not by this matrix):
+//   • SCHOOL_OWNER / SCHOOL_ADMIN — blanket full access (engine short-circuits them)
+//   • HEADMASTER — academic head: hard-allowed every feature EXCEPT Finance & Ops
+//     by PermissionsService Step 4b, so toggles here would be silent no-ops.
+// Only the roles below resolve through defaults/overrides end-to-end.
+export const MANAGEABLE_ROLES: { value: string; label: string }[] = [
+  { value: 'TEACHER',           label: 'Teacher'           },
+  { value: 'ACCOUNTANT',        label: 'Accountant'        },
+  { value: 'TRANSPORT_OFFICER', label: 'Transport Officer' },
+];
+
 export const OWNER_ADMIN              = ['SCHOOL_OWNER', 'SCHOOL_ADMIN'];
 // The Headmaster (academic head) sits alongside Owner/Admin for People &
 // Academics, but is excluded from Finance & Ops and aggregate Reports.

@@ -57,9 +57,16 @@ type AddForm = {
   dateOfBirth: string;
   classId: string;
   studentCategoryId: string;
+  address: string;
+  guardianName: string;
+  guardianRelationship: string;
+  guardianPhone: string;
 };
 
-const EMPTY_FORM: AddForm = { firstName: '', lastName: '', gender: '', dateOfBirth: '', classId: '', studentCategoryId: '' };
+const EMPTY_FORM: AddForm = {
+  firstName: '', lastName: '', gender: '', dateOfBirth: '', classId: '', studentCategoryId: '',
+  address: '', guardianName: '', guardianRelationship: '', guardianPhone: '',
+};
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
 
@@ -150,17 +157,35 @@ function AddStudentDialog({ open, onCreated, onClose, classes, classesLoading }:
     setError(null);
     setSaving(true);
     try {
-      const result = await staffApi.post<{ studentId: string; firstName: string; lastName: string; tempPassword: string }>(
+      const result = await staffApi.post<{ id: string; studentId: string; firstName: string; lastName: string; tempPassword: string }>(
         '/school/students',
         {
           firstName:   form.firstName.trim(),
           lastName:    form.lastName.trim(),
           gender:      form.gender      || undefined,
           dateOfBirth: form.dateOfBirth || undefined,
+          address:     form.address.trim() || undefined,
           classId:     form.classId     || undefined,
           studentCategoryId: form.studentCategoryId || undefined,
         },
       );
+
+      // Guardian is optional — attach it in a follow-up call if a name was given.
+      // Best-effort: the student already exists, so a guardian failure shouldn't
+      // block the success state (the guardian can be added later from the profile).
+      if (form.guardianName.trim()) {
+        try {
+          await staffApi.post(`/school/students/${result.id}/guardians`, {
+            name:         form.guardianName.trim(),
+            relationship: form.guardianRelationship || 'Guardian',
+            phone:        form.guardianPhone.trim() || undefined,
+            isPrimary:    true,
+          });
+        } catch {
+          // swallow — student created; guardian can be added from the detail page
+        }
+      }
+
       setCreated(result);
       onCreated();
     } catch (err) {
@@ -287,6 +312,49 @@ function AddStudentDialog({ open, onCreated, onClose, classes, classesLoading }:
                   </p>
                 )}
               </Field>
+            </div>
+            <div className="col-span-2">
+              <Field label="Home address">
+                <FocusInput
+                  value={form.address}
+                  onChange={e => set('address', e.target.value)}
+                  placeholder="e.g. 12 Liberation Rd, Accra"
+                />
+              </Field>
+            </div>
+          </div>
+
+          {/* ── Guardian (optional) ── */}
+          <div className="pt-2 border-t border-slate-100">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+              Guardian <span className="font-normal normal-case text-slate-400">— optional</span>
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Guardian name">
+                <FocusInput
+                  value={form.guardianName}
+                  onChange={e => set('guardianName', e.target.value)}
+                  placeholder="e.g. Kofi Mensah"
+                />
+              </Field>
+              <Field label="Relationship">
+                <FocusSelect value={form.guardianRelationship} onChange={e => set('guardianRelationship', e.target.value)}>
+                  <option value="">Guardian</option>
+                  <option value="Father">Father</option>
+                  <option value="Mother">Mother</option>
+                  <option value="Guardian">Guardian</option>
+                  <option value="Other">Other</option>
+                </FocusSelect>
+              </Field>
+              <div className="col-span-1 sm:col-span-2">
+                <Field label="Guardian phone">
+                  <FocusInput
+                    value={form.guardianPhone}
+                    onChange={e => set('guardianPhone', e.target.value)}
+                    placeholder="+233 20 000 0000"
+                  />
+                </Field>
+              </div>
             </div>
           </div>
 

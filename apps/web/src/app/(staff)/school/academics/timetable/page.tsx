@@ -571,9 +571,12 @@ export default function TimetablePage() {
     [currentTermId],
   );
 
-  const { data: config,  loading: configLoading, refetch: refetchConfig } = useApi(fetchConfig);
-  const { data: slots,   refetch: refetchSlots }  = useApi(fetchSlots);
-  const { data: clashes } = useApi(fetchClashes);
+  // Keys force a re-fetch once the term/class actually resolve — on first mount
+  // they're still empty (terms/classes load async), so a keyless fetch would
+  // cache the empty-term `null` config forever and keep showing the setup form.
+  const { data: config,  loading: configLoading, refetch: refetchConfig } = useApi(fetchConfig, currentTermId);
+  const { data: slots,   refetch: refetchSlots }  = useApi(fetchSlots, `${currentClassId}:${currentTermId}`);
+  const { data: clashes } = useApi(fetchClashes, currentTermId);
 
   return (
     <div>

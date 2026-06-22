@@ -6,6 +6,7 @@ import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { useStaffAuth } from '@/contexts/staff-auth';
 import { clearPermissionCache } from '@/hooks/use-permission';
+import { MANAGEABLE_ROLES } from '@/lib/staff-roles';
 import { Alert } from '@/components/ui/settings-card';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -13,11 +14,7 @@ import { Alert } from '@/components/ui/settings-card';
 const ACTIONS = ['VIEW', 'CREATE', 'EDIT', 'DELETE'] as const;
 type Action = typeof ACTIONS[number];
 
-const ROLES = [
-  { value: 'TEACHER',           label: 'Teacher'           },
-  { value: 'ACCOUNTANT',        label: 'Accountant'        },
-  { value: 'TRANSPORT_OFFICER', label: 'Transport Officer' },
-];
+const ROLES = MANAGEABLE_ROLES;
 
 const FEATURES = [
   { key: 'admissions',    label: 'Admissions',    subFeatures: [
@@ -400,6 +397,11 @@ export default function RolePermissionsPage() {
           </button>
         ))}
       </div>
+
+      <p className="text-xs text-slate-400 mb-4 -mt-1">
+        Owner, Admin and Headmaster aren&rsquo;t listed — they have built-in access that isn&rsquo;t
+        managed here (Headmaster has full academic access; Owner and Admin have everything).
+      </p>
 
       {/* Legend */}
       <div className="flex items-center gap-4 mb-3 text-xs text-slate-400 flex-wrap">
