@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useStaffAuth } from '@/contexts/staff-auth';
@@ -41,6 +42,7 @@ const icons = {
   reports:       'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8',
   audit:         'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   settings:      'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
+  chevron:       'M6 9l6 6 6-6',
 };
 
 // ── Nav item types ────────────────────────────────────────────────────────────
@@ -48,14 +50,34 @@ const icons = {
 type NavItem = {
   label: string;
   href: string;
-  iconPath: string;
+  iconPath?: string;     // omitted for dropdown children (they render text-only)
   id?: string;           // optional id for custom visibility logic
   // Permission-gated feature item: shown iff the user has VIEW on this feature
   // per the permission engine (role defaults + role/user overrides + feature
   // state all flow through). Owner/Admin always see it.
   permId?: string;
   roles?: string[];      // role-gated item — shows for users with a matching role
+  children?: NavItem[];  // when present, the item renders as a collapsible group
 };
+
+// Resolve whether a permission/role-gated item is visible to the current user.
+function isVisible(
+  item: NavItem,
+  { hasRole, navPerms, isOwnerOrAdmin, hiddenIds }: {
+    hasRole: (role: string) => boolean;
+    navPerms: Record<string, boolean>;
+    isOwnerOrAdmin: boolean;
+    hiddenIds?: string[];
+  },
+): boolean {
+  if (item.permId) {
+    if (!isOwnerOrAdmin && !navPerms[item.permId]) return false;
+  } else if (item.roles && !item.roles.some(r => hasRole(r))) {
+    return false;
+  }
+  if (item.id && hiddenIds?.includes(item.id)) return false;
+  return true;
+}
 
 // ── Nav link ──────────────────────────────────────────────────────────────────
 // The rail is tinted with the school's accent colour, so active/hover use white
@@ -72,9 +94,68 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
           : 'text-white/75 hover:text-white hover:bg-white/10',
       )}
     >
-      <Icon d={item.iconPath} />
+      {item.iconPath && <Icon d={item.iconPath} />}
       <span>{item.label}</span>
     </Link>
+  );
+}
+
+// ── Nav group (collapsible parent revealing its sub-pages) ────────────────────
+
+type Gate = {
+  hasRole: (role: string) => boolean;
+  navPerms: Record<string, boolean>;
+  isOwnerOrAdmin: boolean;
+};
+
+function NavGroup({ item, pathname, gate }: { item: NavItem; pathname: string; gate: Gate }) {
+  const children = (item.children ?? []).filter(c => isVisible(c, gate));
+  const groupActive = pathname === item.href || pathname.startsWith(item.href + '/');
+  const [open, setOpen] = useState(groupActive);
+
+  // Auto-expand whenever the active route moves into this group (e.g. via the
+  // breadcrumb or a deep link), so the current sub-page is always revealed.
+  useEffect(() => { if (groupActive) setOpen(true); }, [groupActive]);
+
+  if (children.length === 0) return null;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        className={cn(
+          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
+          groupActive ? 'text-white font-medium' : 'text-white/75 hover:text-white hover:bg-white/10',
+        )}
+      >
+        {item.iconPath && <Icon d={item.iconPath} />}
+        <span className="flex-1 text-left">{item.label}</span>
+        <Icon d={icons.chevron} className={cn('w-4 h-4 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="mt-0.5 ml-[26px] pl-3 border-l border-white/15 space-y-0.5">
+          {children.map(child => {
+            const active = pathname === child.href || pathname.startsWith(child.href + '/');
+            return (
+              <Link
+                key={child.href}
+                href={child.href}
+                className={cn(
+                  'block px-3 py-1.5 rounded-lg text-[13px] transition-colors',
+                  active
+                    ? 'bg-white/20 text-white font-medium'
+                    : 'text-white/65 hover:text-white hover:bg-white/10',
+                )}
+              >
+                {child.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -89,17 +170,8 @@ function NavSection({ label, items, pathname, hasRole, hiddenIds, navPerms, isOw
   navPerms: Record<string, boolean>;
   isOwnerOrAdmin: boolean;
 }) {
-  const visibleItems = items.filter(item => {
-    // Permission-gated items resolve through the engine (which already accounts
-    // for feature state). Owner/Admin always pass.
-    if (item.permId) {
-      if (!isOwnerOrAdmin && !navPerms[item.permId]) return false;
-    } else if (item.roles && !item.roles.some(r => hasRole(r))) {
-      return false;
-    }
-    if (item.id && hiddenIds?.includes(item.id)) return false;
-    return true;
-  });
+  const gate: Gate = { hasRole, navPerms, isOwnerOrAdmin };
+  const visibleItems = items.filter(item => isVisible(item, { ...gate, hiddenIds }));
 
   if (visibleItems.length === 0) return null;
 
@@ -109,10 +181,15 @@ function NavSection({ label, items, pathname, hasRole, hiddenIds, navPerms, isOw
         {label}
       </p>
       <div className="space-y-0.5">
-        {visibleItems.map(item => {
-          const active = pathname === item.href || pathname.startsWith(item.href + '/');
-          return <NavLink key={item.href} item={item} active={active} />;
-        })}
+        {visibleItems.map(item =>
+          item.children
+            ? <NavGroup key={item.href} item={item} pathname={pathname} gate={gate} />
+            : <NavLink
+                key={item.href}
+                item={item}
+                active={pathname === item.href || pathname.startsWith(item.href + '/')}
+              />,
+        )}
       </div>
     </div>
   );
@@ -138,17 +215,43 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: 'Academics',
     items: [
-      { label: 'Academics',  href: '/school/academics',  iconPath: icons.academics,  permId: 'academics' },
+      {
+        label: 'Academics', href: '/school/academics', iconPath: icons.academics, permId: 'academics',
+        children: [
+          // Subjects is owner/admin-only (matches academics/layout gating).
+          { label: 'Subjects',     href: '/school/academics/subjects',     roles: OWNER_ADMIN },
+          { label: 'Timetable',    href: '/school/academics/timetable'     },
+          { label: 'Assessments',  href: '/school/academics/assessments'   },
+          { label: 'Grade Book',   href: '/school/academics/grade-book'    },
+          { label: 'Report Cards', href: '/school/academics/report-cards'  },
+        ],
+      },
       { label: 'Attendance', href: '/school/attendance', iconPath: icons.attendance, permId: 'attendance', id: 'attendance' },
     ],
   },
   {
     section: 'Finance & Ops',
     items: [
-      { label: 'Fees',      href: '/school/finance',   iconPath: icons.finance,   permId: 'finance'      },
+      {
+        label: 'Fees', href: '/school/finance', iconPath: icons.finance, permId: 'finance',
+        children: [
+          { label: 'Fee Structures', href: '/school/finance/fee-structures' },
+          { label: 'Invoices',       href: '/school/finance/invoices'       },
+          { label: 'Outstanding',    href: '/school/finance/outstanding'    },
+          { label: 'Transactions',   href: '/school/finance/transactions'   },
+        ],
+      },
       { label: 'Expenses',  href: '/school/expenses',  iconPath: icons.expenses,  permId: 'expenses'     },
       { label: 'Feeding',   href: '/school/feeding',   iconPath: icons.feeding,   permId: 'feeding_fees' },
-      { label: 'Transport', href: '/school/transport', iconPath: icons.transport, permId: 'transport'    },
+      {
+        label: 'Transport', href: '/school/transport', iconPath: icons.transport, permId: 'transport',
+        children: [
+          { label: 'Routes',     href: '/school/transport/routes'   },
+          { label: 'Vehicles',   href: '/school/transport/vehicles' },
+          { label: 'Drivers',    href: '/school/transport/drivers'  },
+          { label: 'Daily Fees', href: '/school/transport/fees'     },
+        ],
+      },
     ],
   },
   {
@@ -207,7 +310,7 @@ function SidebarBody() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+      <nav className="flex-1 overflow-y-auto scrollbar-slim px-3 py-4 space-y-5">
         {!navReady ? (
           <div className="space-y-2 px-1">
             {Array.from({ length: 9 }).map((_, i) => (

@@ -1,48 +1,32 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useStaffAuth } from '@/contexts/staff-auth';
-import { cn } from '@/lib/cn';
 
-const ALL_TABS = [
-  { label: 'Subjects',     href: '/school/academics/subjects',     ownerAdminOnly: true  },
-  { label: 'Timetable',    href: '/school/academics/timetable',    ownerAdminOnly: false },
-  { label: 'Assessments',  href: '/school/academics/assessments',  ownerAdminOnly: false },
-  { label: 'Grade Book',   href: '/school/academics/grade-book',   ownerAdminOnly: false },
-  { label: 'Report Cards', href: '/school/academics/report-cards', ownerAdminOnly: false },
+// The sub-pages now live in the sidebar as a collapsible "Academics" group, so
+// this layout no longer renders a tab bar — just a breadcrumb for orientation.
+const SUB_PAGES = [
+  { label: 'Subjects',     href: '/school/academics/subjects'     },
+  { label: 'Timetable',    href: '/school/academics/timetable'    },
+  { label: 'Assessments',  href: '/school/academics/assessments'  },
+  { label: 'Grade Book',   href: '/school/academics/grade-book'   },
+  { label: 'Report Cards', href: '/school/academics/report-cards' },
 ];
 
 export default function AcademicsLayout({ children }: { children: React.ReactNode }) {
-  const pathname   = usePathname();
-  const { isOwner, isAdmin } = useStaffAuth();
-  const isTeacherOnly = !isOwner && !isAdmin;
-
-  const tabs = ALL_TABS.filter(t => !t.ownerAdminOnly || !isTeacherOnly);
+  const pathname = usePathname();
+  const current = SUB_PAGES.find(p => pathname.startsWith(p.href));
 
   return (
     <div>
-      {/* Sub-nav tabs */}
-      <div className="flex gap-1 mb-6 border-b border-slate-200">
-        {tabs.map(tab => {
-          const active = pathname.startsWith(tab.href);
-          return (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              className={cn(
-                'px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
-                active
-                  ? 'border-current'
-                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300',
-              )}
-              style={active ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : {}}
-            >
-              {tab.label}
-            </Link>
-          );
-        })}
-      </div>
+      {/* Breadcrumb */}
+      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 mb-6 text-sm">
+        <span className="text-slate-500">Academics</span>
+        <svg className="w-3.5 h-3.5 text-slate-300" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 18l6-6-6-6" />
+        </svg>
+        <span className="font-medium text-slate-800">{current?.label ?? ''}</span>
+      </nav>
 
       {children}
     </div>

@@ -19,3 +19,26 @@
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Slim, unobtrusive scrollbar for the dark accent rail: a thin semi-transparent
+   white thumb on a transparent track, so "there's more below" stays visible
+   without the chunky native bar.
+
+   NOTE: we deliberately do NOT set `scrollbar-width`/`scrollbar-color` here.
+   On Chromium/Edge, specifying those standard properties makes the browser
+   ignore the `::-webkit-scrollbar` pseudo-elements and fall back to the native
+   (chunky-looking) thin bar. Webkit-only keeps the custom pill on those
+   browsers; Firefox falls back to its own already-slim default. */
+.scrollbar-slim::-webkit-scrollbar {
+  width: 6px;
+}
+.scrollbar-slim::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-slim::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.28);
+  border-radius: 9999px;
+}
+.scrollbar-slim::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.45);
+}
