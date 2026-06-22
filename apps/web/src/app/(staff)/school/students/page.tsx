@@ -361,12 +361,11 @@ export default function StudentsPage() {
     ? (classes ?? []).filter(c => scope.assignedClassIds.includes(c.id))
     : (gradeFilter ? (classes ?? []).filter(c => c.gradeLevelId === gradeFilter) : (classes ?? []));
 
-  // For restricted teachers: further filter students to their scoped classes
+  // Restricted teachers are already scoped to their classes by the backend
+  // (studentScopeFilter), so we only apply the local search filter here. Re-
+  // filtering on the client by `classAssignments[0]` (the latest assignment)
+  // would wrongly drop students who match on an earlier assignment.
   const filtered = (students ?? []).filter(s => {
-    if (scope.restricted) {
-      const studentClassId = s.classAssignments[0]?.class?.id;
-      if (studentClassId && !scope.assignedClassIds.includes(studentClassId)) return false;
-    }
     if (!search) return true;
     return `${s.firstName} ${s.lastName} ${s.studentId}`.toLowerCase().includes(search.toLowerCase());
   });

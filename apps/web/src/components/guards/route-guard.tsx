@@ -3,43 +3,45 @@
 import { ReactNode, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useStaffAuth } from '@/contexts/staff-auth';
-import { useFeature } from '@/hooks/use-feature';
+import { useNavPermissions } from '@/hooks/use-permission';
 import {
   OWNER_ADMIN,
   OWNER_ADMIN_HEAD,
-  OWNER_ADMIN_HEAD_TEACHER,
   OWNER_ADMIN_ACCOUNTANT,
-  OWNER_ADMIN_TRANSPORT,
 } from '@/lib/staff-roles';
 
 // Guards every /school/* page against direct-URL access, mirroring exactly the
-// role + feature gating the sidebar uses to show/hide nav links. A user who hits
-// a route they aren't allowed to see is silently redirected to the dashboard.
-// This is defense-in-depth + correct UX; the backend remains the real enforcer.
+// gating the sidebar uses to show/hide nav links. A user who hits a route they
+// aren't allowed to see is silently redirected to the dashboard. This is
+// defense-in-depth + correct UX; the backend remains the real enforcer.
+//
+// Feature routes gate on `permId` — the user's VIEW permission resolved through
+// the engine (role defaults + role/user overrides + feature state), so a granted
+// user-level override actually opens the route. Management routes stay role-based.
 
 const REDIRECT_TO = '/school/dashboard';
 
-type Rule = { prefix: string; roles?: string[]; featureKey?: string };
+type Rule = { prefix: string; roles?: string[]; permId?: string };
 
 // Ordered most-specific-first isn't required here — prefixes are distinct
 // top-level sections, so first match wins. Anything not listed (dashboard,
 // students, account, onboarding) is allowed for any authenticated staff member,
 // which keeps the redirect target always reachable (no loops).
 const RULES: Rule[] = [
-  { prefix: '/school/admissions',    roles: OWNER_ADMIN_HEAD,         featureKey: 'admissions'    },
-  { prefix: '/school/staff',         roles: OWNER_ADMIN_HEAD                                        },
-  { prefix: '/school/users',         roles: OWNER_ADMIN_HEAD                                        },
-  { prefix: '/school/academics',     roles: OWNER_ADMIN_HEAD_TEACHER, featureKey: 'academics'     },
-  { prefix: '/school/attendance',    roles: OWNER_ADMIN_HEAD_TEACHER, featureKey: 'attendance'    },
-  { prefix: '/school/finance',       roles: OWNER_ADMIN_ACCOUNTANT,   featureKey: 'finance'       },
-  { prefix: '/school/expenses',      roles: OWNER_ADMIN_ACCOUNTANT,   featureKey: 'finance'       },
-  { prefix: '/school/feeding',       roles: OWNER_ADMIN_ACCOUNTANT,   featureKey: 'feeding_fees'  },
-  { prefix: '/school/transport',     roles: OWNER_ADMIN_TRANSPORT,    featureKey: 'transport'     },
-  { prefix: '/school/communication',                                  featureKey: 'communication' },
-  { prefix: '/school/reports',       roles: OWNER_ADMIN_ACCOUNTANT                                 },
-  { prefix: '/school/progression',   roles: OWNER_ADMIN_HEAD                                        },
-  { prefix: '/school/audit-logs',    roles: OWNER_ADMIN                                            },
-  { prefix: '/school/settings',      roles: OWNER_ADMIN                                            },
+  { prefix: '/school/admissions',    permId: 'admissions'    },
+  { prefix: '/school/staff',         roles: OWNER_ADMIN_HEAD },
+  { prefix: '/school/users',         roles: OWNER_ADMIN_HEAD },
+  { prefix: '/school/academics',     permId: 'academics'     },
+  { prefix: '/school/attendance',    permId: 'attendance'    },
+  { prefix: '/school/finance',       permId: 'finance'       },
+  { prefix: '/school/expenses',      permId: 'expenses'      },
+  { prefix: '/school/feeding',       permId: 'feeding_fees'  },
+  { prefix: '/school/transport',     permId: 'transport'     },
+  { prefix: '/school/communication', permId: 'communication' },
+  { prefix: '/school/reports',       roles: OWNER_ADMIN_ACCOUNTANT },
+  { prefix: '/school/progression',   roles: OWNER_ADMIN_HEAD       },
+  { prefix: '/school/audit-logs',    roles: OWNER_ADMIN            },
+  { prefix: '/school/settings',      roles: OWNER_ADMIN            },
 ];
 
 function matchRule(pathname: string): Rule | undefined {
@@ -57,39 +59,30 @@ function Spinner() {
   );
 }
 
-// Isolates the useFeature hook so the parent's hook order stays stable across
-// routes with and without a feature requirement.
-function FeatureRouteGate({ featureKey, children }: { featureKey: string; children: ReactNode }) {
-  const router = useRouter();
-  const { isActive, loading } = useFeature(featureKey);
-
-  useEffect(() => {
-    if (!loading && !isActive) router.replace(REDIRECT_TO);
-  }, [loading, isActive, router]);
-
-  if (loading || !isActive) return <Spinner />;
-  return <>{children}</>;
-}
-
 export function RouteGuard({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { hasRole, loading } = useStaffAuth();
+  const { nav: navPerms, loading: permsLoading } = useNavPermissions();
 
   const rule = matchRule(pathname);
+  const isOwnerOrAdmin = hasRole('SCHOOL_OWNER') || hasRole('SCHOOL_ADMIN');
+
+  // Permission-gated routes wait on the engine result; role-gated routes only
+  // need auth. Owner/Admin bypass both.
+  const permPending = !!rule?.permId && !isOwnerOrAdmin && permsLoading;
+
   const roleDenied = !loading && !!rule?.roles && !rule.roles.some(r => hasRole(r));
+  const permDenied =
+    !loading && !permsLoading && !!rule?.permId && !isOwnerOrAdmin && !navPerms[rule.permId];
+  const denied = roleDenied || permDenied;
 
   useEffect(() => {
-    if (roleDenied) router.replace(REDIRECT_TO);
-  }, [roleDenied, router]);
+    if (denied) router.replace(REDIRECT_TO);
+  }, [denied, router]);
 
-  if (loading) return <Spinner />;
-  if (roleDenied) return <Spinner />;
-
-  // Role check passed (or no rule). Apply the feature check if the rule has one.
-  if (rule?.featureKey) {
-    return <FeatureRouteGate featureKey={rule.featureKey}>{children}</FeatureRouteGate>;
-  }
+  if (loading || permPending) return <Spinner />;
+  if (denied) return <Spinner />;
 
   return <>{children}</>;
 }

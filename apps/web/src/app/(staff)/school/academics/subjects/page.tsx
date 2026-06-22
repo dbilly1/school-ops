@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { useStaffAuth } from '@/contexts/staff-auth';
@@ -360,8 +361,15 @@ function NewSubjectModal({ open, onClose, grades, onCreated }: {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function SubjectsPage() {
-  const { isOwner, isAdmin } = useStaffAuth();
-  const readOnly = !isOwner && !isAdmin;
+  const router = useRouter();
+  const { isOwner, isAdmin, loading: authLoading } = useStaffAuth();
+
+  // Subjects management is owner/admin-only. Teachers (and headmasters) have no
+  // access — if one reaches this page directly, send them to a tab they can use.
+  const denied = !authLoading && !isOwner && !isAdmin;
+  useEffect(() => {
+    if (denied) router.replace('/school/academics/timetable');
+  }, [denied, router]);
 
   const [showNew, setShowNew]     = useState(false);
   const [gradeFilter, setGradeFilter] = useState('');
@@ -381,6 +389,11 @@ export default function SubjectsPage() {
   const filtered = subjects?.filter(s =>
     !search || s.name.toLowerCase().includes(search.toLowerCase()) || (s.code?.toLowerCase().includes(search.toLowerCase())),
   );
+
+  // Only owner/admin reach the page body (teachers are redirected above); keep
+  // the read-only flag for defensive rendering during the redirect frame.
+  const readOnly = !isOwner && !isAdmin;
+  if (denied) return null;
 
   async function applyGesSubjects() {
     if (!confirm('Add the GES default subjects to every grade level you have tagged with a level type (KG / Primary / JHS)? Existing subjects are kept — this only adds what is missing.')) return;

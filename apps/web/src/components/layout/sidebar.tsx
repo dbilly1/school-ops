@@ -4,10 +4,9 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useStaffAuth } from '@/contexts/staff-auth';
 import { useTeacherScope } from '@/hooks/use-teacher-scope';
-import { useAllFeatures } from '@/hooks/use-feature';
-import { FeatureState } from '@schoolops/types';
+import { useNavPermissions } from '@/hooks/use-permission';
 import { cn } from '@/lib/cn';
-import { OWNER_ADMIN, OWNER_ADMIN_HEAD, OWNER_ADMIN_HEAD_TEACHER, OWNER_ADMIN_ACCOUNTANT, OWNER_ADMIN_TRANSPORT } from '@/lib/staff-roles';
+import { OWNER_ADMIN, OWNER_ADMIN_HEAD, OWNER_ADMIN_ACCOUNTANT } from '@/lib/staff-roles';
 
 // ── Icons (inline SVG — no icon library dependency) ───────────────────────────
 
@@ -51,8 +50,11 @@ type NavItem = {
   href: string;
   iconPath: string;
   id?: string;           // optional id for custom visibility logic
-  featureKey?: string;   // gated — item hidden if feature not ACTIVE
-  roles?: string[];      // if set, item only shows for users with at least one matching role
+  // Permission-gated feature item: shown iff the user has VIEW on this feature
+  // per the permission engine (role defaults + role/user overrides + feature
+  // state all flow through). Owner/Admin always see it.
+  permId?: string;
+  roles?: string[];      // role-gated item — shows for users with a matching role
 };
 
 // ── Nav link ──────────────────────────────────────────────────────────────────
@@ -78,18 +80,24 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 
 // ── Nav section ───────────────────────────────────────────────────────────────
 
-function NavSection({ label, items, pathname, hasRole, hiddenIds, featureStates }: {
+function NavSection({ label, items, pathname, hasRole, hiddenIds, navPerms, isOwnerOrAdmin }: {
   label: string;
   items: NavItem[];
   pathname: string;
   hasRole: (role: string) => boolean;
   hiddenIds?: string[];
-  featureStates: Map<string, FeatureState>;
+  navPerms: Record<string, boolean>;
+  isOwnerOrAdmin: boolean;
 }) {
   const visibleItems = items.filter(item => {
-    if (item.roles && !item.roles.some(r => hasRole(r))) return false;
+    // Permission-gated items resolve through the engine (which already accounts
+    // for feature state). Owner/Admin always pass.
+    if (item.permId) {
+      if (!isOwnerOrAdmin && !navPerms[item.permId]) return false;
+    } else if (item.roles && !item.roles.some(r => hasRole(r))) {
+      return false;
+    }
     if (item.id && hiddenIds?.includes(item.id)) return false;
-    if (item.featureKey && featureStates.get(item.featureKey) !== FeatureState.ACTIVE) return false;
     return true;
   });
 
@@ -122,7 +130,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: 'People',
     items: [
-      { label: 'Admissions', href: '/school/admissions', iconPath: icons.admissions, featureKey: 'admissions', roles: OWNER_ADMIN_HEAD },
+      { label: 'Admissions', href: '/school/admissions', iconPath: icons.admissions, permId: 'admissions' },
       { label: 'Students',   href: '/school/students',   iconPath: icons.students },
       { label: 'Staff',      href: '/school/staff',      iconPath: icons.staff,      roles: OWNER_ADMIN_HEAD },
     ],
@@ -130,23 +138,23 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: 'Academics',
     items: [
-      { label: 'Academics',  href: '/school/academics',  iconPath: icons.academics,  featureKey: 'academics',  roles: OWNER_ADMIN_HEAD_TEACHER },
-      { label: 'Attendance', href: '/school/attendance', iconPath: icons.attendance, featureKey: 'attendance', roles: OWNER_ADMIN_HEAD_TEACHER, id: 'attendance' },
+      { label: 'Academics',  href: '/school/academics',  iconPath: icons.academics,  permId: 'academics' },
+      { label: 'Attendance', href: '/school/attendance', iconPath: icons.attendance, permId: 'attendance', id: 'attendance' },
     ],
   },
   {
     section: 'Finance & Ops',
     items: [
-      { label: 'Fees',      href: '/school/finance',   iconPath: icons.finance,   featureKey: 'finance',      roles: OWNER_ADMIN_ACCOUNTANT },
-      { label: 'Expenses',  href: '/school/expenses',  iconPath: icons.expenses,  featureKey: 'finance',      roles: OWNER_ADMIN_ACCOUNTANT },
-      { label: 'Feeding',   href: '/school/feeding',   iconPath: icons.feeding,   featureKey: 'feeding_fees', roles: OWNER_ADMIN_ACCOUNTANT },
-      { label: 'Transport', href: '/school/transport', iconPath: icons.transport, featureKey: 'transport',    roles: OWNER_ADMIN_TRANSPORT  },
+      { label: 'Fees',      href: '/school/finance',   iconPath: icons.finance,   permId: 'finance'      },
+      { label: 'Expenses',  href: '/school/expenses',  iconPath: icons.expenses,  permId: 'expenses'     },
+      { label: 'Feeding',   href: '/school/feeding',   iconPath: icons.feeding,   permId: 'feeding_fees' },
+      { label: 'Transport', href: '/school/transport', iconPath: icons.transport, permId: 'transport'    },
     ],
   },
   {
     section: 'Communication',
     items: [
-      { label: 'Communication', href: '/school/communication', iconPath: icons.communication, featureKey: 'communication' },
+      { label: 'Communication', href: '/school/communication', iconPath: icons.communication, permId: 'communication' },
     ],
   },
   {
@@ -164,14 +172,14 @@ function SidebarBody() {
   const pathname = usePathname();
   const { branding, hasRole, loading: authLoading } = useStaffAuth();
   const scope = useTeacherScope();
-  const { states: featureStates, loading: featuresLoading } = useAllFeatures();
+  const { nav: navPerms, loading: permsLoading } = useNavPermissions();
 
   const isOwnerOrAdmin = hasRole('SCHOOL_OWNER') || hasRole('SCHOOL_ADMIN');
   // A pure teacher only sees Attendance if they have at least one assigned class
   const canSeeAttendance = isOwnerOrAdmin || (scope.restricted ? scope.assignedClassIds.length > 0 : true);
 
-  // Render the whole nav at once (not item-by-item) once auth + features + scope are ready.
-  const navReady = !authLoading && !featuresLoading && !scope.loading;
+  // Render the whole nav at once (not item-by-item) once auth + permissions + scope are ready.
+  const navReady = !authLoading && !permsLoading && !scope.loading;
 
   return (
     <>
@@ -215,7 +223,8 @@ function SidebarBody() {
               pathname={pathname}
               hasRole={hasRole}
               hiddenIds={canSeeAttendance ? [] : ['attendance']}
-              featureStates={featureStates}
+              navPerms={navPerms}
+              isOwnerOrAdmin={isOwnerOrAdmin}
             />
           ))
         )}

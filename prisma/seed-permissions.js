@@ -153,6 +153,13 @@ const DEFAULTS = [
   ['TRANSPORT_OFFICER', 'transport', 'pickup_points',    'CREATE', true ],
   ['TRANSPORT_OFFICER', 'transport', 'pickup_points',    'EDIT',   true ],
   ['TRANSPORT_OFFICER', 'transport', 'pickup_points',    'DELETE', false],
+  // Daily fee collection — collecting transport fees is core to the role, so it
+  // is granted by default (CREATE covers mark-paid / prepay / settle; DELETE
+  // stays Owner/Admin-only).
+  ['TRANSPORT_OFFICER', 'transport', 'fee_collection',   'VIEW',   true ],
+  ['TRANSPORT_OFFICER', 'transport', 'fee_collection',   'CREATE', true ],
+  ['TRANSPORT_OFFICER', 'transport', 'fee_collection',   'EDIT',   true ],
+  ['TRANSPORT_OFFICER', 'transport', 'fee_collection',   'DELETE', false],
   // Students (view only — needed for assignments)
   ['TRANSPORT_OFFICER', 'students', null, 'VIEW',   true ],
   ['TRANSPORT_OFFICER', 'students', null, 'CREATE', false],

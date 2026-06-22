@@ -45,6 +45,12 @@ export class AssessmentsController {
     return this.assessmentsService.getScoresByStudent(user.schoolId, studentId, termId);
   }
 
+  @Get(':id/scores')
+  @RequirePermission('academics', 'VIEW')
+  getScores(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.assessmentsService.getScores(user.schoolId, id);
+  }
+
   @Get(':id')
   @RequirePermission('academics', 'VIEW')
   findOne(@CurrentUser() user: any, @Param('id') id: string) {

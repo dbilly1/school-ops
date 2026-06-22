@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { useTeacherScope } from '@/hooks/use-teacher-scope';
 import { Alert } from '@/components/ui/settings-card';
 import { ClassTabs } from '@/components/ui/class-tabs';
 
@@ -90,6 +91,7 @@ function ReportCardRow({ card, onPreview }: { card: ReportCard; onPreview: () =>
 
 export default function ReportCardsPage() {
   const router = useRouter();
+  const scope  = useTeacherScope();
   const [classId, setClassId]   = useState('');
   const [termId, setTermId]     = useState('');
   const [generating, setGenerating] = useState(false);
@@ -103,8 +105,14 @@ export default function ReportCardsPage() {
     [],
   );
 
-  const { data: classes } = useApi(fetchClasses);
-  const { data: terms }   = useApi(fetchTerms);
+  const { data: allClasses } = useApi(fetchClasses);
+  const { data: terms }      = useApi(fetchTerms);
+
+  // Restrict the class list for teachers to their assigned classes (mirrors the
+  // grade-book / assessments pages); admins see every class.
+  const classes = scope.restricted
+    ? (allClasses ?? []).filter(c => scope.assignedClassIds.includes(c.id))
+    : (allClasses ?? []);
 
   const activeTermId  = termId  || terms?.find((t: any) => t.isActive)?.id  || '';
   const activeClassId = classId || classes?.[0]?.id || '';

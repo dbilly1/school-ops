@@ -136,6 +136,27 @@ export class AssessmentsService {
     return { recorded: results.length, assessmentId };
   }
 
+  // Flat score list for a single assessment — used by the score-entry page to
+  // pre-fill already-recorded marks. (findOne also returns scores, but the page
+  // fetches this lean shape separately.)
+  async getScores(schoolId: string, assessmentId: string) {
+    const assessment = await this.prisma.assessment.findFirst({
+      where: { id: assessmentId, schoolId },
+      select: { id: true },
+    });
+    if (!assessment) throw new NotFoundException('Assessment not found');
+
+    const scores = await this.prisma.assessmentScore.findMany({
+      where: { assessmentId },
+      select: { studentId: true, rawScore: true, remarks: true },
+    });
+    return scores.map((s) => ({
+      studentId: s.studentId,
+      rawScore: Number(s.rawScore),
+      remarks: s.remarks,
+    }));
+  }
+
   async getScoresByStudent(schoolId: string, studentId: string, termId?: string) {
     const scores = await this.prisma.assessmentScore.findMany({
       where: {

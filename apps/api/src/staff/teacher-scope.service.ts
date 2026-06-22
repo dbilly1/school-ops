@@ -44,9 +44,15 @@ export class TeacherScopeService {
   }
 
   private async staffProfileId(userId: string): Promise<string | null> {
+    // `schoolId` MUST be selected: the tenant-scope Prisma middleware post-filters
+    // every `findUnique` result by comparing `result.schoolId` to the request's
+    // tenant. Selecting only `id` leaves `result.schoolId` undefined, so the
+    // middleware treats the row as cross-tenant and nulls it out — which would
+    // make every restricted teacher resolve to "no profile" (empty students,
+    // assessments, attendance, recordable subjects).
     const profile = await this.prisma.staffProfile.findUnique({
       where: { userId },
-      select: { id: true },
+      select: { id: true, schoolId: true },
     });
     return profile?.id ?? null;
   }

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../school-setup/calendar/calendar.service';
 import { TeacherScopeService } from '../staff/teacher-scope.service';
@@ -130,17 +130,19 @@ export class AttendanceService {
 
   // ── Coverage ──────────────────────────────────────────────
   // Which classes have / haven't had attendance marked across a date range.
-  // Admins see every class; a restricted teacher sees only the classes they
-  // class-teach. "Marked" for a day = at least one record exists for that
-  // class+date, which matches bulkMark (it writes a row per student on save).
+  // Owners/admins/headmasters only — restricted teachers are rejected (this is an
+  // oversight view over every class). "Marked" for a day = at least one record
+  // exists for that class+date, which matches bulkMark (it writes a row per
+  // student on save).
   // Returns every calendar day in range typed (school/weekend/holiday/off) so the
   // UI can render a day-grid that strikes non-school days, plus per-class marked /
   // missing summaries for longer ranges. Missing only ever counts school days.
   async getCoverage(schoolId: string, startStr: string, endStr: string, caller: Caller) {
-    const restricted = this.teacherScope.isRestricted(caller.roles);
-    const scopedClassIds = restricted
-      ? await this.teacherScope.classTeacherClassIdsForUser(caller.id)
-      : null;
+    // Coverage is an oversight view reserved for owners/admins/headmasters.
+    // Restricted (pure) teachers have no access.
+    if (this.teacherScope.isRestricted(caller.roles)) {
+      throw new ForbiddenException('Attendance coverage is not available to teachers');
+    }
 
     // Parse + clamp the range to a sane span (max ~1 year) to bound the scan.
     const today = new Date().toISOString().slice(0, 10);
@@ -162,14 +164,14 @@ export class AttendanceService {
     const schoolDays = days.filter((d) => d.type === 'school').map((d) => d.date);
     const schoolDaySet = new Set(schoolDays);
 
-    const base = { restricted, start, end, termStart, termEnd, days, schoolDayCount: schoolDays.length };
+    const base = { restricted: false, start, end, termStart, termEnd, days, schoolDayCount: schoolDays.length };
 
-    if ((scopedClassIds && scopedClassIds.length === 0) || schoolDays.length === 0) {
+    if (schoolDays.length === 0) {
       return { ...base, classes: [] };
     }
 
     const classes = await this.prisma.class.findMany({
-      where: { schoolId, ...(scopedClassIds ? { id: { in: scopedClassIds } } : {}) },
+      where: { schoolId },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     });
@@ -178,7 +180,6 @@ export class AttendanceService {
       where: {
         schoolId,
         date: { gte: startDate, lte: endDate },
-        ...(scopedClassIds ? { classId: { in: scopedClassIds } } : {}),
       },
       select: { classId: true, date: true },
       distinct: ['classId', 'date'],

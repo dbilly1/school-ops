@@ -70,6 +70,49 @@ export function usePermission(check: PermissionCheck): PermissionResult {
   return { can, loading };
 }
 
+// ── useNavPermissions (one request for the whole sidebar / route guard) ───────
+// The current user's effective VIEW permission per nav feature, resolved through
+// the permission engine — so user-level overrides (not just role membership)
+// decide what shows. Owner/Admin short-circuit to all-true.
+
+type NavPermissions = Record<string, boolean>;
+
+const navCache = new Map<string, NavPermissions>(); // userId -> nav map
+
+export function useNavPermissions(): { nav: NavPermissions; loading: boolean } {
+  const { user, isOwner, isAdmin } = useStaffAuth();
+  const [nav, setNav]         = useState<NavPermissions>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!user) { setLoading(false); return; }
+
+    // Owner/Admin see everything — skip the round-trip.
+    if (isOwner || isAdmin) { setNav({}); setLoading(false); return; }
+
+    const cached = navCache.get(user.id);
+    if (cached) { setNav(cached); setLoading(false); }
+    else setLoading(true);
+
+    (async () => {
+      try {
+        const { nav: result } = await staffApi.get<{ nav: NavPermissions }>('/school/permissions/me');
+        navCache.set(user.id, result);
+        if (!cancelled) setNav(result);
+      } catch {
+        if (!cancelled && !cached) setNav({});
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [user, isOwner, isAdmin]);
+
+  return { nav, loading };
+}
+
 // ── Imperative helper (for non-hook contexts e.g. guards) ─────────────────────
 
 export async function checkPermission(
@@ -99,4 +142,5 @@ export async function checkPermission(
 
 export function clearPermissionCache() {
   cache.clear();
+  navCache.clear();
 }

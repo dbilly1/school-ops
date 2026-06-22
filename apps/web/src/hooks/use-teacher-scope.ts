@@ -69,7 +69,13 @@ export function useTeacherScope(): TeacherScope {
     [restricted],
   );
 
-  const { data, loading } = useApi(fetch);
+  // Key on `restricted` so the hook re-fetches when auth resolves and the user
+  // is recognised as a restricted teacher. Without this, a hard refresh / direct
+  // page load renders first with `restricted === false` (auth not yet loaded),
+  // fetches the empty placeholder, and never re-runs when `restricted` flips to
+  // true — leaving the teacher with no classes/subjects (no students, no
+  // attendance classes, etc.).
+  const { data, loading } = useApi(fetch, restricted);
 
   const classAssignments   = data?.classAssignments   ?? [];
   const subjectAssignments = data?.subjectAssignments ?? [];

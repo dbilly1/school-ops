@@ -383,14 +383,18 @@ function StudentAttendanceTab({ assignedClassIds, restricted }: {
   const [termBounds, setTermBounds] = useState<{ start: string | null; end: string | null }>({ start: null, end: null });
   const range = presetRange(preset, custom, termBounds);
 
+  // Attendance coverage is an oversight view for admins/headmasters only — a
+  // restricted teacher neither sees the strip nor fetches it.
   const fetchCoverage = useCallback(
-    () => staffApi.get<CoverageResponse>(`/school/attendance/coverage?start=${range.start}&end=${range.end}`).catch(() => null),
-    [range.start, range.end],
+    () => restricted
+      ? Promise.resolve<CoverageResponse | null>(null)
+      : staffApi.get<CoverageResponse>(`/school/attendance/coverage?start=${range.start}&end=${range.end}`).catch(() => null),
+    [restricted, range.start, range.end],
   );
 
   const { data: allClasses }                            = useApi(fetchClasses);
   const { data: attendance, loading, refetch }          = useApi(fetchAttendance, `${classId}:${date}`);
-  const { data: coverage, refetch: refetchCoverage }    = useApi(fetchCoverage, `${range.start}:${range.end}`);
+  const { data: coverage, refetch: refetchCoverage }    = useApi(fetchCoverage, `${restricted}:${range.start}:${range.end}`);
 
   // Carry the active-term bounds back so the "Entire term" preset can resolve.
   useEffect(() => {
@@ -467,18 +471,20 @@ function StudentAttendanceTab({ assignedClassIds, restricted }: {
 
   return (
     <div>
-      <CoverageStrip
-        data={coverage ?? null}
-        today={today}
-        onJump={jumpTo}
-        range={
-          <RangeControl
-            preset={preset} onPreset={setPreset}
-            custom={custom} onCustom={setCustom}
-            termAvailable={!!termBounds.start}
-          />
-        }
-      />
+      {!restricted && (
+        <CoverageStrip
+          data={coverage ?? null}
+          today={today}
+          onJump={jumpTo}
+          range={
+            <RangeControl
+              preset={preset} onPreset={setPreset}
+              custom={custom} onCustom={setCustom}
+              termAvailable={!!termBounds.start}
+            />
+          }
+        />
+      )}
 
       {/* Date + mark-all row */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
