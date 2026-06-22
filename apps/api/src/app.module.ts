@@ -30,6 +30,7 @@ import { PortalModule } from './portal/portal.module';
 import { ReportsModule } from './reports/reports.module';
 import { AuditViewerModule } from './audit-viewer/audit-viewer.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { PlannerModule } from './planner/planner.module';
 import { MailModule } from './mail/mail.module';
 
 @Module({
@@ -70,6 +71,7 @@ import { MailModule } from './mail/mail.module';
     ReportsModule,
     AuditViewerModule,
     DashboardModule,
+    PlannerModule,
   ],
 })
 export class AppModule {}

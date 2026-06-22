@@ -29,6 +29,7 @@ function Icon({ d, className }: { d: string; className?: string }) {
 
 const icons = {
   dashboard:     'M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M9 22V12h6v10',
+  planner:       'M8 2v4 M16 2v4 M3 10h18 M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M9 16l2 2 4-4',
   admissions:    'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
   students:      'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
   staff:         'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
@@ -202,6 +203,8 @@ const NAV: { section: string; items: NavItem[] }[] = [
     section: 'Main',
     items: [
       { label: 'Dashboard', href: '/school/dashboard', iconPath: icons.dashboard },
+      // Personal planner — available to every staff user (no permission gate).
+      { label: 'Planner',   href: '/school/planner',   iconPath: icons.planner },
     ],
   },
   {

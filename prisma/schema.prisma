@@ -115,6 +115,11 @@ enum ReportCardLayout {
   HOLISTIC
 }
 
+enum PlannerStatus {
+  PLANNED
+  DONE
+}
+
 enum CalendarEventType {
   HOLIDAY
   VACATION
@@ -171,11 +176,11 @@ model Package {
 }
 
 model PackageFeature {
-  id             String  @id @default(uuid())
-  packageId      String
-  featureKey     String
-  subFeatureKey  String?
-  createdAt      DateTime @default(now())
+  id            String   @id @default(uuid())
+  packageId     String
+  featureKey    String
+  subFeatureKey String?
+  createdAt     DateTime @default(now())
 
   package Package @relation(fields: [packageId], references: [id])
 
@@ -184,10 +189,10 @@ model PackageFeature {
 }
 
 model SubFeatureDefault {
-  id              String  @id @default(uuid())
-  featureKey      String
-  subFeatureKey   String
-  defaultEnabled  Boolean @default(false)
+  id             String  @id @default(uuid())
+  featureKey     String
+  subFeatureKey  String
+  defaultEnabled Boolean @default(false)
 
   @@unique([featureKey, subFeatureKey])
   @@map("sub_feature_defaults")
@@ -198,70 +203,71 @@ model SubFeatureDefault {
 // ============================================================
 
 model School {
-  id                 String              @id @default(uuid())
-  slug               String?             @unique
-  name               String
-  country            String
-  logoUrl            String?
-  primaryColor       String?
-  address            String?
-  phone              String?
-  email              String?
-  studentIdPrefix    String?             // Prefix for human-readable student IDs, e.g. "MIS". Defaults to school-name initials.
-  studentSeq         Int                 @default(0)  // Monotonic counter for student-ID sequence; only ever increments.
-  packageId            String?
-  subscriptionState    SubscriptionState   @default(TRIAL)
-  onboardingComplete              Boolean   @default(false)
-  adminCanManagePermissions       Boolean   @default(true)
-  createdAt                       DateTime  @default(now())
-  updatedAt                       DateTime  @updatedAt
+  id                        String            @id @default(uuid())
+  slug                      String?           @unique
+  name                      String
+  country                   String
+  logoUrl                   String?
+  primaryColor              String?
+  address                   String?
+  phone                     String?
+  email                     String?
+  studentIdPrefix           String? // Prefix for human-readable student IDs, e.g. "MIS". Defaults to school-name initials.
+  studentSeq                Int               @default(0) // Monotonic counter for student-ID sequence; only ever increments.
+  packageId                 String?
+  subscriptionState         SubscriptionState @default(TRIAL)
+  onboardingComplete        Boolean           @default(false)
+  adminCanManagePermissions Boolean           @default(true)
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
 
-  package                  Package?                  @relation(fields: [packageId], references: [id])
-  schoolFeatures           SchoolFeature[]
-  schoolSubFeatureConfigs  SchoolSubFeatureConfig[]
-  schoolFeatureGrants      SchoolFeatureGrant[]
-  users                    User[]
-  staffProfiles            StaffProfile[]
-  gradelevels              GradeLevel[]
-  classes                  Class[]
-  academicYears            AcademicYear[]
-  terms                    Term[]
-  calendarEvents           SchoolCalendarEvent[]
-  subjects                 Subject[]
-  students                 Student[]
-  admissionRecords         AdmissionRecord[]
-  admissionFieldConfigs    AdmissionFieldConfig[]
-  studentCategories        StudentCategory[]
-  feeStructures            FeeStructure[]
-  invoices                 Invoice[]
-  payments                 Payment[]
-  timetableConfigs         TimetableConfig[]
-  assessments              Assessment[]
-  studentAttendance        StudentAttendanceRecord[]
-  staffAttendance          StaffAttendanceRecord[]
-  vehicles                 Vehicle[]
-  transportRoutes          TransportRoute[]
-  drivers                  Driver[]
-  notices                  Notice[]
-  announcements            Announcement[]
-  feedingConfigs           FeedingConfig[]
-  feedingEnrollments       FeedingEnrollment[]
-  feedingPayments          FeedingPayment[]
-  feedingDailyRecords      FeedingDailyRecord[]
-  transportPayments        TransportPayment[]
-  transportDailyRecords    TransportDailyRecord[]
-  reportCardConfigs        ReportCardConfig[]
-  notifications            Notification[]
-  auditLogs                AuditLog[]
-  rolePermissionOverrides  RolePermissionOverride[]
-  userPermissionOverrides  UserPermissionOverride[]
-  gradingScales            GradingScale[]
+  package                   Package?                   @relation(fields: [packageId], references: [id])
+  schoolFeatures            SchoolFeature[]
+  schoolSubFeatureConfigs   SchoolSubFeatureConfig[]
+  schoolFeatureGrants       SchoolFeatureGrant[]
+  users                     User[]
+  staffProfiles             StaffProfile[]
+  gradelevels               GradeLevel[]
+  classes                   Class[]
+  academicYears             AcademicYear[]
+  terms                     Term[]
+  calendarEvents            SchoolCalendarEvent[]
+  subjects                  Subject[]
+  students                  Student[]
+  admissionRecords          AdmissionRecord[]
+  admissionFieldConfigs     AdmissionFieldConfig[]
+  studentCategories         StudentCategory[]
+  feeStructures             FeeStructure[]
+  invoices                  Invoice[]
+  payments                  Payment[]
+  timetableConfigs          TimetableConfig[]
+  assessments               Assessment[]
+  studentAttendance         StudentAttendanceRecord[]
+  staffAttendance           StaffAttendanceRecord[]
+  vehicles                  Vehicle[]
+  transportRoutes           TransportRoute[]
+  drivers                   Driver[]
+  notices                   Notice[]
+  announcements             Announcement[]
+  feedingConfigs            FeedingConfig[]
+  feedingEnrollments        FeedingEnrollment[]
+  feedingPayments           FeedingPayment[]
+  feedingDailyRecords       FeedingDailyRecord[]
+  transportPayments         TransportPayment[]
+  transportDailyRecords     TransportDailyRecord[]
+  reportCardConfigs         ReportCardConfig[]
+  notifications             Notification[]
+  auditLogs                 AuditLog[]
+  rolePermissionOverrides   RolePermissionOverride[]
+  userPermissionOverrides   UserPermissionOverride[]
+  gradingScales             GradingScale[]
   assessmentCategoryWeights AssessmentCategoryWeight[]
   holisticProficiencyLevels HolisticProficiencyLevel[]
-  holisticSkills           HolisticSkill[]
-  expenseCategories        ExpenseCategory[]
-  expenses                 Expense[]
-  expenseBudgets           ExpenseBudget[]
+  holisticSkills            HolisticSkill[]
+  expenseCategories         ExpenseCategory[]
+  expenses                  Expense[]
+  expenseBudgets            ExpenseBudget[]
+  plannerEntries            PlannerEntry[]
 
   @@map("schools")
 }
@@ -304,8 +310,8 @@ model SchoolFeatureGrant {
   grantedBy     String
   createdAt     DateTime  @default(now())
 
-  school    School @relation(fields: [schoolId], references: [id])
-  grantedByUser User @relation("GrantedByUser", fields: [grantedBy], references: [id])
+  school        School @relation(fields: [schoolId], references: [id])
+  grantedByUser User   @relation("GrantedByUser", fields: [grantedBy], references: [id])
 
   @@index([schoolId])
   @@map("school_feature_grants")
@@ -386,24 +392,25 @@ model User {
   firstName    String
   lastName     String
   isActive     Boolean  @default(true)
-  tempPassword String?  // plain-text kept only while mustChange = true; cleared on first login
+  tempPassword String? // plain-text kept only while mustChange = true; cleared on first login
   mustChange   Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  school              School               @relation(fields: [schoolId], references: [id])
-  roles               UserRole[]
-  refreshTokens       RefreshToken[]
-  staffProfile        StaffProfile?
-  roleOverridesSet    RolePermissionOverride[] @relation("OverrideSetBy")
-  userOverridesSet    UserPermissionOverride[] @relation("OverrideSetBy")
-  userOverrides       UserPermissionOverride[] @relation("OverrideTarget")
-  grantsIssued        SchoolFeatureGrant[]     @relation("GrantedByUser")
-  auditLogsActed      AuditLog[]               @relation("AuditActor")
-  feedingRecorded     FeedingPayment[]         @relation("FeedingRecordedBy")
-  transportRecorded   TransportPayment[]       @relation("TransportRecordedBy")
-  paymentsRecorded    Payment[]                @relation("PaymentRecordedBy")
-  expensesRecorded    Expense[]                @relation("ExpenseRecordedBy")
+  school            School                   @relation(fields: [schoolId], references: [id])
+  roles             UserRole[]
+  refreshTokens     RefreshToken[]
+  staffProfile      StaffProfile?
+  roleOverridesSet  RolePermissionOverride[] @relation("OverrideSetBy")
+  userOverridesSet  UserPermissionOverride[] @relation("OverrideSetBy")
+  userOverrides     UserPermissionOverride[] @relation("OverrideTarget")
+  grantsIssued      SchoolFeatureGrant[]     @relation("GrantedByUser")
+  auditLogsActed    AuditLog[]               @relation("AuditActor")
+  feedingRecorded   FeedingPayment[]         @relation("FeedingRecordedBy")
+  transportRecorded TransportPayment[]       @relation("TransportRecordedBy")
+  paymentsRecorded  Payment[]                @relation("PaymentRecordedBy")
+  expensesRecorded  Expense[]                @relation("ExpenseRecordedBy")
+  plannerEntries    PlannerEntry[]
 
   @@unique([schoolId, email])
   @@map("users")
@@ -475,21 +482,21 @@ model UserPermissionOverride {
 // ============================================================
 
 model AcademicYear {
-  id            String    @id @default(uuid())
-  schoolId      String
-  name          String
-  startDate     DateTime?
-  endDate       DateTime?
-  isActive      Boolean  @default(false)
-  allowOverlap  Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String    @id @default(uuid())
+  schoolId     String
+  name         String
+  startDate    DateTime?
+  endDate      DateTime?
+  isActive     Boolean   @default(false)
+  allowOverlap Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  school          School                @relation(fields: [schoolId], references: [id])
-  terms           Term[]
-  calendarEvents  SchoolCalendarEvent[]
+  school             School                   @relation(fields: [schoolId], references: [id])
+  terms              Term[]
+  calendarEvents     SchoolCalendarEvent[]
   studentAssignments StudentClassAssignment[]
-  timetableConfigs TimetableConfig[]
+  timetableConfigs   TimetableConfig[]
 
   @@unique([schoolId, name])
   @@map("academic_years")
@@ -502,20 +509,20 @@ model Term {
   name           String
   startDate      DateTime?
   endDate        DateTime?
-  isActive       Boolean  @default(false)
+  isActive       Boolean   @default(false)
   sequence       Int
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  school          School          @relation(fields: [schoolId], references: [id])
-  academicYear    AcademicYear    @relation(fields: [academicYearId], references: [id])
+  school           School            @relation(fields: [schoolId], references: [id])
+  academicYear     AcademicYear      @relation(fields: [academicYearId], references: [id])
   timetableConfigs TimetableConfig[]
-  assessments     Assessment[]
-  feeStructures   FeeStructure[]
-  invoices        Invoice[]
-  reportCards     ReportCard[]
-  expenses        Expense[]
-  expenseBudgets  ExpenseBudget[]
+  assessments      Assessment[]
+  feeStructures    FeeStructure[]
+  invoices         Invoice[]
+  reportCards      ReportCard[]
+  expenses         Expense[]
+  expenseBudgets   ExpenseBudget[]
 
   @@unique([academicYearId, sequence])
   @@index([schoolId])
@@ -560,7 +567,7 @@ model GradeLevel {
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
 
-  school        School        @relation(fields: [schoolId], references: [id])
+  school        School              @relation(fields: [schoolId], references: [id])
   classes       Class[]
   feeStructures FeeStructure[]
   feedingRates  FeedingClassRate[]
@@ -578,13 +585,14 @@ model Class {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  school             School                   @relation(fields: [schoolId], references: [id])
-  gradeLevel         GradeLevel               @relation(fields: [gradeLevelId], references: [id])
+  school             School                    @relation(fields: [schoolId], references: [id])
+  gradeLevel         GradeLevel                @relation(fields: [gradeLevelId], references: [id])
   studentAssignments StudentClassAssignment[]
   classTeachers      TeacherClassAssignment[]
   timetableSlots     TimetableSlot[]
   attendanceRecords  StudentAttendanceRecord[]
   assessments        Assessment[]
+  plannerEntries     PlannerEntry[]
 
   @@unique([schoolId, name])
   @@map("classes")
@@ -595,27 +603,27 @@ model Class {
 // ============================================================
 
 model StaffProfile {
-  id              String    @id @default(uuid())
-  schoolId        String
-  userId          String    @unique
-  staffId         String
-  designation     String?
-  dateJoined      DateTime?
-  employmentType  String?
-  dateOfBirth     DateTime?
-  gender          String?
-  phone           String?
-  photoUrl        String?
+  id               String    @id @default(uuid())
+  schoolId         String
+  userId           String    @unique
+  staffId          String
+  designation      String?
+  dateJoined       DateTime?
+  employmentType   String?
+  dateOfBirth      DateTime?
+  gender           String?
+  phone            String?
+  photoUrl         String?
   emergencyContact Json?
-  customFields    Json?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  customFields     Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  school               School                   @relation(fields: [schoolId], references: [id])
-  user                 User                     @relation(fields: [userId], references: [id])
-  qualifications       StaffQualification[]
-  classAssignments     TeacherClassAssignment[]
-  subjectAssignments   TeacherSubjectAssignment[]
+  school             School                     @relation(fields: [schoolId], references: [id])
+  user               User                       @relation(fields: [userId], references: [id])
+  qualifications     StaffQualification[]
+  classAssignments   TeacherClassAssignment[]
+  subjectAssignments TeacherSubjectAssignment[]
 
   @@unique([schoolId, staffId])
   @@map("staff_profiles")
@@ -672,11 +680,12 @@ model Subject {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school             School                   @relation(fields: [schoolId], references: [id])
+  school             School                     @relation(fields: [schoolId], references: [id])
   gradeLevels        GradeLevelSubject[]
   subjectAssignments TeacherSubjectAssignment[]
   timetableSlots     TimetableSlot[]
   assessments        Assessment[]
+  plannerEntries     PlannerEntry[]
 
   @@unique([schoolId, name])
   @@map("subjects")
@@ -710,24 +719,51 @@ model CurriculumSubject {
   @@map("curriculum_subjects")
 }
 
+// Personal day/week planner — private to each staff user (any role). A free-form
+// to-do keyed to a date, optionally tagged with a class/subject the user teaches.
+// Owner-scoped by userId (NOT a review artifact — that's LessonNote).
+model PlannerEntry {
+  id        String        @id @default(uuid())
+  schoolId  String
+  userId    String
+  date      DateTime // the day it's planned for (date-only; stored at UTC midnight)
+  title     String
+  notes     String?
+  status    PlannerStatus @default(PLANNED)
+  position  Int           @default(0) // ordering within a day
+  classId   String?
+  subjectId String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  school  School   @relation(fields: [schoolId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+  class   Class?   @relation(fields: [classId], references: [id])
+  subject Subject? @relation(fields: [subjectId], references: [id])
+
+  @@index([userId, date])
+  @@index([schoolId])
+  @@map("planner_entries")
+}
+
 // ============================================================
 // GRADING
 // ============================================================
 
 model GradingScale {
-  id                   String         @id @default(uuid())
-  schoolId             String
-  scaleType            GradeScaleType
-  passmark             Decimal?
-  gpaMax               Decimal?
-  isActive             Boolean        @default(true)
+  id                     String         @id @default(uuid())
+  schoolId               String
+  scaleType              GradeScaleType
+  passmark               Decimal?
+  gpaMax                 Decimal?
+  isActive               Boolean        @default(true)
   // Grade levels this scale applies to. Empty = school-wide default/fallback
   // (e.g. Primary uses an A–F scale, JHS uses a 1–9 scale, simultaneously).
-  appliesToGradeLevelIds String[]     @default([])
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
+  appliesToGradeLevelIds String[]       @default([])
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
 
-  school School              @relation(fields: [schoolId], references: [id])
+  school School             @relation(fields: [schoolId], references: [id])
   bands  GradingScaleBand[]
 
   @@index([schoolId])
@@ -753,19 +789,19 @@ model GradingScaleBand {
 // ============================================================
 
 model TimetableConfig {
-  id                   String   @id @default(uuid())
-  schoolId             String
-  academicYearId       String
-  termId               String
-  periodsPerDay        Int
+  id                    String   @id @default(uuid())
+  schoolId              String
+  academicYearId        String
+  termId                String
+  periodsPerDay         Int
   periodDurationMinutes Int
-  schoolDays           String[]
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  schoolDays            String[]
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
-  school       School       @relation(fields: [schoolId], references: [id])
-  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
-  term         Term         @relation(fields: [termId], references: [id])
+  school       School           @relation(fields: [schoolId], references: [id])
+  academicYear AcademicYear     @relation(fields: [academicYearId], references: [id])
+  term         Term             @relation(fields: [termId], references: [id])
   breaks       TimetableBreak[]
   slots        TimetableSlot[]
 
@@ -786,7 +822,7 @@ model TimetableBreak {
 }
 
 model TimetableSlot {
-  id                String    @id @default(uuid())
+  id                String   @id @default(uuid())
   schoolId          String
   classId           String
   timetableConfigId String
@@ -794,7 +830,7 @@ model TimetableSlot {
   periodNumber      Int
   subjectId         String?
   teacherId         String?
-  slotType          SlotType  @default(LESSON)
+  slotType          SlotType @default(LESSON)
 
   class           Class           @relation(fields: [classId], references: [id])
   timetableConfig TimetableConfig @relation(fields: [timetableConfigId], references: [id])
@@ -810,17 +846,17 @@ model TimetableSlot {
 // ============================================================
 
 model AdmissionFieldConfig {
-  id           String   @id @default(uuid())
-  schoolId     String
-  fieldKey     String
-  label        String
-  fieldType    String
-  isRequired   Boolean  @default(false)
-  isHidden     Boolean  @default(false)
-  carryToProfile Boolean @default(true)
-  position     Int
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             String   @id @default(uuid())
+  schoolId       String
+  fieldKey       String
+  label          String
+  fieldType      String
+  isRequired     Boolean  @default(false)
+  isHidden       Boolean  @default(false)
+  carryToProfile Boolean  @default(true)
+  position       Int
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   school School @relation(fields: [schoolId], references: [id])
 
@@ -829,29 +865,29 @@ model AdmissionFieldConfig {
 }
 
 model AdmissionRecord {
-  id           String         @id @default(uuid())
-  schoolId     String
-  stage        AdmissionStage @default(LEAD)
-  formData     Json
-  notes        String?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id        String         @id @default(uuid())
+  schoolId  String
+  stage     AdmissionStage @default(LEAD)
+  formData  Json
+  notes     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
-  school      School             @relation(fields: [schoolId], references: [id])
-  followUps   AdmissionFollowUp[]
-  student     Student?
+  school    School              @relation(fields: [schoolId], references: [id])
+  followUps AdmissionFollowUp[]
+  student   Student?
 
   @@index([schoolId])
   @@map("admission_records")
 }
 
 model AdmissionFollowUp {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   admissionRecordId String
   note              String
   followUpDate      DateTime?
   createdBy         String
-  createdAt         DateTime @default(now())
+  createdAt         DateTime  @default(now())
 
   admissionRecord AdmissionRecord @relation(fields: [admissionRecordId], references: [id])
 
@@ -863,9 +899,9 @@ model AdmissionFollowUp {
 // ============================================================
 
 model Student {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   schoolId          String
-  admissionRecordId String?  @unique
+  admissionRecordId String?   @unique
   studentId         String
   firstName         String
   lastName          String
@@ -878,40 +914,40 @@ model Student {
   medicalNotes      String?
   emergencyContacts Json?
   customFields      Json?
-  enrolledAt        DateTime @default(now())
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  enrolledAt        DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  school              School                   @relation(fields: [schoolId], references: [id])
-  admissionRecord     AdmissionRecord?         @relation(fields: [admissionRecordId], references: [id])
-  studentCategory     StudentCategory?         @relation(fields: [studentCategoryId], references: [id])
-  portalCredential    StudentPortalCredential?
-  refreshTokens       StudentRefreshToken[]
-  guardians           GuardianRelationship[]
-  classAssignments    StudentClassAssignment[]
-  attendanceRecords   StudentAttendanceRecord[]
-  assessmentScores    AssessmentScore[]
-  invoices            Invoice[]
-  feedingEnrollments  FeedingEnrollment[]
-  feedingPayments     FeedingPayment[]
-  feedingDailyRecords FeedingDailyRecord[]
-  transportAssignment StudentTransportAssignment?
-  transportPayments   TransportPayment[]
+  school                School                      @relation(fields: [schoolId], references: [id])
+  admissionRecord       AdmissionRecord?            @relation(fields: [admissionRecordId], references: [id])
+  studentCategory       StudentCategory?            @relation(fields: [studentCategoryId], references: [id])
+  portalCredential      StudentPortalCredential?
+  refreshTokens         StudentRefreshToken[]
+  guardians             GuardianRelationship[]
+  classAssignments      StudentClassAssignment[]
+  attendanceRecords     StudentAttendanceRecord[]
+  assessmentScores      AssessmentScore[]
+  invoices              Invoice[]
+  feedingEnrollments    FeedingEnrollment[]
+  feedingPayments       FeedingPayment[]
+  feedingDailyRecords   FeedingDailyRecord[]
+  transportAssignment   StudentTransportAssignment?
+  transportPayments     TransportPayment[]
   transportDailyRecords TransportDailyRecord[]
-  reportCards         ReportCard[]
+  reportCards           ReportCard[]
 
   @@unique([schoolId, studentId])
   @@map("students")
 }
 
 model StudentPortalCredential {
-  id           String    @id @default(uuid())
-  studentId    String    @unique
+  id           String   @id @default(uuid())
+  studentId    String   @unique
   passwordHash String
-  tempPassword String?   // plain-text kept only while mustChange = true; cleared on first login
-  mustChange   Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  tempPassword String? // plain-text kept only while mustChange = true; cleared on first login
+  mustChange   Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   student Student @relation(fields: [studentId], references: [id])
 
@@ -954,15 +990,15 @@ model StudentClassAssignment {
 // ============================================================
 
 model StudentAttendanceRecord {
-  id          String           @id @default(uuid())
-  schoolId    String
-  studentId   String
-  classId     String
-  date        DateTime
-  status      AttendanceStatus
-  notes       String?
-  markedBy    String?
-  createdAt   DateTime         @default(now())
+  id        String           @id @default(uuid())
+  schoolId  String
+  studentId String
+  classId   String
+  date      DateTime
+  status    AttendanceStatus
+  notes     String?
+  markedBy  String?
+  createdAt DateTime         @default(now())
 
   school  School  @relation(fields: [schoolId], references: [id])
   student Student @relation(fields: [studentId], references: [id])
@@ -994,18 +1030,18 @@ model StaffAttendanceRecord {
 // ============================================================
 
 model Assessment {
-  id           String             @id @default(uuid())
-  schoolId     String
-  subjectId    String
-  classId      String?
-  termId       String
-  category     AssessmentCategory @default(CLASS_TEST)
-  title        String
-  totalScore   Decimal
-  weight       Decimal?
+  id             String             @id @default(uuid())
+  schoolId       String
+  subjectId      String
+  classId        String?
+  termId         String
+  category       AssessmentCategory @default(CLASS_TEST)
+  title          String
+  totalScore     Decimal
+  weight         Decimal?
   assessmentDate DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   school  School            @relation(fields: [schoolId], references: [id])
   subject Subject           @relation(fields: [subjectId], references: [id])
@@ -1071,17 +1107,17 @@ model FeeStructure {
 }
 
 model Invoice {
-  id          String   @id @default(uuid())
-  schoolId    String
-  studentId   String
-  termId      String
-  amount      Decimal
-  amountPaid  Decimal  @default(0)
-  issuedAt    DateTime @default(now())
-  dueDate     DateTime?
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String    @id @default(uuid())
+  schoolId   String
+  studentId  String
+  termId     String
+  amount     Decimal
+  amountPaid Decimal   @default(0)
+  issuedAt   DateTime  @default(now())
+  dueDate    DateTime?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   school   School    @relation(fields: [schoolId], references: [id])
   student  Student   @relation(fields: [studentId], references: [id])
@@ -1093,19 +1129,19 @@ model Invoice {
 }
 
 model Payment {
-  id           String   @id @default(uuid())
-  schoolId     String
-  invoiceId    String
-  amount       Decimal
-  paymentDate  DateTime
-  method       String?
-  reference    String?
-  recordedBy   String
-  createdAt    DateTime @default(now())
+  id          String   @id @default(uuid())
+  schoolId    String
+  invoiceId   String
+  amount      Decimal
+  paymentDate DateTime
+  method      String?
+  reference   String?
+  recordedBy  String
+  createdAt   DateTime @default(now())
 
-  school       School @relation(fields: [schoolId], references: [id])
-  invoice      Invoice @relation(fields: [invoiceId], references: [id])
-  recordedByUser User  @relation("PaymentRecordedBy", fields: [recordedBy], references: [id])
+  school         School  @relation(fields: [schoolId], references: [id])
+  invoice        Invoice @relation(fields: [invoiceId], references: [id])
+  recordedByUser User    @relation("PaymentRecordedBy", fields: [recordedBy], references: [id])
 
   @@index([schoolId])
   @@index([invoiceId])
@@ -1179,18 +1215,18 @@ model ExpenseBudget {
 // ============================================================
 
 model FeedingConfig {
-  id          String       @id @default(uuid())
-  schoolId    String
-  rateMode    RateModeType
-  flatRate    Decimal?
+  id            String       @id @default(uuid())
+  schoolId      String
+  rateMode      RateModeType
+  flatRate      Decimal?
   effectiveFrom DateTime
   // When true, feeding is optional: students can be exempted (FeedingEnrollment
   // isActive=false). When false (default) every class student participates.
-  optOutAllowed Boolean    @default(false)
-  createdAt   DateTime     @default(now())
+  optOutAllowed Boolean      @default(false)
+  createdAt     DateTime     @default(now())
 
-  school      School             @relation(fields: [schoolId], references: [id])
-  classRates  FeedingClassRate[]
+  school     School             @relation(fields: [schoolId], references: [id])
+  classRates FeedingClassRate[]
 
   @@index([schoolId])
   @@map("feeding_configs")
@@ -1225,18 +1261,18 @@ model FeedingEnrollment {
 }
 
 model FeedingPayment {
-  id           String   @id @default(uuid())
-  schoolId     String
-  studentId    String
-  amountPaid   Decimal
-  paymentDate  DateTime
-  daysCovered  Int
-  recordedBy   String
-  createdAt    DateTime @default(now())
+  id          String   @id @default(uuid())
+  schoolId    String
+  studentId   String
+  amountPaid  Decimal
+  paymentDate DateTime
+  daysCovered Int
+  recordedBy  String
+  createdAt   DateTime @default(now())
 
-  school         School @relation(fields: [schoolId], references: [id])
-  student        Student @relation(fields: [studentId], references: [id])
-  recordedByUser User    @relation("FeedingRecordedBy", fields: [recordedBy], references: [id])
+  school         School               @relation(fields: [schoolId], references: [id])
+  student        Student              @relation(fields: [studentId], references: [id])
+  recordedByUser User                 @relation("FeedingRecordedBy", fields: [recordedBy], references: [id])
   dailyRecords   FeedingDailyRecord[]
 
   @@index([schoolId])
@@ -1253,9 +1289,9 @@ model FeedingDailyRecord {
   feedingPaymentId String?
   createdAt        DateTime       @default(now())
 
-  school          School          @relation(fields: [schoolId], references: [id])
-  student         Student         @relation(fields: [studentId], references: [id])
-  feedingPayment  FeedingPayment? @relation(fields: [feedingPaymentId], references: [id])
+  school         School          @relation(fields: [schoolId], references: [id])
+  student        Student         @relation(fields: [studentId], references: [id])
+  feedingPayment FeedingPayment? @relation(fields: [feedingPaymentId], references: [id])
 
   @@unique([schoolId, studentId, recordDate])
   @@map("feeding_daily_records")
@@ -1266,35 +1302,35 @@ model FeedingDailyRecord {
 // ============================================================
 
 model Vehicle {
-  id           String   @id @default(uuid())
-  schoolId     String
-  plateNumber  String
-  model        String?
-  capacity     Int?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String   @id @default(uuid())
+  schoolId    String
+  plateNumber String
+  model       String?
+  capacity    Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  school  School           @relation(fields: [schoolId], references: [id])
-  routes  TransportRoute[]
+  school School           @relation(fields: [schoolId], references: [id])
+  routes TransportRoute[]
 
   @@unique([schoolId, plateNumber])
   @@map("vehicles")
 }
 
 model TransportRoute {
-  id          String   @id @default(uuid())
-  schoolId    String
-  vehicleId   String?
-  driverId    String?
-  name        String
-  dailyRate   Decimal
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  schoolId  String
+  vehicleId String?
+  driverId  String?
+  name      String
+  dailyRate Decimal
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  school       School                     @relation(fields: [schoolId], references: [id])
-  vehicle      Vehicle?                   @relation(fields: [vehicleId], references: [id])
-  driver       Driver?                    @relation(fields: [driverId], references: [id])
-  pickupPoints PickupPoint[]
+  school             School                       @relation(fields: [schoolId], references: [id])
+  vehicle            Vehicle?                     @relation(fields: [vehicleId], references: [id])
+  driver             Driver?                      @relation(fields: [driverId], references: [id])
+  pickupPoints       PickupPoint[]
   studentAssignments StudentTransportAssignment[]
 
   @@index([schoolId])
@@ -1318,11 +1354,11 @@ model Driver {
 }
 
 model PickupPoint {
-  id             String  @id @default(uuid())
+  id               String  @id @default(uuid())
   transportRouteId String
-  name           String
-  description    String?
-  sequence       Int
+  name             String
+  description      String?
+  sequence         Int
 
   transportRoute TransportRoute @relation(fields: [transportRouteId], references: [id])
 
@@ -1344,18 +1380,18 @@ model StudentTransportAssignment {
 }
 
 model TransportPayment {
-  id           String   @id @default(uuid())
-  schoolId     String
-  studentId    String
-  amountPaid   Decimal
-  paymentDate  DateTime
-  daysCovered  Int
-  recordedBy   String
-  createdAt    DateTime @default(now())
+  id          String   @id @default(uuid())
+  schoolId    String
+  studentId   String
+  amountPaid  Decimal
+  paymentDate DateTime
+  daysCovered Int
+  recordedBy  String
+  createdAt   DateTime @default(now())
 
-  school         School  @relation(fields: [schoolId], references: [id])
-  student        Student @relation(fields: [studentId], references: [id])
-  recordedByUser User    @relation("TransportRecordedBy", fields: [recordedBy], references: [id])
+  school         School                 @relation(fields: [schoolId], references: [id])
+  student        Student                @relation(fields: [studentId], references: [id])
+  recordedByUser User                   @relation("TransportRecordedBy", fields: [recordedBy], references: [id])
   dailyRecords   TransportDailyRecord[]
 
   @@index([schoolId])
@@ -1372,8 +1408,8 @@ model TransportDailyRecord {
   transportPaymentId String?
   createdAt          DateTime       @default(now())
 
-  school           School           @relation(fields: [schoolId], references: [id])
-  student          Student          @relation(fields: [studentId], references: [id])
+  school           School            @relation(fields: [schoolId], references: [id])
+  student          Student           @relation(fields: [studentId], references: [id])
   transportPayment TransportPayment? @relation(fields: [transportPaymentId], references: [id])
 
   @@unique([schoolId, studentId, recordDate])
@@ -1385,28 +1421,28 @@ model TransportDailyRecord {
 // ============================================================
 
 model ReportCardConfig {
-  id                    String   @id @default(uuid())
-  schoolId              String   @unique
-  showRawScore          Boolean  @default(true)
-  showGradeLabel        Boolean  @default(true)
-  showAttendanceSummary Boolean  @default(true)
-  showBehaviourScores   Boolean  @default(false)
-  showTeacherComments   Boolean  @default(true)
-  showPrincipalComments Boolean  @default(true)
-  showNextTermInfo      Boolean  @default(false)
-  showPosition          Boolean  @default(true)
+  id                    String           @id @default(uuid())
+  schoolId              String           @unique
+  showRawScore          Boolean          @default(true)
+  showGradeLabel        Boolean          @default(true)
+  showAttendanceSummary Boolean          @default(true)
+  showBehaviourScores   Boolean          @default(false)
+  showTeacherComments   Boolean          @default(true)
+  showPrincipalComments Boolean          @default(true)
+  showNextTermInfo      Boolean          @default(false)
+  showPosition          Boolean          @default(true)
   // Holistic-style extras (off by default; not every school uses them).
   reportCardLayout      ReportCardLayout @default(STANDARD)
-  showAssessmentScale   Boolean  @default(false)
-  showMetricsTable      Boolean  @default(false)
+  showAssessmentScale   Boolean          @default(false)
+  showMetricsTable      Boolean          @default(false)
   // Terminal-grade weighting: class score (SBA) vs end-of-term exam. GES
   // standards-based default is 50/50; schools may change it (e.g. 30/70).
-  sbaWeight             Decimal  @default(50)
-  examWeight            Decimal  @default(50)
+  sbaWeight             Decimal          @default(50)
+  examWeight            Decimal          @default(50)
   footerText            String?
-  updatedAt             DateTime @updatedAt
+  updatedAt             DateTime         @updatedAt
 
-  school         School                   @relation(fields: [schoolId], references: [id])
+  school         School                    @relation(fields: [schoolId], references: [id])
   customSections ReportCardCustomSection[]
 
   @@map("report_card_configs")
@@ -1431,11 +1467,11 @@ model HolisticProficiencyLevel {
 
 // School-configurable skill rows assessed on the proficiency scale.
 model HolisticSkill {
-  id         String @id @default(uuid())
+  id         String  @id @default(uuid())
   schoolId   String
   label      String
   groupLabel String?
-  sequence   Int    @default(0)
+  sequence   Int     @default(0)
 
   school School @relation(fields: [schoolId], references: [id])
 
@@ -1469,31 +1505,31 @@ model ReportCardCustomSection {
 }
 
 model ReportCard {
-  id          String    @id @default(uuid())
-  studentId   String
-  termId      String
-  pdfUrl      String?
-  publishedAt DateTime?
+  id                 String    @id @default(uuid())
+  studentId          String
+  termId             String
+  pdfUrl             String?
+  publishedAt        DateTime?
   // Computed snapshot at generation time: per-subject SBA/exam/total/grade.
-  data        Json?
-  aggregate   Decimal?
-  position    Int?
-  classSize   Int?
+  data               Json?
+  aggregate          Decimal?
+  position           Int?
+  classSize          Int?
   // When the snapshot was last (re)generated, and a signature of the scores it
   // was built from — used to flag a card as stale when scores change after it
   // was generated.
-  generatedAt DateTime?
-  sourceHash  String?
+  generatedAt        DateTime?
+  sourceHash         String?
   // Per-student Holistic Development ratings: { [skillId]: levelCode }.
-  holistic    Json?
+  holistic           Json?
   // GES "Attitudes, Interests & Conduct" section + remarks.
-  attitudes        String?
-  interests        String?
-  conduct          String?
-  teacherRemarks   String?
+  attitudes          String?
+  interests          String?
+  conduct            String?
+  teacherRemarks     String?
   headTeacherRemarks String?
-  promotedTo       String?
-  createdAt   DateTime  @default(now())
+  promotedTo         String?
+  createdAt          DateTime  @default(now())
 
   student Student @relation(fields: [studentId], references: [id])
   term    Term    @relation(fields: [termId], references: [id])
@@ -1507,14 +1543,14 @@ model ReportCard {
 // ============================================================
 
 model Notice {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   schoolId    String
   title       String
   body        String
   publishedAt DateTime?
   createdBy   String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   school School @relation(fields: [schoolId], references: [id])
 
@@ -1523,14 +1559,14 @@ model Notice {
 }
 
 model Announcement {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   schoolId    String
   title       String
   body        String
   publishedAt DateTime?
   createdBy   String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   school School @relation(fields: [schoolId], references: [id])
 
