@@ -4,6 +4,7 @@ import { Suspense, useState, useCallback, use } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { useTeacherScope } from '@/hooks/use-teacher-scope';
 import { ReportCardDocument, type ReportCardData, type SchoolHeader } from '@/components/report-cards/report-card-document';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -20,6 +21,7 @@ export default function ReportCardPreviewPage({ params }: { params: Promise<{ st
 function PreviewInner({ studentId }: { studentId: string }) {
   const router = useRouter();
   const termId = useSearchParams().get('termId') ?? '';
+  const scope = useTeacherScope();
 
   const fetchCard = useCallback(
     () => staffApi.get<ReportCardData>(`/school/report-cards/student/${studentId}?termId=${termId}`),
@@ -32,6 +34,11 @@ function PreviewInner({ studentId }: { studentId: string }) {
 
   const [downloading, setDownloading] = useState(false);
   const [editing, setEditing] = useState(false);
+
+  // Only the class teacher (or an unrestricted owner/admin) may edit a report
+  // card. Subject teachers can preview and print, but not edit — the API
+  // enforces the same rule.
+  const canEdit = !scope.restricted || (!!data?.classId && scope.isClassTeacherOf(data.classId));
 
   async function downloadPdf() {
     setDownloading(true);
@@ -77,13 +84,15 @@ function PreviewInner({ studentId }: { studentId: string }) {
           ← Back to report cards
         </button>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setEditing(v => !v)}
-            disabled={!data}
-            className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
-          >
-            {editing ? 'Close editor' : '✎ Edit details'}
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => setEditing(v => !v)}
+              disabled={!data}
+              className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+            >
+              {editing ? 'Close editor' : '✎ Edit details'}
+            </button>
+          )}
           <button
             onClick={() => window.print()}
             disabled={!data}
@@ -109,7 +118,7 @@ function PreviewInner({ studentId }: { studentId: string }) {
         </div>
       )}
 
-      {!loading && data && editing && (
+      {!loading && data && editing && canEdit && (
         <ReportCardEditor
           data={data}
           studentId={studentId}

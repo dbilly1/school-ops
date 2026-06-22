@@ -1,12 +1,18 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { Prisma, AssessmentCategory } from '@prisma/client';
+import { Prisma, AssessmentCategory, StaffRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GradingService } from '../school-setup/grading/grading.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { TeacherScopeService } from '../staff/teacher-scope.service';
 import { isExamCategory } from '../assessments/assessment-category.util';
 import { DEFAULT_LEVELS, DEFAULT_SKILLS } from '../school-setup/report-card-config/report-card-config.service';
 import { CancelReportCardsDto, GenerateReportCardsDto, PublishReportCardsDto, UpdateReportCardDto } from './dto/report-card.dto';
+
+// Report cards are owned by the class teacher: only the teacher who class-teaches
+// the class (or an unrestricted Owner/Admin/Headmaster) may generate, edit,
+// publish or cancel them. Subject teachers are blocked.
+type Caller = { id: string; roles: StaffRole[] };
 
 // Per-subject computed terminal result.
 type SubjectResult = {
@@ -31,7 +37,24 @@ export class ReportCardsService {
     private prisma: PrismaService,
     private grading: GradingService,
     private notifications: NotificationsService,
+    private teacherScope: TeacherScopeService,
   ) {}
+
+  // Resolve the class a student sits in for a term's academic year, so a
+  // student-scoped mutation (edit) can be authorized against the class teacher.
+  private async assertClassTeacherForStudent(
+    caller: Caller,
+    studentId: string,
+    academicYearId: string,
+  ): Promise<void> {
+    if (!this.teacherScope.isRestricted(caller.roles)) return;
+    const assignment = await this.prisma.studentClassAssignment.findFirst({
+      where: { studentId, academicYearId },
+      select: { classId: true },
+    });
+    if (!assignment) throw new ForbiddenException('You are not the class teacher of this student');
+    await this.teacherScope.assertClassTeacher(caller.id, caller.roles, assignment.classId);
+  }
 
   // ── Computation ───────────────────────────────────────────
 
@@ -229,7 +252,9 @@ export class ReportCardsService {
 
   // ── Generate (compile + persist snapshot for a whole class) ──
 
-  async generate(schoolId: string, dto: GenerateReportCardsDto) {
+  async generate(schoolId: string, dto: GenerateReportCardsDto, caller: Caller) {
+    await this.teacherScope.assertClassTeacher(caller.id, caller.roles, dto.classId);
+
     const term = await this.prisma.term.findFirst({
       where: { id: dto.termId, schoolId },
       include: { academicYear: { select: { id: true, name: true } } },
@@ -436,6 +461,7 @@ export class ReportCardsService {
     return {
       student: { id: student.id, studentId: student.studentId, firstName: student.firstName, lastName: student.lastName },
       term: { id: term.id, name: term.name, academicYear: term.academicYear },
+      classId: assignment?.classId ?? null,
       className: assignment?.class.name ?? null,
       classTeacherName,
       vacationDate: term.endDate ?? null,
@@ -467,9 +493,13 @@ export class ReportCardsService {
   }
 
   // Update the conduct / remarks / holistic ratings of a report card.
-  async updateReportCard(schoolId: string, studentId: string, termId: string, dto: UpdateReportCardDto) {
+  async updateReportCard(schoolId: string, studentId: string, termId: string, dto: UpdateReportCardDto, caller: Caller) {
     const student = await this.prisma.student.findFirst({ where: { id: studentId, schoolId } });
     if (!student) throw new NotFoundException('Student not found');
+
+    const term = await this.prisma.term.findFirst({ where: { id: termId, schoolId }, select: { academicYearId: true } });
+    if (!term) throw new NotFoundException('Term not found');
+    await this.assertClassTeacherForStudent(caller, studentId, term.academicYearId);
 
     const { holistic, ...rest } = dto;
     const data = {
@@ -484,7 +514,9 @@ export class ReportCardsService {
     });
   }
 
-  async publish(schoolId: string, dto: PublishReportCardsDto, actorId: string) {
+  async publish(schoolId: string, dto: PublishReportCardsDto, actorId: string, caller: Caller) {
+    await this.teacherScope.assertClassTeacher(caller.id, caller.roles, dto.classId);
+
     const term = await this.prisma.term.findFirst({ where: { id: dto.termId, schoolId } });
     if (!term) throw new NotFoundException('Term not found');
 
@@ -533,7 +565,9 @@ export class ReportCardsService {
   // Cancel a generation: discard the computed snapshot so the card returns to
   // NOT_GENERATED, while preserving any hand-entered remarks / conduct /
   // holistic ratings. Published cards are left untouched (unpublish first).
-  async cancelGenerate(schoolId: string, dto: CancelReportCardsDto) {
+  async cancelGenerate(schoolId: string, dto: CancelReportCardsDto, caller: Caller) {
+    await this.teacherScope.assertClassTeacher(caller.id, caller.roles, dto.classId);
+
     const term = await this.prisma.term.findFirst({ where: { id: dto.termId, schoolId } });
     if (!term) throw new NotFoundException('Term not found');
 

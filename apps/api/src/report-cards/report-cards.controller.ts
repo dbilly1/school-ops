@@ -22,7 +22,7 @@ export class ReportCardsController {
   @Post('generate')
   @RequirePermission('academics', 'CREATE', 'report_cards')
   generate(@CurrentUser() user: any, @Body() dto: GenerateReportCardsDto) {
-    return this.reportCardsService.generate(user.schoolId, dto);
+    return this.reportCardsService.generate(user.schoolId, dto, { id: user.id, roles: user.roles });
   }
 
   @Get('class/:classId')
@@ -65,13 +65,13 @@ export class ReportCardsController {
   @Post('publish')
   @RequirePermission('academics', 'EDIT', 'report_cards')
   publish(@CurrentUser() user: any, @Body() dto: PublishReportCardsDto) {
-    return this.reportCardsService.publish(user.schoolId, dto, user.id);
+    return this.reportCardsService.publish(user.schoolId, dto, user.id, { id: user.id, roles: user.roles });
   }
 
   @Post('cancel')
   @RequirePermission('academics', 'EDIT', 'report_cards')
   cancelGenerate(@CurrentUser() user: any, @Body() dto: CancelReportCardsDto) {
-    return this.reportCardsService.cancelGenerate(user.schoolId, dto);
+    return this.reportCardsService.cancelGenerate(user.schoolId, dto, { id: user.id, roles: user.roles });
   }
 
   @Patch('student/:studentId')
@@ -82,6 +82,6 @@ export class ReportCardsController {
     @Query('termId') termId: string,
     @Body() dto: UpdateReportCardDto,
   ) {
-    return this.reportCardsService.updateReportCard(user.schoolId, studentId, termId, dto);
+    return this.reportCardsService.updateReportCard(user.schoolId, studentId, termId, dto, { id: user.id, roles: user.roles });
   }
 }

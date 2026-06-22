@@ -117,6 +117,11 @@ export default function ReportCardsPage() {
   const activeTermId  = termId  || terms?.find((t: any) => t.isActive)?.id  || '';
   const activeClassId = classId || classes?.[0]?.id || '';
 
+  // Only the class teacher (or an unrestricted owner/admin) may generate, publish
+  // or discard. A subject teacher can still preview the cards for their classes,
+  // but the management actions are hidden — the API enforces the same rule.
+  const canManage = !scope.restricted || scope.isClassTeacherOf(activeClassId);
+
   const fetchCards = useCallback(
     () => activeClassId && activeTermId
       ? staffApi.get<ReportCard[]>(`/school/report-cards/class/${activeClassId}?termId=${activeTermId}`).catch(() => [])
@@ -223,15 +228,23 @@ export default function ReportCardsPage() {
             )}
           </div>
 
-          <button
-            onClick={generate}
-            disabled={generating}
-            className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
-          >
-            {generating ? 'Generating…' : generatedCount > 0 ? '↺ Regenerate' : 'Generate report cards'}
-          </button>
+          {!canManage && (
+            <span className="text-xs text-slate-400" title="Only the class teacher can generate or publish report cards.">
+              View only — managed by the class teacher
+            </span>
+          )}
 
-          {unpublishedCount > 0 && (
+          {canManage && (
+            <button
+              onClick={generate}
+              disabled={generating}
+              className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+            >
+              {generating ? 'Generating…' : generatedCount > 0 ? '↺ Regenerate' : 'Generate report cards'}
+            </button>
+          )}
+
+          {canManage && unpublishedCount > 0 && (
             <button
               onClick={discardDrafts}
               disabled={discarding}
@@ -241,7 +254,7 @@ export default function ReportCardsPage() {
             </button>
           )}
 
-          {unpublishedCount > 0 && (
+          {canManage && unpublishedCount > 0 && (
             <button
               onClick={publishAll}
               disabled={publishing}

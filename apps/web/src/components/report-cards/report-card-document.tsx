@@ -33,6 +33,7 @@ export type ReportCardData = {
     name: string;
     academicYear: { id: string; name: string };
   };
+  classId?: string | null;
   className: string | null;
   classTeacherName?: string | null;
   vacationDate?: string | null;
