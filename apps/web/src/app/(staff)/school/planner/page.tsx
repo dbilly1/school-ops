@@ -29,13 +29,14 @@ type Option = { id: string; name: string };
 
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-function dayKey(d: Date) { return localKey(d); }
-
 function addDays(d: Date, n: number) {
   const x = new Date(d);
   x.setDate(x.getDate() + n);
   return x;
 }
+
+// Monday-based weekday index (0 = Monday … 6 = Sunday).
+function weekIdx(d: Date) { return (d.getDay() + 6) % 7; }
 
 function prettyDay(key: string) {
   const d = new Date(`${key}T00:00:00`);
@@ -50,21 +51,23 @@ function shortDay(key: string) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function PlannerPage() {
-  const [view, setView]     = useState<'day' | 'week'>('week');
-  const [anchor, setAnchor] = useState<Date>(() => new Date());
-  const [alert, setAlert]   = useState<{ type: 'error' | 'success'; message: string } | null>(null);
-  const [editing, setEditing] = useState<PlannerEntry | 'new' | null>(null);
+  const [anchor, setAnchor]     = useState<Date>(() => new Date());
+  // Which weekday is featured on the left (defaults to today's weekday).
+  const [selectedIdx, setSelectedIdx] = useState<number>(() => weekIdx(new Date()));
+  const [alert, setAlert]       = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [editing, setEditing]   = useState<PlannerEntry | 'new' | null>(null);
   const [newDayKey, setNewDayKey] = useState<string>('');
 
-  // The visible day keys (1 for day view, Mon–Sun for week view).
+  // The 7 day keys (Mon–Sun) of the anchor's week.
   const dayKeys = useMemo(() => {
-    if (view === 'day') return [dayKey(anchor)];
     const monday = mondayOf(anchor);
-    return Array.from({ length: 7 }, (_, i) => dayKey(addDays(monday, i)));
-  }, [view, anchor]);
+    return Array.from({ length: 7 }, (_, i) => localKey(addDays(monday, i)));
+  }, [anchor]);
 
   const rangeStart = dayKeys[0];
-  const rangeEnd   = dayKeys[dayKeys.length - 1];
+  const rangeEnd   = dayKeys[6];
+  const selectedKey = dayKeys[selectedIdx];
+  const todayKey = localKey(new Date());
 
   const fetchEntries = useCallback(
     () => staffApi.get<PlannerEntry[]>(`/school/planner?start=${rangeStart}&end=${rangeEnd}`).catch(() => []),
@@ -87,8 +90,6 @@ export default function PlannerPage() {
     }
     return map;
   }, [entries, dayKeys]);
-
-  const todayKey = dayKey(new Date());
 
   // ── Mutations ──
   async function toggle(entry: PlannerEntry) {
@@ -121,14 +122,12 @@ export default function PlannerPage() {
     }
   }
 
-  // ── Navigation ──
-  function shift(dir: -1 | 1) {
-    setAnchor(a => addDays(a, dir * (view === 'day' ? 1 : 7)));
+  function goToday() {
+    setAnchor(new Date());
+    setSelectedIdx(weekIdx(new Date()));
   }
 
-  const rangeLabel = view === 'day'
-    ? prettyDay(rangeStart)
-    : `${shortDay(rangeStart)} – ${shortDay(rangeEnd)}`;
+  const weekLabel = `${shortDay(rangeStart)} – ${shortDay(rangeEnd)}`;
 
   return (
     <div>
@@ -138,55 +137,52 @@ export default function PlannerPage() {
           <h2 className="text-lg font-bold text-slate-900">Planner</h2>
           <p className="text-sm text-slate-500 mt-0.5">Plan your day and week and tick things off. Private to you.</p>
         </div>
-
-        {/* View toggle */}
-        <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
-          {(['day', 'week'] as const).map(v => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`px-3.5 py-1.5 text-sm font-medium rounded-md transition capitalize ${
-                view === v ? 'text-white' : 'text-slate-600 hover:bg-slate-50'
-              }`}
-              style={view === v ? { backgroundColor: 'var(--accent)' } : {}}
-            >
-              {v}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <button onClick={() => setAnchor(a => addDays(a, -7))} className="w-8 h-8 grid place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition" aria-label="Previous week">‹</button>
+          <button onClick={() => setAnchor(a => addDays(a, 7))} className="w-8 h-8 grid place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition" aria-label="Next week">›</button>
+          <button onClick={goToday} className="px-3 h-8 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition">Today</button>
+          <span className="ml-1 text-sm font-medium text-slate-700">{weekLabel}</span>
         </div>
-      </div>
-
-      {/* Date nav */}
-      <div className="flex items-center gap-2 mb-4">
-        <button onClick={() => shift(-1)} className="w-8 h-8 grid place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition" aria-label="Previous">‹</button>
-        <button onClick={() => shift(1)} className="w-8 h-8 grid place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition" aria-label="Next">›</button>
-        <button onClick={() => setAnchor(new Date())} className="px-3 h-8 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition">Today</button>
-        <span className="ml-1 text-sm font-medium text-slate-700">{rangeLabel}</span>
       </div>
 
       {alert && <div className="mb-4"><Alert type={alert.type} message={alert.message} /></div>}
 
-      {/* Grid */}
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-3">
-          {dayKeys.map(k => <div key={k} className="h-40 rounded-xl bg-slate-100 animate-pulse" />)}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,7fr)] gap-4">
+          <div className="h-[420px] rounded-2xl bg-slate-100 animate-pulse" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            {dayKeys.map(k => <div key={k} className="h-32 rounded-xl bg-slate-100 animate-pulse" />)}
+          </div>
         </div>
       ) : (
-        <div className={view === 'day' ? 'max-w-2xl' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3'}>
-          {dayKeys.map(key => (
-            <DayColumn
-              key={key}
-              dayKey={key}
-              isToday={key === todayKey}
-              compact={view === 'week'}
-              entries={byDay.get(key) ?? []}
-              onToggle={toggle}
-              onQuickAdd={quickAdd}
-              onEdit={e => setEditing(e)}
-              onAddDetailed={() => { setNewDayKey(key); setEditing('new'); }}
-              onDelete={remove}
-            />
-          ))}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,7fr)] gap-4">
+          {/* Featured (selected) day — 30% */}
+          <FeaturedDay
+            dayKey={selectedKey}
+            isToday={selectedKey === todayKey}
+            entries={byDay.get(selectedKey) ?? []}
+            onToggle={toggle}
+            onQuickAdd={quickAdd}
+            onEdit={e => setEditing(e)}
+            onAddDetailed={() => { setNewDayKey(selectedKey); setEditing('new'); }}
+            onDelete={remove}
+          />
+
+          {/* The week — 70% */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 content-start">
+            {dayKeys.map((key, i) => (
+              <WeekDayCard
+                key={key}
+                dayKey={key}
+                isToday={key === todayKey}
+                isSelected={i === selectedIdx}
+                entries={byDay.get(key) ?? []}
+                onSelect={() => setSelectedIdx(i)}
+                onToggle={toggle}
+                onQuickAdd={quickAdd}
+              />
+            ))}
+          </div>
         </div>
       )}
 
@@ -205,20 +201,88 @@ export default function PlannerPage() {
   );
 }
 
-// ── Day column ──────────────────────────────────────────────────────────────
+// ── Featured day (left, prominent) ────────────────────────────────────────────
 
-function DayColumn({
-  dayKey: key, isToday, compact, entries, onToggle, onQuickAdd, onEdit, onAddDetailed, onDelete,
+function FeaturedDay({
+  dayKey: key, isToday, entries, onToggle, onQuickAdd, onEdit, onAddDetailed, onDelete,
 }: {
   dayKey: string;
   isToday: boolean;
-  compact: boolean;
   entries: PlannerEntry[];
   onToggle: (e: PlannerEntry) => void;
   onQuickAdd: (key: string, title: string) => void;
   onEdit: (e: PlannerEntry) => void;
   onAddDetailed: () => void;
   onDelete: (e: PlannerEntry) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const doneCount = entries.filter(e => e.status === 'DONE').length;
+
+  function submitQuick() {
+    if (!draft.trim()) return;
+    onQuickAdd(key, draft);
+    setDraft('');
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border-2 shadow-sm flex flex-col self-start lg:sticky lg:top-4"
+      style={{ borderColor: isToday ? 'var(--accent)' : 'rgb(226 232 240)' }}>
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          {isToday && (
+            <span className="text-[10px] font-bold uppercase tracking-wide text-white px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--accent)' }}>Today</span>
+          )}
+          <p className="text-base font-bold text-slate-900">{prettyDay(key)}</p>
+        </div>
+        <p className="text-xs text-slate-400 mt-1">
+          {entries.length === 0 ? 'Nothing planned yet' : `${doneCount} of ${entries.length} done`}
+        </p>
+      </div>
+
+      {/* Entries */}
+      <div className="flex-1 p-3 space-y-1 min-h-[180px] max-h-[60vh] overflow-y-auto scrollbar-slim">
+        {entries.map(e => (
+          <EntryRow key={e.id} entry={e} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} />
+        ))}
+        {entries.length === 0 && (
+          <p className="text-sm text-slate-300 px-2 py-6 text-center">Add your first task for this day.</p>
+        )}
+      </div>
+
+      {/* Quick add */}
+      <div className="px-3 pb-3 pt-1 flex items-center gap-1.5">
+        <input
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') submitQuick(); }}
+          placeholder="Add a task…"
+          className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-slate-300"
+        />
+        <button
+          onClick={onAddDetailed}
+          title="Add with details"
+          className="w-9 h-9 grid place-items-center rounded-lg text-slate-400 hover:bg-slate-100 transition shrink-0"
+        >
+          ⋯
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Week day card (right, selectable) ─────────────────────────────────────────
+
+function WeekDayCard({
+  dayKey: key, isToday, isSelected, entries, onSelect, onToggle, onQuickAdd,
+}: {
+  dayKey: string;
+  isToday: boolean;
+  isSelected: boolean;
+  entries: PlannerEntry[];
+  onSelect: () => void;
+  onToggle: (e: PlannerEntry) => void;
+  onQuickAdd: (key: string, title: string) => void;
 }) {
   const [draft, setDraft] = useState('');
   const d = new Date(`${key}T00:00:00`);
@@ -231,53 +295,61 @@ function DayColumn({
   }
 
   return (
-    <div className={`bg-white rounded-xl border ${isToday ? 'border-[color:var(--accent)]' : 'border-slate-100'} shadow-sm flex flex-col`}>
-      {/* Day header */}
+    <div
+      onClick={onSelect}
+      className={`bg-white rounded-xl border shadow-sm flex flex-col cursor-pointer transition min-h-[128px] ${
+        isSelected ? 'ring-2 ring-[color:var(--accent)] border-transparent' : 'border-slate-100 hover:border-slate-200'
+      }`}
+    >
       <div className="px-3 py-2.5 border-b border-slate-50 flex items-center justify-between">
         <div>
-          <p className={`text-xs font-semibold ${isToday ? 'text-[color:var(--accent)]' : 'text-slate-500'}`}>
-            {compact ? DOW[(d.getDay() + 6) % 7] : prettyDay(key)}
-          </p>
-          {compact && <p className="text-[11px] text-slate-400">{shortDay(key)}</p>}
+          <p className={`text-xs font-semibold ${isToday ? 'text-[color:var(--accent)]' : 'text-slate-500'}`}>{DOW[weekIdx(d)]}</p>
+          <p className="text-[11px] text-slate-400">{shortDay(key)}</p>
         </div>
-        {entries.length > 0 && (
-          <span className="text-[11px] text-slate-400">{doneCount}/{entries.length}</span>
-        )}
+        {entries.length > 0 && <span className="text-[11px] text-slate-400">{doneCount}/{entries.length}</span>}
       </div>
 
-      {/* Entries */}
-      <div className="flex-1 p-2 space-y-1.5 min-h-[60px]">
-        {entries.map(e => (
-          <EntryRow key={e.id} entry={e} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} />
+      <div className="flex-1 p-2 space-y-1">
+        {entries.slice(0, 5).map(e => (
+          <MiniRow key={e.id} entry={e} onToggle={onToggle} />
         ))}
-        {entries.length === 0 && (
-          <p className="text-xs text-slate-300 px-1 py-2">Nothing planned.</p>
+        {entries.length > 5 && (
+          <p className="text-[11px] text-slate-400 px-1.5">+{entries.length - 5} more</p>
         )}
+        {entries.length === 0 && <p className="text-xs text-slate-300 px-1.5 py-1">Nothing planned.</p>}
       </div>
 
-      {/* Quick add */}
-      <div className="px-2 pb-2 flex items-center gap-1">
+      <div className="px-2 pb-2" onClick={e => e.stopPropagation()}>
         <input
           value={draft}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') submitQuick(); }}
-          placeholder="Add a task…"
-          className="flex-1 px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-slate-300"
+          placeholder="Add…"
+          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-slate-300"
         />
-        <button
-          onClick={onAddDetailed}
-          title="Add with details"
-          className="w-7 h-7 grid place-items-center rounded-lg text-slate-400 hover:bg-slate-100 transition shrink-0"
-        >
-          ⋯
-        </button>
       </div>
     </div>
   );
 }
 
-// ── Entry row ─────────────────────────────────────────────────────────────────
+// ── Rows ───────────────────────────────────────────────────────────────────────
 
+function Checkbox({ done, onClick }: { done: boolean; onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`mt-0.5 w-4 h-4 shrink-0 rounded border grid place-items-center transition ${
+        done ? 'border-transparent text-white' : 'border-slate-300 hover:border-slate-400'
+      }`}
+      style={done ? { backgroundColor: 'var(--accent)' } : {}}
+      aria-label={done ? 'Mark not done' : 'Mark done'}
+    >
+      {done && <span className="text-[10px] leading-none">✓</span>}
+    </button>
+  );
+}
+
+// Full row — featured panel (toggle, click to edit, delete on hover).
 function EntryRow({ entry, onToggle, onEdit, onDelete }: {
   entry: PlannerEntry;
   onToggle: (e: PlannerEntry) => void;
@@ -287,17 +359,7 @@ function EntryRow({ entry, onToggle, onEdit, onDelete }: {
   const done = entry.status === 'DONE';
   return (
     <div className="group flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 transition">
-      <button
-        onClick={() => onToggle(entry)}
-        className={`mt-0.5 w-4 h-4 shrink-0 rounded border grid place-items-center transition ${
-          done ? 'border-transparent text-white' : 'border-slate-300 hover:border-slate-400'
-        }`}
-        style={done ? { backgroundColor: 'var(--accent)' } : {}}
-        aria-label={done ? 'Mark not done' : 'Mark done'}
-      >
-        {done && <span className="text-[10px] leading-none">✓</span>}
-      </button>
-
+      <Checkbox done={done} onClick={() => onToggle(entry)} />
       <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onEdit(entry)}>
         <p className={`text-sm leading-snug ${done ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{entry.title}</p>
         {(entry.class || entry.subject) && (
@@ -308,7 +370,6 @@ function EntryRow({ entry, onToggle, onEdit, onDelete }: {
         )}
         {entry.notes && <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{entry.notes}</p>}
       </div>
-
       <button
         onClick={() => onDelete(entry)}
         className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition shrink-0 text-xs"
@@ -316,6 +377,18 @@ function EntryRow({ entry, onToggle, onEdit, onDelete }: {
       >
         ✕
       </button>
+    </div>
+  );
+}
+
+// Compact row — week cards (toggle only; clicking the row bubbles up to select
+// the day, where it can be edited in the featured panel).
+function MiniRow({ entry, onToggle }: { entry: PlannerEntry; onToggle: (e: PlannerEntry) => void }) {
+  const done = entry.status === 'DONE';
+  return (
+    <div className="flex items-start gap-1.5 px-1.5 py-1 rounded-md">
+      <Checkbox done={done} onClick={e => { e.stopPropagation(); onToggle(entry); }} />
+      <p className={`text-xs leading-snug min-w-0 truncate ${done ? 'text-slate-400 line-through' : 'text-slate-600'}`}>{entry.title}</p>
     </div>
   );
 }
