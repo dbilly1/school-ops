@@ -11,6 +11,7 @@ const SUB_PAGES = [
   { label: 'Grade Book',   href: '/school/academics/grade-book'   },
   { label: 'Report Cards', href: '/school/academics/report-cards' },
   { label: 'Lesson Notes', href: '/school/academics/lesson-notes' },
+  { label: 'Curriculum',   href: '/school/academics/curriculum' },
 ];
 
 export default function AcademicsLayout({ children }: { children: React.ReactNode }) {

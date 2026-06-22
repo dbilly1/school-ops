@@ -278,6 +278,7 @@ model School {
   expenseBudgets            ExpenseBudget[]
   plannerEntries            PlannerEntry[]
   lessonNotes               LessonNote[]
+  curriculumLinks           SchoolCurriculumLink[]
 
   @@map("schools")
 }
@@ -732,6 +733,49 @@ model CurriculumSubject {
 
   @@unique([levelType, name])
   @@map("curriculum_subjects")
+}
+
+// Platform-level shared curriculum library (super-admin owned, NOT tenant-scoped
+// — like CurriculumSubject). The official GES curriculum PDFs, uploaded once and
+// referenced by every school. The file lives in Supabase Storage; `fileKey` is
+// its path within the bucket. Tagged by level band + subject name so schools can
+// filter to what's relevant.
+model CurriculumResource {
+  id          String             @id @default(uuid())
+  levelType   EducationLevelType
+  subjectName String
+  title       String
+  description String?
+  fileKey     String // path within the storage bucket
+  fileName    String
+  fileSize    Int
+  mimeType    String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([levelType])
+  @@map("curriculum_resources")
+}
+
+// Per-school curriculum links — a school's own supplementary materials, stored
+// as pasted URLs (zero storage). Managed by Owner/Admin/Headmaster, visible to
+// teachers.
+model SchoolCurriculumLink {
+  id          String              @id @default(uuid())
+  schoolId    String
+  levelType   EducationLevelType?
+  subjectName String?
+  title       String
+  url         String
+  description String?
+  createdBy   String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@map("school_curriculum_links")
 }
 
 // Personal day/week planner — private to each staff user (any role). A free-form

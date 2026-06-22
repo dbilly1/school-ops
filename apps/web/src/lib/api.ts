@@ -106,8 +106,11 @@ async function request<T>(
 ): Promise<T> {
   const { accessToken } = getTokens(scope);
 
+  // For multipart uploads (FormData body) let the browser set the Content-Type
+  // (with the multipart boundary) — forcing application/json would corrupt it.
+  const isForm = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(isForm ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string>),
   };
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
@@ -143,6 +146,7 @@ function makeClient(scope: AuthScope) {
     patch:  <T>(path: string, body?: unknown)  => request<T>(scope, path, { method: 'PATCH',  body: JSON.stringify(body) }),
     put:    <T>(path: string, body?: unknown)  => request<T>(scope, path, { method: 'PUT',    body: JSON.stringify(body) }),
     delete: <T>(path: string)                  => request<T>(scope, path, { method: 'DELETE' }),
+    upload: <T>(path: string, form: FormData)  => request<T>(scope, path, { method: 'POST',   body: form }),
   };
 }
 

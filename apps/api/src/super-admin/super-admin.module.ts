@@ -13,6 +13,8 @@ import { PlatformAnalyticsService } from './analytics/platform-analytics.service
 import { PlatformAnalyticsController } from './analytics/platform-analytics.controller';
 import { CurriculumSubjectsService } from './curriculum/curriculum-subjects.service';
 import { CurriculumSubjectsController } from './curriculum/curriculum-subjects.controller';
+import { CurriculumResourcesService } from './curriculum/curriculum-resources.service';
+import { CurriculumResourcesController } from './curriculum/curriculum-resources.controller';
 
 @Module({
   imports: [
@@ -33,6 +35,7 @@ import { CurriculumSubjectsController } from './curriculum/curriculum-subjects.c
     SuperAdminSchoolsService,
     PlatformAnalyticsService,
     CurriculumSubjectsService,
+    CurriculumResourcesService,
   ],
   controllers: [
     SuperAdminAuthController,
@@ -40,6 +43,7 @@ import { CurriculumSubjectsController } from './curriculum/curriculum-subjects.c
     SuperAdminSchoolsController,
     PlatformAnalyticsController,
     CurriculumSubjectsController,
+    CurriculumResourcesController,
   ],
   exports: [PackagesService],
 })

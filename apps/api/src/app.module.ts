@@ -32,6 +32,8 @@ import { AuditViewerModule } from './audit-viewer/audit-viewer.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { PlannerModule } from './planner/planner.module';
 import { LessonNotesModule } from './lesson-notes/lesson-notes.module';
+import { StorageModule } from './storage/storage.module';
+import { CurriculumModule } from './curriculum/curriculum.module';
 import { MailModule } from './mail/mail.module';
 
 @Module({
@@ -74,6 +76,8 @@ import { MailModule } from './mail/mail.module';
     DashboardModule,
     PlannerModule,
     LessonNotesModule,
+    StorageModule,
+    CurriculumModule,
   ],
 })
 export class AppModule {}
