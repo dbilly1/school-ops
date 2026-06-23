@@ -22,8 +22,8 @@ export class CurriculumService {
     });
     const types = levels.map((l) => l.levelType!).filter(Boolean);
     return this.prisma.curriculumResource.findMany({
-      where: types.length ? { levelType: { in: types } } : {},
-      orderBy: [{ levelType: 'asc' }, { subjectName: 'asc' }, { title: 'asc' }],
+      where: types.length ? { levelTypes: { hasSome: types } } : {},
+      orderBy: [{ subjectName: 'asc' }, { title: 'asc' }],
     });
   }
 

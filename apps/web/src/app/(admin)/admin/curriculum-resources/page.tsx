@@ -6,7 +6,7 @@ import { useApi } from '@/hooks/use-api';
 
 type Resource = {
   id: string;
-  levelType: string;
+  levelTypes: string[];
   subjectName: string;
   title: string;
   description: string | null;
@@ -35,18 +35,32 @@ export default function CurriculumResourcesPage() {
   const { data, loading, refetch } = useApi(fetchAll);
 
   const fileRef = useRef<HTMLInputElement>(null);
-  const [form, setForm] = useState({ levelType: 'LOWER_PRIMARY', subjectName: '', title: '', description: '' });
+  const [form, setForm] = useState<{ levelTypes: string[]; subjectName: string; title: string; description: string }>(
+    { levelTypes: ['LOWER_PRIMARY'], subjectName: '', title: '', description: '' },
+  );
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [alert, setAlert]   = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
+  function toggleLevel(value: string) {
+    setForm(f => ({
+      ...f,
+      levelTypes: f.levelTypes.includes(value)
+        ? f.levelTypes.filter(v => v !== value)
+        : [...f.levelTypes, value],
+    }));
+  }
+
   async function upload() {
+    if (form.levelTypes.length === 0) { setAlert({ type: 'error', message: 'Select at least one level.' }); return; }
     if (!form.subjectName.trim() || !form.title.trim()) { setAlert({ type: 'error', message: 'Subject and title are required.' }); return; }
     if (!file) { setAlert({ type: 'error', message: 'Choose a file to upload.' }); return; }
     setAlert(null); setSaving(true);
     try {
       const fd = new FormData();
-      fd.append('levelType', form.levelType);
+      // Keep level order canonical so cumulative docs group predictably.
+      const ordered = LEVELS.filter(l => form.levelTypes.includes(l.value)).map(l => l.value);
+      fd.append('levelTypes', ordered.join(','));
       fd.append('subjectName', form.subjectName.trim());
       fd.append('title', form.title.trim());
       if (form.description.trim()) fd.append('description', form.description.trim());
@@ -79,7 +93,7 @@ export default function CurriculumResourcesPage() {
     refetch();
   }
 
-  const grouped = LEVELS.map(l => ({ ...l, rows: (data ?? []).filter(r => r.levelType === l.value) }));
+  const grouped = LEVELS.map(l => ({ ...l, rows: (data ?? []).filter(r => r.levelTypes?.includes(l.value)) }));
 
   return (
     <div>
@@ -98,14 +112,26 @@ export default function CurriculumResourcesPage() {
 
       {/* Upload form */}
       <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 mb-6 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Level</label>
-            <select value={form.levelType} onChange={e => setForm(f => ({ ...f, levelType: e.target.value }))}
-              className="px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-              {LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-            </select>
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">
+            Levels <span className="text-slate-300">(pick all this document covers)</span>
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {LEVELS.map(l => {
+              const on = form.levelTypes.includes(l.value);
+              return (
+                <button key={l.value} type="button" onClick={() => toggleLevel(l.value)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition ${
+                    on ? 'border-transparent text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                  style={on ? { backgroundColor: 'var(--accent, #1a56db)' } : undefined}>
+                  {l.label}
+                </button>
+              );
+            })}
           </div>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
           <div className="w-48">
             <label className="block text-xs font-medium text-slate-500 mb-1">Subject</label>
             <input value={form.subjectName} onChange={e => setForm(f => ({ ...f, subjectName: e.target.value }))}

@@ -741,8 +741,10 @@ model CurriculumSubject {
 // its path within the bucket. Tagged by level band + subject name so schools can
 // filter to what's relevant.
 model CurriculumResource {
-  id          String             @id @default(uuid())
-  levelType   EducationLevelType
+  id          String               @id @default(uuid())
+  // A document can span several level bands (e.g. a cumulative B1–B6 curriculum),
+  // so it carries the full set of levels it applies to.
+  levelTypes  EducationLevelType[]
   subjectName String
   title       String
   description String?
@@ -750,10 +752,10 @@ model CurriculumResource {
   fileName    String
   fileSize    Int
   mimeType    String?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
 
-  @@index([levelType])
+  @@index([levelTypes], type: Gin)
   @@map("curriculum_resources")
 }
 

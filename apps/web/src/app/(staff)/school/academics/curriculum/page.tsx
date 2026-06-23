@@ -9,7 +9,7 @@ import { Alert } from '@/components/ui/settings-card';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Resource = {
-  id: string; levelType: string; subjectName: string; title: string;
+  id: string; levelTypes: string[]; subjectName: string; title: string;
   description: string | null; fileName: string; fileSize: number;
 };
 type Link = {
@@ -64,7 +64,7 @@ export default function CurriculumPage() {
 
   // Group resources by level → ordered.
   const resByLevel = LEVEL_ORDER
-    .map(lv => ({ level: lv, rows: (resources ?? []).filter(r => r.levelType === lv) }))
+    .map(lv => ({ level: lv, rows: (resources ?? []).filter(r => r.levelTypes?.includes(lv)) }))
     .filter(g => g.rows.length > 0);
 
   return (

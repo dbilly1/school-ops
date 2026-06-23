@@ -14,8 +14,8 @@ export class CurriculumResourcesService {
 
   findAll(levelType?: EducationLevelType) {
     return this.prisma.curriculumResource.findMany({
-      where: levelType ? { levelType } : {},
-      orderBy: [{ levelType: 'asc' }, { subjectName: 'asc' }, { title: 'asc' }],
+      where: levelType ? { levelTypes: { has: levelType } } : {},
+      orderBy: [{ subjectName: 'asc' }, { title: 'asc' }],
     });
   }
 
@@ -29,7 +29,7 @@ export class CurriculumResourcesService {
 
     return this.prisma.curriculumResource.create({
       data: {
-        levelType: dto.levelType,
+        levelTypes: dto.levelTypes,
         subjectName: dto.subjectName.trim(),
         title: dto.title.trim(),
         description: dto.description?.trim() || null,
