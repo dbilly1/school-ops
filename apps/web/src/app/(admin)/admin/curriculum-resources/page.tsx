@@ -16,7 +16,7 @@ type Resource = {
 };
 
 const LEVELS: { value: string; label: string }[] = [
-  { value: 'KG',            label: 'Kindergarten' },
+  { value: 'KG',            label: 'Preschool' },
   { value: 'LOWER_PRIMARY', label: 'Lower Primary (B1–B3)' },
   { value: 'UPPER_PRIMARY', label: 'Upper Primary (B4–B6)' },
   { value: 'JHS',           label: 'Junior High (B7–B9)' },

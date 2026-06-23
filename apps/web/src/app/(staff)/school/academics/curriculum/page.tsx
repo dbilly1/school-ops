@@ -18,7 +18,7 @@ type Link = {
 };
 
 const LEVEL_LABEL: Record<string, string> = {
-  KG: 'Kindergarten', LOWER_PRIMARY: 'Lower Primary (B1–B3)', UPPER_PRIMARY: 'Upper Primary (B4–B6)',
+  KG: 'Preschool', LOWER_PRIMARY: 'Lower Primary (B1–B3)', UPPER_PRIMARY: 'Upper Primary (B4–B6)',
   JHS: 'Junior High (B7–B9)', SHS: 'Senior High', OTHER: 'Other',
 };
 const LEVEL_ORDER = ['KG', 'LOWER_PRIMARY', 'UPPER_PRIMARY', 'JHS', 'SHS', 'OTHER'];

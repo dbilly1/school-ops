@@ -11,7 +11,7 @@ type GradeLevel   = { id: string; name: string; sequence: number; levelType?: st
 // the right grading scale apply automatically.
 const LEVEL_TYPES: { value: string; label: string }[] = [
   { value: '',              label: 'Untagged' },
-  { value: 'KG',            label: 'KG' },
+  { value: 'KG',            label: 'Preschool' },
   { value: 'LOWER_PRIMARY', label: 'Lower Primary' },
   { value: 'UPPER_PRIMARY', label: 'Upper Primary' },
   { value: 'JHS',           label: 'JHS' },
