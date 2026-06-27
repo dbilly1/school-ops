@@ -21,6 +21,7 @@ const NAV = [
       { label: 'School Calendar',        href: '/school/settings/calendar'      },
       { label: 'Grading Scale',          href: '/school/settings/grading'       },
       { label: 'Report Card Layout',     href: '/school/settings/report-card'   },
+      { label: 'Lesson Notes',           href: '/school/settings/lesson-notes'  },
     ],
   },
   {

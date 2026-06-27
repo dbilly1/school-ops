@@ -4,7 +4,6 @@ import { useState, useCallback, useMemo } from 'react';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { useTeacherScope } from '@/hooks/use-teacher-scope';
-import { useStaffAuth } from '@/contexts/staff-auth';
 import { Alert } from '@/components/ui/settings-card';
 import { RichTextEditor } from '@/components/rich-text/rich-text-editor';
 import { RichTextView } from '@/components/rich-text/rich-text-view';
@@ -108,8 +107,6 @@ function StatusChip({ status }: { status: Status }) {
 
 export default function LessonNotesPage() {
   const [tab, setTab] = useState<'mine' | 'review'>('mine');
-  const { isOwner, isAdmin, isHeadmaster } = useStaffAuth();
-  const canManagePolicy = isOwner || isAdmin || isHeadmaster;
 
   // Capability probe — the review summary endpoint is gated by
   // academics:lesson_note_review, so a 200 means the user is a reviewer.
@@ -124,7 +121,7 @@ export default function LessonNotesPage() {
     () => staffApi.get<{ policy: FormatPolicy }>('/school/lesson-notes/policy').then(r => r.policy).catch(() => 'STRUCTURED_ONLY' as FormatPolicy),
     [],
   );
-  const { data: policy, refetch: refetchPolicy } = useApi(fetchPolicy);
+  const { data: policy } = useApi(fetchPolicy);
 
   const fetchTerms = useCallback(
     () => staffApi.get<any>('/school/academic-years/active').then(y => (y?.terms ?? []) as Named[]).catch(() => []),
@@ -145,8 +142,6 @@ export default function LessonNotesPage() {
         <p className="text-sm text-slate-500 mt-0.5">Prepare your weekly lesson notes and submit them for review.</p>
       </div>
 
-      {canManagePolicy && <PolicyPanel policy={effectivePolicy} onSaved={refetchPolicy} />}
-
       {/* Tabs */}
       <div className="flex items-center gap-1 mb-5 border-b border-slate-200">
         <TabButton active={tab === 'mine'} onClick={() => setTab('mine')}>My notes</TabButton>
@@ -161,75 +156,6 @@ export default function LessonNotesPage() {
         <MyNotesTab terms={terms ?? []} classes={classes ?? []} subjects={subjects ?? []} policy={effectivePolicy} />
       ) : (
         <ReviewTab terms={terms ?? []} classes={classes ?? []} />
-      )}
-    </div>
-  );
-}
-
-// ── School policy panel (Owner / Admin / Headmaster) ──────────────────────────
-
-const POLICY_OPTIONS: { value: FormatPolicy; label: string; hint: string }[] = [
-  { value: 'STRUCTURED_ONLY', label: 'Structured template only', hint: 'Teachers fill the GES template fields. (Default)' },
-  { value: 'RICH_ALLOWED',    label: 'Allow rich text',          hint: 'Teachers choose the template or a free-form rich-text body per note.' },
-  { value: 'RICH_ONLY',       label: 'Rich text only',           hint: 'Every note is a free-form rich-text body.' },
-];
-
-function PolicyPanel({ policy, onSaved }: { policy: FormatPolicy; onSaved: () => void }) {
-  const [open, setOpen]   = useState(false);
-  const [value, setValue] = useState<FormatPolicy>(policy);
-  const [saving, setSaving] = useState(false);
-  const [alert, setAlert] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
-
-  const current = POLICY_OPTIONS.find(o => o.value === policy);
-
-  async function save() {
-    setSaving(true);
-    setAlert(null);
-    try {
-      await staffApi.patch('/school/lesson-notes/policy', { policy: value });
-      setAlert({ type: 'success', message: 'Lesson-note format setting saved.' });
-      onSaved();
-    } catch (err) {
-      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Could not save setting.' });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="bg-white rounded-xl border border-slate-100 shadow-sm mb-5">
-      <button
-        onClick={() => { setOpen(o => !o); setValue(policy); setAlert(null); }}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left"
-      >
-        <div>
-          <p className="text-sm font-semibold text-slate-800">Lesson-note format</p>
-          <p className="text-xs text-slate-400 mt-0.5">{current?.label}</p>
-        </div>
-        <span className="text-xs font-medium text-slate-400">{open ? 'Close' : 'Change'}</span>
-      </button>
-      {open && (
-        <div className="px-4 pb-4 border-t border-slate-100 pt-4 space-y-3">
-          {alert && <Alert type={alert.type} message={alert.message} />}
-          <div className="space-y-2">
-            {POLICY_OPTIONS.map(o => (
-              <label key={o.value} className="flex items-start gap-2.5 cursor-pointer">
-                <input type="radio" name="ln-policy" checked={value === o.value} onChange={() => setValue(o.value)} className="mt-0.5" />
-                <span>
-                  <span className="text-sm font-medium text-slate-700">{o.label}</span>
-                  <span className="block text-xs text-slate-400">{o.hint}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          <div className="flex justify-end">
-            <button onClick={save} disabled={saving || value === policy}
-              className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition disabled:opacity-50"
-              style={{ backgroundColor: 'var(--accent)' }}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </div>
       )}
     </div>
   );
