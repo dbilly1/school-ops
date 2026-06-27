@@ -1,11 +1,20 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { IsEnum } from 'class-validator';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { LessonNoteFormatPolicy, StaffRole } from '@prisma/client';
 import { LessonNotesService } from './lesson-notes.service';
 import { CreateLessonNoteDto, UpdateLessonNoteDto, ReviewLessonNoteDto } from './dto/lesson-note.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../permissions/permissions.guard';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
+import { StaffRolesGuard } from '../auth/guards/staff-roles.guard';
+import { RequireStaffRole } from '../auth/decorators/staff-roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+
+class SetLessonNotePolicyDto {
+  @IsEnum(LessonNoteFormatPolicy)
+  policy!: LessonNoteFormatPolicy;
+}
 
 // Two capability groups, both under the `academics` feature:
 //   • lesson_notes        — a teacher authoring/submitting their OWN notes
@@ -18,10 +27,27 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 // they take precedence.
 @ApiTags('Lesson Notes')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, StaffRolesGuard)
 @Controller('school/lesson-notes')
 export class LessonNotesController {
   constructor(private lessonNotes: LessonNotesService) {}
+
+  // ── Format policy (school-wide) ──
+  // Read by any author so the editor knows whether rich text is offered;
+  // written only by school leadership. Declared before the `:id` routes so the
+  // static `policy` segment takes precedence over the PATCH `:id` handler.
+  // Readable by any authenticated staff (non-sensitive school config) so the
+  // editor and the leadership panel always see the true current value.
+  @Get('policy')
+  async getPolicy(@CurrentUser() user: any) {
+    return { policy: await this.lessonNotes.getPolicy(user.schoolId) };
+  }
+
+  @Patch('policy')
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
+  setPolicy(@CurrentUser() user: any, @Body() dto: SetLessonNotePolicyDto) {
+    return this.lessonNotes.setPolicy(user.schoolId, dto.policy);
+  }
 
   // ── Review queue (reviewers) ──
   @Get('review/summary')

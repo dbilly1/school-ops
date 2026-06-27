@@ -4,14 +4,24 @@ import { useState, useCallback, useMemo } from 'react';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { useTeacherScope } from '@/hooks/use-teacher-scope';
+import { useStaffAuth } from '@/contexts/staff-auth';
 import { Alert } from '@/components/ui/settings-card';
+import { RichTextEditor } from '@/components/rich-text/rich-text-editor';
+import { RichTextView } from '@/components/rich-text/rich-text-view';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Status = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'RETURNED';
 
+// School-wide policy for how a note body may be authored.
+type FormatPolicy = 'STRUCTURED_ONLY' | 'RICH_ALLOWED' | 'RICH_ONLY';
+
 type Lesson = { day?: string; starter?: string; main?: string; plenary?: string };
+// A note's content is either the structured GES template or a free-form rich
+// body, discriminated by `format: 'RICH'`.
 type Content = {
+  format?: 'RICH';
+  html?: string;
   strand?: string;
   subStrand?: string;
   contentStandard?: string;
@@ -21,6 +31,10 @@ type Content = {
   references?: string;
   lessons?: Lesson[];
 };
+
+function isRich(c?: Content | null): boolean {
+  return !!c && c.format === 'RICH';
+}
 
 type Person = { id: string; firstName: string; lastName: string };
 type Named = { id: string; name: string };
@@ -58,6 +72,22 @@ function fmtDate(s: string | null) {
   return new Date(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// Plain-text length of an HTML string — used to tell whether a rich body is
+// actually empty (an editor can leave behind <br>/&nbsp; with no real text).
+function stripHtml(html: string): string {
+  if (typeof document === 'undefined') return html.replace(/<[^>]*>/g, '');
+  const el = document.createElement('div');
+  el.innerHTML = html;
+  return (el.textContent ?? '').replace(/ /g, ' ');
+}
+
+// Whether the structured template carries any author-entered text.
+function hasStructuredBody(c: Content, lessons: Lesson[]): boolean {
+  const headers = [c.strand, c.subStrand, c.contentStandard, c.indicators, c.objectives, c.resources, c.references];
+  if (headers.some(v => (v ?? '').trim())) return true;
+  return lessons.some(l => [l.day, l.starter, l.main, l.plenary].some(v => (v ?? '').trim()));
+}
+
 const STATUS_STYLES: Record<Status, { label: string; cls: string; dot: string }> = {
   DRAFT:     { label: 'Draft',     cls: 'text-slate-500',   dot: 'bg-slate-300'   },
   SUBMITTED: { label: 'Submitted', cls: 'text-blue-600',    dot: 'bg-blue-500'    },
@@ -78,6 +108,8 @@ function StatusChip({ status }: { status: Status }) {
 
 export default function LessonNotesPage() {
   const [tab, setTab] = useState<'mine' | 'review'>('mine');
+  const { isOwner, isAdmin, isHeadmaster } = useStaffAuth();
+  const canManagePolicy = isOwner || isAdmin || isHeadmaster;
 
   // Capability probe — the review summary endpoint is gated by
   // academics:lesson_note_review, so a 200 means the user is a reviewer.
@@ -87,6 +119,12 @@ export default function LessonNotesPage() {
   );
   const { data: summary } = useApi(fetchSummary);
   const isReviewer = summary !== null && summary !== undefined;
+
+  const fetchPolicy = useCallback(
+    () => staffApi.get<{ policy: FormatPolicy }>('/school/lesson-notes/policy').then(r => r.policy).catch(() => 'STRUCTURED_ONLY' as FormatPolicy),
+    [],
+  );
+  const { data: policy, refetch: refetchPolicy } = useApi(fetchPolicy);
 
   const fetchTerms = useCallback(
     () => staffApi.get<any>('/school/academic-years/active').then(y => (y?.terms ?? []) as Named[]).catch(() => []),
@@ -98,12 +136,16 @@ export default function LessonNotesPage() {
   const { data: classes }  = useApi(fetchClasses);
   const { data: subjects } = useApi(fetchSubjects);
 
+  const effectivePolicy: FormatPolicy = policy ?? 'STRUCTURED_ONLY';
+
   return (
     <div>
       <div className="mb-5">
         <h2 className="text-lg font-bold text-slate-900">Lesson Notes</h2>
         <p className="text-sm text-slate-500 mt-0.5">Prepare your weekly lesson notes and submit them for review.</p>
       </div>
+
+      {canManagePolicy && <PolicyPanel policy={effectivePolicy} onSaved={refetchPolicy} />}
 
       {/* Tabs */}
       <div className="flex items-center gap-1 mb-5 border-b border-slate-200">
@@ -116,9 +158,78 @@ export default function LessonNotesPage() {
       </div>
 
       {tab === 'mine' ? (
-        <MyNotesTab terms={terms ?? []} classes={classes ?? []} subjects={subjects ?? []} />
+        <MyNotesTab terms={terms ?? []} classes={classes ?? []} subjects={subjects ?? []} policy={effectivePolicy} />
       ) : (
         <ReviewTab terms={terms ?? []} classes={classes ?? []} />
+      )}
+    </div>
+  );
+}
+
+// ── School policy panel (Owner / Admin / Headmaster) ──────────────────────────
+
+const POLICY_OPTIONS: { value: FormatPolicy; label: string; hint: string }[] = [
+  { value: 'STRUCTURED_ONLY', label: 'Structured template only', hint: 'Teachers fill the GES template fields. (Default)' },
+  { value: 'RICH_ALLOWED',    label: 'Allow rich text',          hint: 'Teachers choose the template or a free-form rich-text body per note.' },
+  { value: 'RICH_ONLY',       label: 'Rich text only',           hint: 'Every note is a free-form rich-text body.' },
+];
+
+function PolicyPanel({ policy, onSaved }: { policy: FormatPolicy; onSaved: () => void }) {
+  const [open, setOpen]   = useState(false);
+  const [value, setValue] = useState<FormatPolicy>(policy);
+  const [saving, setSaving] = useState(false);
+  const [alert, setAlert] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+
+  const current = POLICY_OPTIONS.find(o => o.value === policy);
+
+  async function save() {
+    setSaving(true);
+    setAlert(null);
+    try {
+      await staffApi.patch('/school/lesson-notes/policy', { policy: value });
+      setAlert({ type: 'success', message: 'Lesson-note format setting saved.' });
+      onSaved();
+    } catch (err) {
+      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Could not save setting.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-100 shadow-sm mb-5">
+      <button
+        onClick={() => { setOpen(o => !o); setValue(policy); setAlert(null); }}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left"
+      >
+        <div>
+          <p className="text-sm font-semibold text-slate-800">Lesson-note format</p>
+          <p className="text-xs text-slate-400 mt-0.5">{current?.label}</p>
+        </div>
+        <span className="text-xs font-medium text-slate-400">{open ? 'Close' : 'Change'}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 border-t border-slate-100 pt-4 space-y-3">
+          {alert && <Alert type={alert.type} message={alert.message} />}
+          <div className="space-y-2">
+            {POLICY_OPTIONS.map(o => (
+              <label key={o.value} className="flex items-start gap-2.5 cursor-pointer">
+                <input type="radio" name="ln-policy" checked={value === o.value} onChange={() => setValue(o.value)} className="mt-0.5" />
+                <span>
+                  <span className="text-sm font-medium text-slate-700">{o.label}</span>
+                  <span className="block text-xs text-slate-400">{o.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="flex justify-end">
+            <button onClick={save} disabled={saving || value === policy}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition disabled:opacity-50"
+              style={{ backgroundColor: 'var(--accent)' }}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -139,7 +250,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 
 // ── My notes ────────────────────────────────────────────────────────────────
 
-function MyNotesTab({ terms, classes, subjects }: { terms: Named[]; classes: Named[]; subjects: Named[] }) {
+function MyNotesTab({ terms, classes, subjects, policy }: { terms: Named[]; classes: Named[]; subjects: Named[]; policy: FormatPolicy }) {
   const [termId, setTermId] = useState('');
   const [alert, setAlert]   = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const [editing, setEditing] = useState<Note | 'new' | null>(null);
@@ -183,6 +294,7 @@ function MyNotesTab({ terms, classes, subjects }: { terms: Named[]; classes: Nam
         terms={terms}
         classes={classes}
         subjects={subjects}
+        policy={policy}
         onClose={() => setEditing(null)}
         onSaved={() => { setEditing(null); refetch(); }}
         onError={m => setAlert({ type: 'error', message: m })}
@@ -259,12 +371,13 @@ function MyNotesTab({ terms, classes, subjects }: { terms: Named[]; classes: Nam
 
 const EMPTY_LESSON: Lesson = { day: '', starter: '', main: '', plenary: '' };
 
-function NoteEditor({ note, termId, terms, classes, subjects, onClose, onSaved, onError }: {
+function NoteEditor({ note, termId, terms, classes, subjects, policy, onClose, onSaved, onError }: {
   note: Note | null;
   termId: string;
   terms: Named[];
   classes: Named[];
   subjects: Named[];
+  policy: FormatPolicy;
   onClose: () => void;
   onSaved: () => void;
   onError: (m: string) => void;
@@ -280,6 +393,24 @@ function NoteEditor({ note, termId, terms, classes, subjects, onClose, onSaved, 
   const [c, setC] = useState<Content>(note?.content ?? {});
   const [lessons, setLessons] = useState<Lesson[]>(note?.content?.lessons?.length ? note.content.lessons : [{ ...EMPTY_LESSON }]);
   const [saving, setSaving] = useState(false);
+
+  // Authoring mode. Honour an existing note's shape; otherwise fall back to what
+  // the school policy dictates. The toggle is only offered under RICH_ALLOWED.
+  const initialMode: 'structured' | 'rich' =
+    note ? (isRich(note.content) ? 'rich' : 'structured')
+         : (policy === 'RICH_ONLY' ? 'rich' : 'structured');
+  const [mode, setMode] = useState<'structured' | 'rich'>(initialMode);
+  const [richHtml, setRichHtml] = useState<string>(isRich(note?.content) ? (note?.content.html ?? '') : '');
+  const canSwitchMode = !readOnly && policy === 'RICH_ALLOWED';
+
+  function switchMode(next: 'structured' | 'rich') {
+    if (next === mode) return;
+    // Switching discards the other mode's body; warn if there's content to lose.
+    const losingRich = mode === 'rich' && richHtml.trim() && stripHtml(richHtml).trim();
+    const losingStructured = mode === 'structured' && hasStructuredBody(c, lessons);
+    if ((losingRich || losingStructured) && !window.confirm('Switching format will clear what you have written here. Continue?')) return;
+    setMode(next);
+  }
 
   // Scope the class/subject pickers to what a restricted teacher actually teaches
   // (class-teacher latitude — backend enforces the same). When editing an existing
@@ -300,8 +431,10 @@ function NoteEditor({ note, termId, terms, classes, subjects, onClose, onSaved, 
 
   async function save(submitAfter: boolean) {
     if (!classId || !subjectId || !noteTermId) { onError('Class, subject and term are required.'); return; }
+    const content: Content = mode === 'rich'
+      ? { format: 'RICH', html: richHtml }
+      : { ...c, lessons };
     setSaving(true);
-    const content: Content = { ...c, lessons };
     try {
       let id = note?.id;
       if (note) {
@@ -370,46 +503,71 @@ function NoteEditor({ note, termId, terms, classes, subjects, onClose, onSaved, 
           <input value={title} onChange={e => setTitle(e.target.value)} disabled={readOnly} className={inputCls} placeholder="e.g. Week 5 — Fractions" />
         </div>
 
-        {/* GES header fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div><label className={labelCls}>Strand</label><input value={c.strand ?? ''} onChange={field('strand')} disabled={readOnly} className={inputCls} /></div>
-          <div><label className={labelCls}>Sub-strand</label><input value={c.subStrand ?? ''} onChange={field('subStrand')} disabled={readOnly} className={inputCls} /></div>
-        </div>
-        <div><label className={labelCls}>Content standard</label><textarea rows={2} value={c.contentStandard ?? ''} onChange={field('contentStandard')} disabled={readOnly} className={inputCls} /></div>
-        <div><label className={labelCls}>Indicators</label><textarea rows={2} value={c.indicators ?? ''} onChange={field('indicators')} disabled={readOnly} className={inputCls} /></div>
-        <div><label className={labelCls}>Learning objectives</label><textarea rows={2} value={c.objectives ?? ''} onChange={field('objectives')} disabled={readOnly} className={inputCls} /></div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div><label className={labelCls}>Teaching-learning resources / core competencies</label><textarea rows={2} value={c.resources ?? ''} onChange={field('resources')} disabled={readOnly} className={inputCls} /></div>
-          <div><label className={labelCls}>References</label><textarea rows={2} value={c.references ?? ''} onChange={field('references')} disabled={readOnly} className={inputCls} /></div>
-        </div>
+        {/* Format toggle — only when the school lets teachers choose per note */}
+        {canSwitchMode && (
+          <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+            <button type="button" onClick={() => switchMode('structured')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${mode === 'structured' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>
+              GES template
+            </button>
+            <button type="button" onClick={() => switchMode('rich')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${mode === 'rich' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>
+              Rich text
+            </button>
+          </div>
+        )}
 
-        {/* Lessons */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-sm font-semibold text-slate-700">Lessons</label>
-            {!readOnly && (
-              <button onClick={() => setLessons(ls => [...ls, { ...EMPTY_LESSON }])} className="text-xs font-medium text-[color:var(--accent)]">+ Add lesson</button>
-            )}
-          </div>
-          <div className="space-y-3">
-            {lessons.map((l, i) => (
-              <div key={i} className="border border-slate-200 rounded-xl p-3 bg-slate-50/50">
-                <div className="flex items-center justify-between mb-2">
-                  <input value={l.day ?? ''} onChange={e => setLesson(i, 'day', e.target.value)} disabled={readOnly}
-                    placeholder={`Lesson ${i + 1} — day/period`} className="text-sm font-medium bg-transparent outline-none text-slate-700 w-full disabled:text-slate-500" />
-                  {!readOnly && lessons.length > 1 && (
-                    <button onClick={() => setLessons(ls => ls.filter((_, idx) => idx !== i))} className="text-slate-300 hover:text-red-500 text-xs shrink-0">✕</button>
-                  )}
-                </div>
-                <div className="grid grid-cols-1 gap-2">
-                  <textarea rows={2} value={l.starter ?? ''} onChange={e => setLesson(i, 'starter', e.target.value)} disabled={readOnly} placeholder="Phase 1 — Starter / introduction" className={inputCls} />
-                  <textarea rows={3} value={l.main ?? ''} onChange={e => setLesson(i, 'main', e.target.value)} disabled={readOnly} placeholder="Phase 2 — New learning & assessment" className={inputCls} />
-                  <textarea rows={2} value={l.plenary ?? ''} onChange={e => setLesson(i, 'plenary', e.target.value)} disabled={readOnly} placeholder="Phase 3 — Plenary / reflection" className={inputCls} />
-                </div>
+        {mode === 'structured' ? (
+          <>
+            {/* GES header fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><label className={labelCls}>Strand</label><input value={c.strand ?? ''} onChange={field('strand')} disabled={readOnly} className={inputCls} /></div>
+              <div><label className={labelCls}>Sub-strand</label><input value={c.subStrand ?? ''} onChange={field('subStrand')} disabled={readOnly} className={inputCls} /></div>
+            </div>
+            <div><label className={labelCls}>Content standard</label><textarea rows={2} value={c.contentStandard ?? ''} onChange={field('contentStandard')} disabled={readOnly} className={inputCls} /></div>
+            <div><label className={labelCls}>Indicators</label><textarea rows={2} value={c.indicators ?? ''} onChange={field('indicators')} disabled={readOnly} className={inputCls} /></div>
+            <div><label className={labelCls}>Learning objectives</label><textarea rows={2} value={c.objectives ?? ''} onChange={field('objectives')} disabled={readOnly} className={inputCls} /></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><label className={labelCls}>Teaching-learning resources / core competencies</label><textarea rows={2} value={c.resources ?? ''} onChange={field('resources')} disabled={readOnly} className={inputCls} /></div>
+              <div><label className={labelCls}>References</label><textarea rows={2} value={c.references ?? ''} onChange={field('references')} disabled={readOnly} className={inputCls} /></div>
+            </div>
+
+            {/* Lessons */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-semibold text-slate-700">Lessons</label>
+                {!readOnly && (
+                  <button onClick={() => setLessons(ls => [...ls, { ...EMPTY_LESSON }])} className="text-xs font-medium text-[color:var(--accent)]">+ Add lesson</button>
+                )}
               </div>
-            ))}
+              <div className="space-y-3">
+                {lessons.map((l, i) => (
+                  <div key={i} className="border border-slate-200 rounded-xl p-3 bg-slate-50/50">
+                    <div className="flex items-center justify-between mb-2">
+                      <input value={l.day ?? ''} onChange={e => setLesson(i, 'day', e.target.value)} disabled={readOnly}
+                        placeholder={`Lesson ${i + 1} — day/period`} className="text-sm font-medium bg-transparent outline-none text-slate-700 w-full disabled:text-slate-500" />
+                      {!readOnly && lessons.length > 1 && (
+                        <button onClick={() => setLessons(ls => ls.filter((_, idx) => idx !== i))} className="text-slate-300 hover:text-red-500 text-xs shrink-0">✕</button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-2">
+                      <textarea rows={2} value={l.starter ?? ''} onChange={e => setLesson(i, 'starter', e.target.value)} disabled={readOnly} placeholder="Phase 1 — Starter / introduction" className={inputCls} />
+                      <textarea rows={3} value={l.main ?? ''} onChange={e => setLesson(i, 'main', e.target.value)} disabled={readOnly} placeholder="Phase 2 — New learning & assessment" className={inputCls} />
+                      <textarea rows={2} value={l.plenary ?? ''} onChange={e => setLesson(i, 'plenary', e.target.value)} disabled={readOnly} placeholder="Phase 3 — Plenary / reflection" className={inputCls} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div>
+            <label className={labelCls}>Lesson note</label>
+            {readOnly
+              ? <RichTextView html={richHtml} />
+              : <RichTextEditor initialHtml={richHtml} onChange={setRichHtml} />}
           </div>
-        </div>
+        )}
 
         {!readOnly && (
           <div className="flex justify-end gap-2 pt-2">
@@ -557,30 +715,36 @@ function ReviewDetail({ note, onClose, onReviewed, onError }: {
 
         {note.title && <p className="text-sm font-medium text-slate-700">{note.title}</p>}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Row label="Strand" value={c.strand} />
-          <Row label="Sub-strand" value={c.subStrand} />
-        </div>
-        <Row label="Content standard" value={c.contentStandard} />
-        <Row label="Indicators" value={c.indicators} />
-        <Row label="Objectives" value={c.objectives} />
-        <Row label="Resources / core competencies" value={c.resources} />
-        <Row label="References" value={c.references} />
-
-        {(c.lessons ?? []).length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Lessons</p>
-            <div className="space-y-3">
-              {(c.lessons ?? []).map((l, i) => (
-                <div key={i} className="border border-slate-200 rounded-xl p-3 bg-slate-50/50 space-y-1.5">
-                  <p className="text-sm font-medium text-slate-700">{l.day || `Lesson ${i + 1}`}</p>
-                  <Row label="Starter" value={l.starter} />
-                  <Row label="Main" value={l.main} />
-                  <Row label="Plenary" value={l.plenary} />
-                </div>
-              ))}
+        {isRich(c) ? (
+          <RichTextView html={c.html} />
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Row label="Strand" value={c.strand} />
+              <Row label="Sub-strand" value={c.subStrand} />
             </div>
-          </div>
+            <Row label="Content standard" value={c.contentStandard} />
+            <Row label="Indicators" value={c.indicators} />
+            <Row label="Objectives" value={c.objectives} />
+            <Row label="Resources / core competencies" value={c.resources} />
+            <Row label="References" value={c.references} />
+
+            {(c.lessons ?? []).length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Lessons</p>
+                <div className="space-y-3">
+                  {(c.lessons ?? []).map((l, i) => (
+                    <div key={i} className="border border-slate-200 rounded-xl p-3 bg-slate-50/50 space-y-1.5">
+                      <p className="text-sm font-medium text-slate-700">{l.day || `Lesson ${i + 1}`}</p>
+                      <Row label="Starter" value={l.starter} />
+                      <Row label="Main" value={l.main} />
+                      <Row label="Plenary" value={l.plenary} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Review actions — only for submitted notes */}

@@ -122,6 +122,16 @@ enum PlannerStatus {
 
 // Lesson-note review workflow. DRAFT = teacher editing; SUBMITTED = awaiting
 // review; APPROVED = vetted by a reviewer; RETURNED = sent back for revision.
+// School-wide policy for how teachers may author lesson-note bodies.
+//   STRUCTURED_ONLY — the GES template fields only (default; legacy behaviour).
+//   RICH_ALLOWED    — teacher chooses structured or free-form rich text per note.
+//   RICH_ONLY       — every note is free-form rich text.
+enum LessonNoteFormatPolicy {
+  STRUCTURED_ONLY
+  RICH_ALLOWED
+  RICH_ONLY
+}
+
 enum LessonNoteStatus {
   DRAFT
   SUBMITTED
@@ -227,6 +237,7 @@ model School {
   subscriptionState         SubscriptionState @default(TRIAL)
   onboardingComplete        Boolean           @default(false)
   adminCanManagePermissions Boolean           @default(true)
+  lessonNoteFormatPolicy    LessonNoteFormatPolicy @default(STRUCTURED_ONLY)
   createdAt                 DateTime          @default(now())
   updatedAt                 DateTime          @updatedAt
 

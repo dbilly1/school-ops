@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { Prisma, LessonNoteStatus, StaffRole } from '@prisma/client';
+import { Prisma, LessonNoteStatus, LessonNoteFormatPolicy, StaffRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TeacherScopeService } from '../staff/teacher-scope.service';
 import { CreateLessonNoteDto, UpdateLessonNoteDto, ReviewLessonNoteDto } from './dto/lesson-note.dto';
+import { prepareLessonNoteContent } from './lesson-note-content';
 
 // Lesson notes are a submit → review → approve/return workflow. Authoring is
 // scoped to the author (a teacher manages only their own); review endpoints are
@@ -60,6 +61,8 @@ export class LessonNotesService {
     // Class-teacher latitude: a restricted teacher may only author for a subject
     // they teach in that class (or, as class teacher, any subject of their class).
     await this.teacherScope.assertCanAuthorLessonNote(userId, roles, dto.subjectId, dto.classId);
+    const policy = await this.getPolicy(schoolId);
+    const content = prepareLessonNoteContent(dto.content, policy);
     try {
       return await this.prisma.lessonNote.create({
         data: {
@@ -70,7 +73,7 @@ export class LessonNotesService {
           termId: dto.termId,
           weekEnding: this.dayUtc(dto.weekEnding),
           title: dto.title?.trim() || null,
-          content: (dto.content ?? {}) as Prisma.InputJsonValue,
+          content,
           status: 'DRAFT',
         },
         include: this.listInclude,
@@ -94,7 +97,10 @@ export class LessonNotesService {
     const data: Prisma.LessonNoteUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title.trim() || null;
     if (dto.weekEnding !== undefined) data.weekEnding = this.dayUtc(dto.weekEnding);
-    if (dto.content !== undefined) data.content = dto.content as Prisma.InputJsonValue;
+    if (dto.content !== undefined) {
+      const policy = await this.getPolicy(schoolId);
+      data.content = prepareLessonNoteContent(dto.content, policy);
+    }
 
     return this.prisma.lessonNote.update({ where: { id }, data, include: this.listInclude });
   }
@@ -197,6 +203,26 @@ export class LessonNotesService {
     }
 
     return updated;
+  }
+
+  // ── School-wide format policy ─────────────────────────────────────────────
+
+  // The school's lesson-note authoring policy. Any author needs this to know
+  // whether the rich-text option is available; defaults to STRUCTURED_ONLY.
+  async getPolicy(schoolId: string): Promise<LessonNoteFormatPolicy> {
+    const school = await this.prisma.school.findUnique({
+      where: { id: schoolId },
+      select: { lessonNoteFormatPolicy: true },
+    });
+    return school?.lessonNoteFormatPolicy ?? LessonNoteFormatPolicy.STRUCTURED_ONLY;
+  }
+
+  async setPolicy(schoolId: string, policy: LessonNoteFormatPolicy) {
+    await this.prisma.school.update({
+      where: { id: schoolId },
+      data: { lessonNoteFormatPolicy: policy },
+    });
+    return { policy };
   }
 
   // Class / subject / term must all belong to the school.
