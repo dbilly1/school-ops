@@ -1,7 +1,8 @@
 import { Controller, Get, Patch, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { StudentsService } from './students.service';
-import { CreateStudentDto, UpdateStudentDto, AddGuardianDto, AssignClassDto, BulkAssignCategoryDto } from './dto/student.dto';
+import { CreateStudentDto, UpdateStudentDto, AddGuardianDto, AssignClassDto, BulkAssignCategoryDto, BulkStatusDto, BulkAssignClassDto, BulkStudentIdsDto } from './dto/student.dto';
+import { ImportStudentsDto } from './dto/import-student.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffRolesGuard } from '../auth/guards/staff-roles.guard';
 import { RequireStaffRole } from '../auth/decorators/staff-roles.decorator';
@@ -29,9 +30,10 @@ export class StudentsController {
     @Query('classId') classId?: string,
     @Query('academicYearId') academicYearId?: string,
     @Query('studentCategoryId') studentCategoryId?: string,
+    @Query('status') status?: string,
   ) {
     return this.studentsService.findAll(
-      user.schoolId, user.id, user.roles ?? [], classId, academicYearId, studentCategoryId,
+      user.schoolId, user.id, user.roles ?? [], classId, academicYearId, studentCategoryId, status,
     );
   }
 
@@ -39,6 +41,48 @@ export class StudentsController {
   @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
   bulkAssignCategory(@CurrentUser() user: any, @Body() dto: BulkAssignCategoryDto) {
     return this.studentsService.bulkAssignCategory(user.schoolId, dto);
+  }
+
+  // Dry-run: validate an uploaded roster and return per-row status. Writes nothing.
+  @Post('import/validate')
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
+  validateImport(@CurrentUser() user: any, @Body() dto: ImportStudentsDto) {
+    return this.studentsService.validateImport(user.schoolId, dto.rows);
+  }
+
+  // Create the rows the user kept after reviewing the dry-run preview.
+  @Post('import')
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
+  importStudents(@CurrentUser() user: any, @Body() dto: ImportStudentsDto) {
+    return this.studentsService.importStudents(user.schoolId, dto.rows);
+  }
+
+  // Archive / restore (soft delete) selected students.
+  @Post('bulk-status')
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
+  bulkSetStatus(@CurrentUser() user: any, @Body() dto: BulkStatusDto) {
+    return this.studentsService.bulkSetStatus(user.schoolId, dto.studentIds, dto.status);
+  }
+
+  // Assign selected students to a class for the active (or given) year.
+  @Post('bulk-assign-class')
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
+  bulkAssignClass(@CurrentUser() user: any, @Body() dto: BulkAssignClassDto) {
+    return this.studentsService.bulkAssignClass(user.schoolId, dto.studentIds, dto.classId, dto.academicYearId);
+  }
+
+  // Regenerate portal passwords for selected students (returns the new passwords).
+  @Post('bulk-reset-password')
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER, StaffRole.SCHOOL_ADMIN, StaffRole.HEADMASTER)
+  bulkResetPassword(@CurrentUser() user: any, @Body() dto: BulkStudentIdsDto) {
+    return this.studentsService.bulkResetPassword(user.schoolId, dto.studentIds);
+  }
+
+  // Permanently delete selected students that have no history. Owner only.
+  @Post('bulk-delete')
+  @RequireStaffRole(StaffRole.SCHOOL_OWNER)
+  bulkDelete(@CurrentUser() user: any, @Body() dto: BulkStudentIdsDto) {
+    return this.studentsService.bulkDelete(user.schoolId, dto.studentIds);
   }
 
   @Get(':id')

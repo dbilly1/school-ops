@@ -1008,6 +1008,13 @@ model AdmissionFollowUp {
 // STUDENTS
 // ============================================================
 
+// ACTIVE students appear in rosters, fee generation, attendance, etc.
+// ARCHIVED = withdrawn/left — hidden from active views but history is kept.
+enum StudentStatus {
+  ACTIVE
+  ARCHIVED
+}
+
 model Student {
   id                String    @id @default(uuid())
   schoolId          String
@@ -1024,6 +1031,8 @@ model Student {
   medicalNotes      String?
   emergencyContacts Json?
   customFields      Json?
+  status            StudentStatus @default(ACTIVE)
+  archivedAt        DateTime?
   enrolledAt        DateTime  @default(now())
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -1047,6 +1056,7 @@ model Student {
   reportCards           ReportCard[]
 
   @@unique([schoolId, studentId])
+  @@index([schoolId, status])
   @@map("students")
 }
 

@@ -1,11 +1,14 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { useTeacherScope } from '@/hooks/use-teacher-scope';
 import { Modal } from '@/components/ui/modal';
+import { ImportStudentsModal } from '@/components/students/import-students-modal';
+import { BulkActionsBar } from '@/components/students/bulk-actions-bar';
+import { useStaffAuth } from '@/contexts/staff-auth';
 import { cn } from '@/lib/cn';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -30,7 +33,11 @@ type StudentListItem = {
   classAssignments: ClassAssignment[];
   guardians: { name: string; phone: string | null }[];
   studentCategory: { id: string; name: string } | null;
+  status: 'ACTIVE' | 'ARCHIVED';
+  archivedAt: string | null;
 };
+
+type StatusFilter = 'active' | 'archived' | 'all';
 
 type Category = { id: string; name: string };
 
@@ -385,26 +392,27 @@ function AddStudentDialog({ open, onCreated, onClose, classes, classesLoading }:
 export default function StudentsPage() {
   const router = useRouter();
   const scope  = useTeacherScope();
+  const { isOwner } = useStaffAuth();
 
   const [search, setSearch]           = useState('');
   const [classFilter, setClassFilter] = useState('');
   const [gradeFilter, setGradeFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
   const [showAdd, setShowAdd]         = useState(false);
+  const [showImport, setShowImport]   = useState(false);
 
-  // Bulk fee-category assignment (owner/admin only)
+  // Bulk actions (owner/admin only)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkCategoryId, setBulkCategoryId] = useState('');
-  const [bulkSaving, setBulkSaving]   = useState(false);
-  const [bulkMsg, setBulkMsg]         = useState<string | null>(null);
 
   const fetchStudents = useCallback(() => {
     const params = new URLSearchParams();
     if (classFilter)    params.set('classId', classFilter);
     if (categoryFilter) params.set('studentCategoryId', categoryFilter);
+    if (statusFilter !== 'active') params.set('status', statusFilter);
     const qs = params.toString();
     return staffApi.get<StudentListItem[]>(`/school/students${qs ? `?${qs}` : ''}`);
-  }, [classFilter, categoryFilter]);
+  }, [classFilter, categoryFilter, statusFilter]);
   const fetchCategories = useCallback(() => staffApi.get<Category[]>('/school/student-categories'), []);
   const fetchGrades  = useCallback(() => staffApi.get<GradeLevel[]>('/school/grade-structure/grade-levels'), []);
   const fetchClasses = useCallback(async () => {
@@ -416,7 +424,7 @@ export default function StudentsPage() {
     return list;
   }, []);
 
-  const { data: students, loading, refetch }        = useApi(fetchStudents, `${classFilter}|${categoryFilter}`);
+  const { data: students, loading, refetch }        = useApi(fetchStudents, `${classFilter}|${categoryFilter}|${statusFilter}`);
   const { data: categories }                        = useApi(fetchCategories);
   const { data: grades }                            = useApi(fetchGrades);
   const { data: classes, loading: classesLoading }  = useApi(fetchClasses);
@@ -441,43 +449,23 @@ export default function StudentsPage() {
   const currentClass = (s: StudentListItem) => s.classAssignments[0]?.class;
 
   // ── Bulk selection ──────────────────────────────────────────────────────────
-  // Clear selection whenever the visible set changes via filters/search.
-  useEffect(() => { setSelectedIds(new Set()); setBulkMsg(null); }, [classFilter, categoryFilter, gradeFilter, search]);
-
+  // Selections that scroll out of the current filter/search simply stop counting:
+  // every consumer below works off `selectedStudents` (selection ∩ visible rows),
+  // so there's no need to eagerly clear the set when filters change.
   const visibleIds      = filtered.map(s => s.id);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+  const selectedStudents = filtered.filter(s => selectedIds.has(s.id));
 
   function toggleOne(id: string) {
-    setBulkMsg(null);
     setSelectedIds(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }
 
   function toggleAll() {
-    setBulkMsg(null);
     setSelectedIds(prev => (visibleIds.every(id => prev.has(id)) ? new Set() : new Set(visibleIds)));
-  }
-
-  async function bulkAssign() {
-    if (selectedIds.size === 0) return;
-    setBulkSaving(true); setBulkMsg(null);
-    try {
-      const res = await staffApi.post<{ updated: number }>('/school/students/bulk-category', {
-        studentIds: Array.from(selectedIds),
-        studentCategoryId: bulkCategoryId,  // '' clears the category
-      });
-      const catName = categories?.find(c => c.id === bulkCategoryId)?.name;
-      setBulkMsg(`${res.updated} student${res.updated !== 1 ? 's' : ''} ${bulkCategoryId ? `set to ${catName}` : 'category cleared'}.`);
-      setSelectedIds(new Set());
-      refetch();
-    } catch (err) {
-      setBulkMsg((err as ApiError).message ?? 'Failed to update students.');
-    } finally {
-      setBulkSaving(false);
-    }
   }
 
   return (
@@ -492,16 +480,27 @@ export default function StudentsPage() {
         </div>
         {/* Only owner/admin can add students */}
         {!scope.restricted && (
-          <button
-            onClick={() => setShowAdd(v => !v)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition"
-            style={{ backgroundColor: 'var(--accent)' }}
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Add student
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowImport(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 transition"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+              </svg>
+              Import
+            </button>
+            <button
+              onClick={() => setShowAdd(v => !v)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition"
+              style={{ backgroundColor: 'var(--accent)' }}
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Add student
+            </button>
+          </div>
         )}
       </div>
 
@@ -511,6 +510,12 @@ export default function StudentsPage() {
         onClose={() => setShowAdd(false)}
         classes={classes ?? null}
         classesLoading={classesLoading}
+      />
+
+      <ImportStudentsModal
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={() => refetch()}
       />
 
       {/* Filters */}
@@ -564,9 +569,23 @@ export default function StudentsPage() {
             <option value="none">No category</option>
           </select>
         )}
-        {(search || classFilter || gradeFilter || categoryFilter) && (
+        {/* Active / archived view — hidden for restricted teachers */}
+        {!scope.restricted && (
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
+            onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+            onBlur={e => e.currentTarget.style.boxShadow = ''}
+          >
+            <option value="active">Active</option>
+            <option value="archived">Archived</option>
+            <option value="all">All statuses</option>
+          </select>
+        )}
+        {(search || classFilter || gradeFilter || categoryFilter || statusFilter !== 'active') && (
           <button
-            onClick={() => { setSearch(''); setClassFilter(''); setGradeFilter(''); setCategoryFilter(''); }}
+            onClick={() => { setSearch(''); setClassFilter(''); setGradeFilter(''); setCategoryFilter(''); setStatusFilter('active'); }}
             className="text-sm text-slate-400 hover:text-slate-700 transition"
           >
             Clear filters
@@ -574,41 +593,17 @@ export default function StudentsPage() {
         )}
       </div>
 
-      {/* Bulk fee-category assignment bar */}
-      {selectable && selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border flex-wrap"
-          style={{ borderColor: 'var(--accent)', backgroundColor: 'var(--accent-tint, #f0fdf4)' }}>
-          <span className="text-sm font-medium text-slate-700">
-            {selectedIds.size} selected
-          </span>
-          <span className="text-slate-300">·</span>
-          <span className="text-sm text-slate-500">Set fee category:</span>
-          <select
-            value={bulkCategoryId}
-            onChange={e => setBulkCategoryId(e.target.value)}
-            className="px-3 py-1.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
-          >
-            <option value="">— Remove category —</option>
-            {categories?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <button
-            onClick={bulkAssign}
-            disabled={bulkSaving}
-            className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white transition disabled:opacity-50"
-            style={{ backgroundColor: 'var(--accent)' }}
-          >
-            {bulkSaving ? 'Applying…' : `Apply to ${selectedIds.size}`}
-          </button>
-          <button
-            onClick={() => setSelectedIds(new Set())}
-            className="text-sm text-slate-400 hover:text-slate-700 transition ml-auto"
-          >
-            Clear selection
-          </button>
-        </div>
-      )}
-      {bulkMsg && (
-        <p className="mb-4 text-sm text-emerald-600">{bulkMsg}</p>
+      {/* Bulk actions bar */}
+      {selectable && selectedStudents.length > 0 && (
+        <BulkActionsBar
+          selected={selectedStudents}
+          categories={categories ?? null}
+          classes={classes ?? null}
+          statusFilter={statusFilter}
+          isOwner={isOwner}
+          onRefetch={refetch}
+          onClearSelection={() => setSelectedIds(new Set())}
+        />
       )}
 
       {/* Table */}
@@ -677,6 +672,11 @@ export default function StudentsPage() {
                       <span className="text-sm font-medium text-slate-800">
                         {student.lastName}, {student.firstName}
                       </span>
+                      {student.status === 'ARCHIVED' && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 uppercase tracking-wide">
+                          Archived
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3.5">

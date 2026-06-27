@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsDateString, IsBoolean, IsObject, IsNotEmpty, IsArray, ArrayNotEmpty } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsBoolean, IsObject, IsNotEmpty, IsArray, ArrayNotEmpty, IsEnum } from 'class-validator';
+import { StudentStatus } from '@prisma/client';
 
 export class CreateStudentDto {
   @IsString()
@@ -118,4 +119,26 @@ export class BulkAssignCategoryDto {
   @IsString()
   @IsOptional()
   studentCategoryId?: string;
+}
+
+export class BulkStudentIdsDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  studentIds!: string[];
+}
+
+export class BulkStatusDto extends BulkStudentIdsDto {
+  @IsEnum(StudentStatus)
+  status!: StudentStatus;
+}
+
+export class BulkAssignClassDto extends BulkStudentIdsDto {
+  @IsString()
+  @IsNotEmpty()
+  classId!: string;
+
+  @IsString()
+  @IsOptional()
+  academicYearId?: string;
 }
