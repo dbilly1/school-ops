@@ -30,4 +30,11 @@ export class UpdateSchoolProfileDto {
   @IsString()
   @IsOptional()
   primaryColor?: string;
+
+  // Free-text payment instructions printed on fee invoices (bank details,
+  // mobile money, deadlines). Empty string clears it.
+  @IsString()
+  @IsOptional()
+  @MaxLength(4000)
+  feePaymentGuidelines?: string;
 }

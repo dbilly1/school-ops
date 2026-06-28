@@ -238,6 +238,7 @@ model School {
   onboardingComplete        Boolean           @default(false)
   adminCanManagePermissions Boolean           @default(true)
   lessonNoteFormatPolicy    LessonNoteFormatPolicy @default(STRUCTURED_ONLY)
+  feePaymentGuidelines      String? // Free-text payment instructions (bank/MoMo/deadlines) printed on fee invoices.
   createdAt                 DateTime          @default(now())
   updatedAt                 DateTime          @updatedAt
 

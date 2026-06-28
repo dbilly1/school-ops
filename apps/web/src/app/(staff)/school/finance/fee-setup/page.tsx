@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useMemo, Fragment } from 'react';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { InvoicePreviewModal, type InvoicePreviewData } from '@/components/finance/invoice-preview-modal';
+import { PaymentGuidelinesCard } from '@/components/finance/payment-guidelines-card';
 import { useStaffAuth } from '@/contexts/staff-auth';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -36,8 +37,9 @@ const FREQ_LABEL: Record<BillingFrequency, string> = {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function FeeSetupPage() {
-  const { user } = useStaffAuth();
+  const { user, isOwner, isAdmin } = useStaffAuth();
   const issuedBy = user ? `${user.firstName} ${user.lastName}`.trim() : null;
+  const canEditGuidelines = isOwner || isAdmin;
 
   const fetchGrades = useCallback(() => staffApi.get<GradeLevel[]>('/school/grade-structure/grade-levels'), []);
   const fetchCats   = useCallback(() => staffApi.get<StudentCategory[]>('/school/student-categories'), []);
@@ -412,6 +414,8 @@ export default function FeeSetupPage() {
           )}
         </>
       )}
+
+      {canEditGuidelines && <PaymentGuidelinesCard />}
 
       <InvoicePreviewModal data={previewData} onClose={() => setPreviewGradeId(null)} />
     </div>

@@ -39,6 +39,7 @@ type SchoolProfile = {
   email?: string | null;
   logoUrl: string | null;
   primaryColor: string | null;
+  feePaymentGuidelines?: string | null;
 };
 
 const ghs = (n: number) => `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -55,13 +56,10 @@ function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
-// Payment guideline placeholder — schools will provide these instructions later.
-const GUIDELINE_PLACEHOLDER =
-  'Payment instructions (bank details, mobile money, deadlines) will appear here once set up by the school.';
-
 function buildInvoiceHtml(d: InvoicePreviewData, school: SchoolProfile | null) {
   const accent = school?.primaryColor || '#065f46';
   const isPreview = d.preview !== false;
+  const guidelines = school?.feePaymentGuidelines?.trim() || '';
   const total = d.lines.reduce((sum, l) => sum + l.amount, 0);
   const dateStr = formatDate(d.date ?? new Date());
   const contactBits = [school?.address, school?.phone, school?.email]
@@ -119,7 +117,7 @@ function buildInvoiceHtml(d: InvoicePreviewData, school: SchoolProfile | null) {
   .note { font-size: 11px; color: #94a3b8; margin-top: 10px; }
   .guideline { margin-top: 28px; padding: 14px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
   .guideline h4 { margin: 0 0 5px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
-  .guideline p { margin: 0; font-size: 12px; color: #94a3b8; font-style: italic; }
+  .guideline p { margin: 0; font-size: 12px; color: #334155; white-space: pre-line; line-height: 1.5; }
   .footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #f1f5f9; font-size: 11px; color: #94a3b8; text-align: center; }
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .wrap { padding: 24px; } }
 </style>
@@ -155,10 +153,10 @@ function buildInvoiceHtml(d: InvoicePreviewData, school: SchoolProfile | null) {
     </table>
     ${isPreview ? '<p class="note">One-time and yearly items are billed only on the applicable invoice; every-term items are billed each term.</p>' : ''}
 
-    <div class="guideline">
+    ${guidelines ? `<div class="guideline">
       <h4>Payment Guidelines</h4>
-      <p>${escapeHtml(GUIDELINE_PLACEHOLDER)}</p>
-    </div>
+      <p>${escapeHtml(guidelines)}</p>
+    </div>` : ''}
 
     <div class="footer">${isPreview ? 'This is a preview generated from the current fee setup, not a finalised invoice.' : 'Computer-generated invoice.'}</div>
   </div>
@@ -290,11 +288,13 @@ export function InvoicePreviewModal({ data, onClose }: { data: InvoicePreviewDat
             </p>
           )}
 
-          {/* Payment guidelines — placeholder for now */}
-          <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
-            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Payment Guidelines</h4>
-            <p className="text-xs text-slate-400 italic">{GUIDELINE_PLACEHOLDER}</p>
-          </div>
+          {/* Payment guidelines — only shown when the school has set them */}
+          {school?.feePaymentGuidelines?.trim() && (
+            <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Payment Guidelines</h4>
+              <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed">{school.feePaymentGuidelines.trim()}</p>
+            </div>
+          )}
         </div>
       </div>
 
