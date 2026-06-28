@@ -350,21 +350,27 @@ export default function AssessmentsPage() {
   const [termFilter, setTermFilter]       = useState('');
   const [subjectFilter, setSubjectFilter] = useState('');
   const [classFilter, setClassFilter]     = useState('');
+  // Hold the list fetch until the active term has been resolved, so the page
+  // loads the active term in one shot rather than fetching all terms first and
+  // then narrowing.
+  const [ready, setReady] = useState(false);
 
   const fetchAssessments = useCallback(() => {
+    if (!ready) return Promise.resolve<Assessment[]>([]);
     const params = new URLSearchParams();
     if (termFilter)    params.set('termId',    termFilter);
     if (subjectFilter) params.set('subjectId', subjectFilter);
     if (classFilter)   params.set('classId',   classFilter);
     return staffApi.get<Assessment[]>(`/school/assessments?${params}`);
-  }, [termFilter, subjectFilter, classFilter]);
+  }, [ready, termFilter, subjectFilter, classFilter]);
 
   const fetchBatches = useCallback(() => {
+    if (!ready) return Promise.resolve<Batch[]>([]);
     const params = new URLSearchParams();
     if (termFilter)  params.set('termId',  termFilter);
     if (classFilter) params.set('classId', classFilter);
     return staffApi.get<Batch[]>(`/school/assessments/batches?${params}`);
-  }, [termFilter, classFilter]);
+  }, [ready, termFilter, classFilter]);
 
   const fetchSubjects = useCallback(() => staffApi.get<Subject[]>('/school/subjects'), []);
   const fetchClasses  = useCallback(() => staffApi.get<ClassRow[]>('/school/grade-structure/classes'), []);
@@ -374,24 +380,33 @@ export default function AssessmentsPage() {
     [],
   );
 
-  // Key on the filters so the list re-queries when any of them changes.
-  const { data: assessments, loading, refetch } = useApi(fetchAssessments, `${termFilter}|${subjectFilter}|${classFilter}`);
-  const { data: batches, refetch: refetchBatches } = useApi(fetchBatches, `b|${termFilter}|${classFilter}`);
+  // Key on the filters (plus `ready`) so the list re-queries when any changes —
+  // and once we flip ready, fires the first real fetch with the active term.
+  const { data: assessments, loading, refetch } = useApi(fetchAssessments, `${ready}|${termFilter}|${subjectFilter}|${classFilter}`);
+  const { data: batches, refetch: refetchBatches } = useApi(fetchBatches, `b|${ready}|${termFilter}|${classFilter}`);
   const { data: subjects } = useApi(fetchSubjects);
   const { data: classes }  = useApi(fetchClasses);
-  const { data: terms }    = useApi(fetchTerms);
+  const { data: terms, loading: termsLoading } = useApi(fetchTerms);
 
   const refetchAll = useCallback(() => { refetch(); refetchBatches(); }, [refetch, refetchBatches]);
 
-  // Default the term filter to the active term once terms load — but only once,
-  // so a later switch to "All terms" (or another term) isn't overridden.
+  // Default the term filter to the active term once terms have loaded — but only
+  // once, so a later switch to "All terms" (or another term) isn't overridden.
+  // Flipping `ready` here triggers the first list fetch already scoped to the
+  // active term (no all-terms fetch beforehand). Runs even when there are no
+  // terms, so the list still loads for a school without an active year.
   const termDefaultApplied = useRef(false);
   useEffect(() => {
-    if (termDefaultApplied.current || !terms?.length) return;
-    const active = (terms as Term[]).find(t => t.isActive);
+    if (termDefaultApplied.current || termsLoading) return;
+    const active = (terms as Term[] | null)?.find(t => t.isActive);
     if (active) setTermFilter(active.id);
     termDefaultApplied.current = true;
-  }, [terms]);
+    setReady(true);
+  }, [terms, termsLoading]);
+
+  // Keep the skeleton up until the active term is resolved, so the empty state
+  // never flashes before the first scoped fetch.
+  const showLoading = loading || !ready;
 
   // For restricted teachers: show subjects they may record for — subject-teacher
   // subjects plus every subject of their class-teacher classes.
@@ -450,7 +465,7 @@ export default function AssessmentsPage() {
       </div>
 
       {/* Summary */}
-      {!loading && visibleAssessments.length > 0 && (
+      {!showLoading && visibleAssessments.length > 0 && (
         <div className="grid grid-cols-3 gap-3 mb-5">
           <div className="bg-white rounded-xl border border-slate-100 px-4 py-3">
             <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Assessments</p>
@@ -491,7 +506,7 @@ export default function AssessmentsPage() {
       </div>
 
       {/* Loading */}
-      {loading && (
+      {showLoading && (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="px-4 py-3.5 border-b border-slate-50 last:border-0">
@@ -502,7 +517,7 @@ export default function AssessmentsPage() {
       )}
 
       {/* Empty state */}
-      {!loading && isEmpty && (
+      {!showLoading && isEmpty && (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-16 text-center">
           <p className="text-sm text-slate-400">No assessments yet.</p>
           <button
@@ -516,7 +531,7 @@ export default function AssessmentsPage() {
       )}
 
       {/* Grouped tables — one per term, active term first */}
-      {!loading && termGroups.map(group => (
+      {!showLoading && termGroups.map(group => (
         <div key={group.termId} className="mb-6">
           <div className="flex items-center gap-2 mb-2">
             <h3 className="text-sm font-bold text-slate-700">{group.termName}</h3>
