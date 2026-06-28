@@ -180,6 +180,7 @@ export class FinanceService {
           orderBy: { paymentDate: 'desc' },
           include: { recordedByUser: { select: { firstName: true, lastName: true } } },
         },
+        items: { orderBy: { sequence: 'asc' } },
       },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
@@ -202,6 +203,14 @@ export class FinanceService {
       status:  invoiceStatus(amount, amountPaid),
       gradeLevel:      assignment?.class.gradeLevel ?? null,
       studentCategory: invoice.student.studentCategory ?? null,
+      items: invoice.items.map((it) => ({
+        id: it.id,
+        name: it.name,
+        amount: Number(it.amount),
+        feeComponentId: it.feeComponentId,
+        isCarryForward: it.isCarryForward,
+        sequence: it.sequence,
+      })),
       payments: invoice.payments.map((p) => ({
         ...p,
         amount: Number(p.amount),
@@ -238,23 +247,91 @@ export class FinanceService {
     });
   }
 
-  // Auto-generate invoices for all students in a term from fee structures
+  // Chronological order key for a term: academic-year start (then term sequence)
+  // so "previous term" works across year boundaries. Falls back to the year's
+  // createdAt-less ordering via the term's own startDate when years lack dates.
+  // Also returns termId → academicYearId (for "first invoice this year" checks).
+  private async buildTermMaps(schoolId: string): Promise<{ order: Map<string, number>; termToYear: Map<string, string> }> {
+    const terms = await this.prisma.term.findMany({
+      where: { schoolId },
+      select: {
+        id: true, sequence: true, startDate: true, academicYearId: true,
+        academicYear: { select: { startDate: true, name: true } },
+      },
+    });
+    const sorted = terms.slice().sort((a, b) => {
+      const ay = a.academicYear.startDate?.getTime() ?? 0;
+      const by = b.academicYear.startDate?.getTime() ?? 0;
+      if (ay !== by) return ay - by;
+      const an = a.academicYear.name.localeCompare(b.academicYear.name, undefined, { numeric: true });
+      if (an !== 0) return an;
+      return a.sequence - b.sequence;
+    });
+    return {
+      order: new Map(sorted.map((t, i) => [t.id, i])),
+      termToYear: new Map(terms.map((t) => [t.id, t.academicYearId])),
+    };
+  }
+
+  // Auto-generate invoices for all students in a term, breaking each bill into
+  // its fee components plus a "Balance brought forward" line carrying the
+  // student's unpaid balance from their previous term.
   async generateTermInvoices(schoolId: string, termId: string) {
     const term = await this.prisma.term.findFirst({ where: { id: termId, schoolId } });
     if (!term) throw new NotFoundException('Term not found');
 
     const assignments = await this.prisma.studentClassAssignment.findMany({
-      where: {
-        academicYearId: term.academicYearId,
-        class: { schoolId },
-      },
+      where: { academicYearId: term.academicYearId, class: { schoolId } },
       include: {
-        student: {
-          select: { id: true, studentId: true, studentCategoryId: true },
-        },
+        student: { select: { id: true, studentId: true, studentCategoryId: true } },
         class: { select: { gradeLevelId: true } },
       },
     });
+
+    // Preload the school's fee items (term-agnostic — the current "terminal" fee)
+    // with overrides + component, grouped by category, so we don't query per
+    // student. The component carries its billing frequency.
+    const feeItems = await this.prisma.feeItem.findMany({
+      where: { schoolId },
+      include: {
+        component: { select: { id: true, name: true, sequence: true, billingFrequency: true } },
+        overrides: { select: { gradeLevelId: true, amount: true } },
+      },
+    });
+    const itemsByCategory = new Map<string, typeof feeItems>();
+    for (const item of feeItems) {
+      const list = itemsByCategory.get(item.studentCategoryId) ?? [];
+      list.push(item);
+      itemsByCategory.set(item.studentCategoryId, list);
+    }
+
+    const { order, termToYear } = await this.buildTermMaps(schoolId);
+    const currentOrder = order.get(termId) ?? 0;
+    const studentIds = assignments.map((a) => a.student.id);
+    const priorInvoices = await this.prisma.invoice.findMany({
+      where: { schoolId, studentId: { in: studentIds } },
+      select: { studentId: true, termId: true, amount: true, amountPaid: true },
+    });
+
+    // Per student: carry-forward (balance of the latest strictly-earlier term),
+    // whether they've ever been invoiced (ONE_TIME components), and whether
+    // they've been invoiced already this academic year (PER_YEAR components).
+    const carryByStudent = new Map<string, number>();
+    const carryMeta = new Map<string, number>(); // studentId → order index of chosen prior term
+    const hasAnyInvoice = new Set<string>();
+    const hasInvoiceThisYear = new Set<string>();
+    for (const inv of priorInvoices) {
+      hasAnyInvoice.add(inv.studentId);
+      if (termToYear.get(inv.termId) === term.academicYearId) hasInvoiceThisYear.add(inv.studentId);
+      const ord = order.get(inv.termId) ?? -1;
+      if (ord < 0 || ord >= currentOrder) continue; // carry only from strictly-earlier terms
+      const prevOrd = carryMeta.get(inv.studentId) ?? -1;
+      if (ord > prevOrd) {
+        const balance = Number(inv.amount) - Number(inv.amountPaid);
+        carryByStudent.set(inv.studentId, balance > 0 ? balance : 0);
+        carryMeta.set(inv.studentId, ord);
+      }
+    }
 
     let created = 0;
     let skipped = 0;
@@ -272,23 +349,66 @@ export class FinanceService {
       });
       if (existing) { skipped++; continue; }
 
-      const feeStructure = await this.prisma.feeStructure.findFirst({
-        where: {
-          schoolId,
-          gradeLevelId: cls.gradeLevelId,
-          studentCategoryId: student.studentCategoryId,
-          termId,
-        },
-      });
+      // Build the fee component lines for this student's grade level, honouring
+      // each component's billing frequency:
+      //   ONE_TIME → only on the student's first invoice ever
+      //   PER_YEAR → only on their first invoice of this academic year
+      //   PER_TERM → every term
+      const billedEver = hasAnyInvoice.has(student.id);
+      const billedThisYear = hasInvoiceThisYear.has(student.id);
+      const categoryItems = itemsByCategory.get(student.studentCategoryId) ?? [];
+      const lines = categoryItems
+        .filter((item) => {
+          if (item.component.billingFrequency === 'ONE_TIME') return !billedEver;
+          if (item.component.billingFrequency === 'PER_YEAR') return !billedThisYear;
+          return true;
+        })
+        .map((item) => {
+          const override = item.overrides.find((o) => o.gradeLevelId === cls.gradeLevelId);
+          const amount = override ? Number(override.amount) : Number(item.defaultAmount);
+          return { feeComponentId: item.feeComponentId, name: item.component.name, amount, sequence: item.component.sequence };
+        })
+        .filter((l) => l.amount > 0)
+        .sort((a, b) => a.sequence - b.sequence);
 
-      if (!feeStructure) {
-        errors.push(`${student.studentId}: no fee structure for grade level + category`);
+      // Fallback to the flat FeeStructure total when no itemised setup exists
+      // (legacy / simple schools), so generation keeps working unchanged.
+      if (lines.length === 0) {
+        const feeStructure = await this.prisma.feeStructure.findFirst({
+          where: { schoolId, gradeLevelId: cls.gradeLevelId, studentCategoryId: student.studentCategoryId, termId },
+        });
+        if (feeStructure && Number(feeStructure.amount) > 0) {
+          lines.push({ feeComponentId: null as any, name: 'School fees', amount: Number(feeStructure.amount), sequence: 0 });
+        }
+      }
+
+      const carry = carryByStudent.get(student.id) ?? 0;
+      if (lines.length === 0 && carry <= 0) {
+        errors.push(`${student.studentId}: no fees set for grade level + category`);
         skipped++;
         continue;
       }
 
+      const feesTotal = lines.reduce((sum, l) => sum + l.amount, 0);
+      const total = feesTotal + carry;
+
       await this.prisma.invoice.create({
-        data: { schoolId, studentId: student.id, termId, amount: feeStructure.amount },
+        data: {
+          schoolId, studentId: student.id, termId, amount: total,
+          items: {
+            create: [
+              ...(carry > 0
+                ? [{ name: 'Balance brought forward', amount: carry, isCarryForward: true, sequence: -1 }]
+                : []),
+              ...lines.map((l, i) => ({
+                feeComponentId: l.feeComponentId ?? undefined,
+                name: l.name,
+                amount: l.amount,
+                sequence: i,
+              })),
+            ],
+          },
+        },
       });
       created++;
     }

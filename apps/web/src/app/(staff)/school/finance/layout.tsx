@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 // The sub-pages now live in the sidebar as a collapsible "Fees" group, so this
 // layout no longer renders a tab bar — just a breadcrumb for orientation.
 const SUB_PAGES = [
+  { label: 'Fee Setup',      href: '/school/finance/fee-setup'      },
   { label: 'Fee Structures', href: '/school/finance/fee-structures' },
   { label: 'Invoices',       href: '/school/finance/invoices'       },
   { label: 'Outstanding',    href: '/school/finance/outstanding'    },

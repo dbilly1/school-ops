@@ -16,6 +16,14 @@ type Payment = {
   recordedBy: { firstName: string; lastName: string };
 };
 
+type InvoiceItem = {
+  id: string;
+  name: string;
+  amount: number;
+  isCarryForward: boolean;
+  sequence: number;
+};
+
 type InvoiceDetail = {
   id: string;
   amount: number;
@@ -26,6 +34,7 @@ type InvoiceDetail = {
   term: { name: string };
   gradeLevel: { name: string };
   studentCategory: { name: string };
+  items: InvoiceItem[];
   payments: Payment[];
 };
 
@@ -145,6 +154,36 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             </div>
             <p className="text-xs text-slate-400 mt-1">{pctPaid}% paid</p>
           </div>
+
+          {/* Fee breakdown */}
+          {invoice.items && invoice.items.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-5">
+              <h3 className="text-sm font-semibold text-slate-700 mb-4">Fee breakdown</h3>
+              <table className="w-full">
+                <tbody>
+                  {invoice.items.map(it => (
+                    <tr key={it.id} className="border-b border-slate-50 last:border-0">
+                      <td className="py-2 text-sm text-slate-600">
+                        {it.name}
+                        {it.isCarryForward && (
+                          <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                            Arrears
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 text-sm text-right font-medium text-slate-800">
+                        GHS {it.amount.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="border-t border-slate-200">
+                    <td className="pt-3 text-sm font-semibold text-slate-700">Total billed</td>
+                    <td className="pt-3 text-sm text-right font-bold text-slate-900">GHS {invoice.amount.toFixed(2)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {/* Payment history */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-5">

@@ -240,6 +240,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
       {
         label: 'Fees', href: '/school/finance', iconPath: icons.finance, permId: 'finance',
         children: [
+          { label: 'Fee Setup',      href: '/school/finance/fee-setup'      },
           { label: 'Fee Structures', href: '/school/finance/fee-structures' },
           { label: 'Invoices',       href: '/school/finance/invoices'       },
           { label: 'Outstanding',    href: '/school/finance/outstanding'    },

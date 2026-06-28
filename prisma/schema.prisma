@@ -258,6 +258,8 @@ model School {
   admissionFieldConfigs     AdmissionFieldConfig[]
   studentCategories         StudentCategory[]
   feeStructures             FeeStructure[]
+  feeComponents             FeeComponent[]
+  feeItems                  FeeItem[]
   invoices                  Invoice[]
   payments                  Payment[]
   timetableConfigs          TimetableConfig[]
@@ -594,11 +596,12 @@ model GradeLevel {
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
 
-  school        School              @relation(fields: [schoolId], references: [id])
-  classes       Class[]
-  feeStructures FeeStructure[]
-  feedingRates  FeedingClassRate[]
-  subjects      GradeLevelSubject[]
+  school           School              @relation(fields: [schoolId], references: [id])
+  classes          Class[]
+  feeStructures    FeeStructure[]
+  feeItemOverrides FeeItemOverride[]
+  feedingRates     FeedingClassRate[]
+  subjects         GradeLevelSubject[]
 
   @@unique([schoolId, sequence])
   @@map("grade_levels")
@@ -1231,6 +1234,7 @@ model StudentCategory {
 
   school        School         @relation(fields: [schoolId], references: [id])
   feeStructures FeeStructure[]
+  feeItems      FeeItem[]
   students      Student[]
 
   @@unique([schoolId, name])
@@ -1270,13 +1274,33 @@ model Invoice {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  school   School    @relation(fields: [schoolId], references: [id])
-  student  Student   @relation(fields: [studentId], references: [id])
-  term     Term      @relation(fields: [termId], references: [id])
+  school   School        @relation(fields: [schoolId], references: [id])
+  student  Student       @relation(fields: [studentId], references: [id])
+  term     Term          @relation(fields: [termId], references: [id])
   payments Payment[]
+  items    InvoiceItem[]
 
   @@unique([schoolId, studentId, termId])
   @@map("invoices")
+}
+
+// Snapshot of the fee line items that make up an invoice's total. Captured at
+// generation time (name copied so renaming a component later doesn't rewrite
+// history). `isCarryForward` marks the "Balance brought forward" arrears line.
+model InvoiceItem {
+  id             String  @id @default(uuid())
+  invoiceId      String
+  feeComponentId String?
+  name           String
+  amount         Decimal
+  isCarryForward Boolean @default(false)
+  sequence       Int     @default(0)
+
+  invoice   Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  component FeeComponent? @relation(fields: [feeComponentId], references: [id])
+
+  @@index([invoiceId])
+  @@map("invoice_items")
 }
 
 model Payment {
@@ -1297,6 +1321,77 @@ model Payment {
   @@index([schoolId])
   @@index([invoiceId])
   @@map("payments")
+}
+
+// ============================================================
+// FEE COMPONENTS (itemised fee build-up)
+// ============================================================
+
+// How often a fee component is billed to a student. PER_TERM = every term's
+// invoice (the norm); PER_YEAR = only the student's first invoice of each
+// academic year (e.g. annual registration); ONE_TIME = only the student's
+// first invoice ever (e.g. admission). Frozen onto the invoice at generation.
+enum FeeBillingFrequency {
+  PER_TERM
+  PER_YEAR
+  ONE_TIME
+}
+
+// School-level catalog of billable fee components (Tuition, PTA, Exams…).
+// Shared across categories so reporting stays consistent; each student
+// category selects which ones it bills and at what price (see FeeItem).
+model FeeComponent {
+  id               String              @id @default(uuid())
+  schoolId         String
+  name             String
+  sequence         Int                 @default(0)
+  billingFrequency FeeBillingFrequency @default(PER_TERM)
+  isArchived       Boolean             @default(false)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  school       School        @relation(fields: [schoolId], references: [id])
+  items        FeeItem[]
+  invoiceItems InvoiceItem[]
+
+  @@unique([schoolId, name])
+  @@map("fee_components")
+}
+
+// A component priced for one student category: a default amount that applies to
+// every grade level, optionally overridden per grade (FeeItemOverride). Fees are
+// term-agnostic — the current definition is the "terminal" fee, snapshotted onto
+// each invoice at generation, so later edits only affect not-yet-billed terms.
+model FeeItem {
+  id                String   @id @default(uuid())
+  schoolId          String
+  studentCategoryId String
+  feeComponentId    String
+  defaultAmount     Decimal  @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  school          School            @relation(fields: [schoolId], references: [id])
+  studentCategory StudentCategory   @relation(fields: [studentCategoryId], references: [id])
+  component       FeeComponent      @relation(fields: [feeComponentId], references: [id])
+  overrides       FeeItemOverride[]
+
+  @@unique([schoolId, studentCategoryId, feeComponentId])
+  @@map("fee_items")
+}
+
+// Per-grade-level price override for a fee item. Absence ⇒ use defaultAmount.
+model FeeItemOverride {
+  id           String  @id @default(uuid())
+  feeItemId    String
+  gradeLevelId String
+  amount       Decimal
+
+  feeItem    FeeItem    @relation(fields: [feeItemId], references: [id], onDelete: Cascade)
+  gradeLevel GradeLevel @relation(fields: [gradeLevelId], references: [id])
+
+  @@unique([feeItemId, gradeLevelId])
+  @@map("fee_item_overrides")
 }
 
 // ============================================================

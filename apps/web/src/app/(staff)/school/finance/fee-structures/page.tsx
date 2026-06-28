@@ -190,6 +190,14 @@ export default function FeeStructuresPage() {
         </div>
       </div>
 
+      {/* ── Itemised-fees pointer ── */}
+      <div className="px-4 py-3 mb-4 bg-sky-50 border border-sky-200 rounded-xl text-sm text-sky-800">
+        Want to break fees into <strong>Tuition, PTA, Exams…</strong> instead of one figure? Use{' '}
+        <a href="/school/finance/fee-setup" className="font-semibold underline">Fee Setup</a>. When a category
+        is set up there, invoice generation uses those itemised fees and ignores the flat amount below — this
+        page is the simple fallback for categories you haven’t itemised.
+      </div>
+
       {/* ── Setup warnings ── */}
       {!loading && terms.length === 0 && (
         <div className="px-4 py-3 mb-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
