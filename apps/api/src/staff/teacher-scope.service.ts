@@ -100,6 +100,20 @@ export class TeacherScopeService {
       throw new ForbiddenException('You can only manage assessments for your assigned subjects and classes');
   }
 
+  // Boolean form of assertCanManageAssessment — for batch create, where we skip
+  // combos a teacher may not touch instead of aborting the whole batch.
+  async canManageAssessment(
+    userId: string,
+    roles: StaffRole[],
+    subjectId: string,
+    classId?: string | null,
+  ): Promise<boolean> {
+    if (!this.isRestricted(roles)) return true;
+    const staffProfileId = await this.staffProfileId(userId);
+    if (!staffProfileId) return false;
+    return this.teachesSubjectInClass(staffProfileId, subjectId, classId);
+  }
+
   // ── Lesson notes: same class-teacher latitude as assessments — a subject
   //    teacher may write for their subject in that class; a class teacher may
   //    write for any subject on their class's grade level. ────────────────────
@@ -195,6 +209,17 @@ export class TeacherScopeService {
         throw new ForbiddenException('You can only record scores for your assigned class or subject');
       }
     }
+  }
+
+  // ── Batch visibility: every class a restricted teacher touches (class-teaches
+  //    OR subject-teaches in). null = unrestricted. Empty array = nothing. ───────
+  async accessibleClassIds(userId: string, roles: StaffRole[]): Promise<string[] | null> {
+    if (!this.isRestricted(roles)) return null;
+    const staffProfileId = await this.staffProfileId(userId);
+    if (!staffProfileId) return [];
+    const classTeacherIds = await this.classTeacherClassIds(staffProfileId);
+    const subjectClassIds = (await this.subjectClassPairs(staffProfileId)).map((p) => p.classId);
+    return [...new Set([...classTeacherIds, ...subjectClassIds])];
   }
 
   // ── For UI scoping: classes the user class-teaches ───────────────────────────

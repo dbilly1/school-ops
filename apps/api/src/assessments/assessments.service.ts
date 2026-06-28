@@ -2,8 +2,8 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { GradingService } from '../school-setup/grading/grading.service';
 import { TeacherScopeService } from '../staff/teacher-scope.service';
-import { StaffRole } from '@prisma/client';
-import { CreateAssessmentDto, BulkRecordScoresDto } from './dto/assessment.dto';
+import { StaffRole, AssessmentCategory } from '@prisma/client';
+import { CreateAssessmentDto, BatchCreateAssessmentDto, BulkRecordScoresDto } from './dto/assessment.dto';
 
 type Caller = { id: string; roles: StaffRole[] };
 
@@ -93,6 +93,203 @@ export class AssessmentsService {
         term: { select: { id: true, name: true } },
       },
     });
+  }
+
+  // Fan one exam out across every (class × subject) combination, grouped into one
+  // AssessmentBatch per class (e.g. "Primary 4 — End of Term Exam"). A combo is
+  // created only when the subject belongs to that class's grade level and the
+  // caller is allowed to manage it; non-applicable combos, forbidden combos, and
+  // exact duplicates (same title/subject/class/term/category) are skipped so the
+  // call is safe to re-run — re-runs reuse an existing batch and only add the
+  // missing subjects.
+  async batchCreate(schoolId: string, dto: BatchCreateAssessmentDto, caller: Caller) {
+    if (!dto.classIds?.length) throw new BadRequestException('Select at least one class');
+    if (!dto.subjects?.length) throw new BadRequestException('Select at least one subject');
+
+    // Batch and its children share one concrete category (default end-of-term).
+    const category = dto.category ?? AssessmentCategory.END_OF_TERM_EXAM;
+    const assessmentDate = dto.assessmentDate ? new Date(dto.assessmentDate) : null;
+
+    const term = await this.prisma.term.findFirst({ where: { id: dto.termId, schoolId } });
+    if (!term) throw new NotFoundException('Term not found');
+
+    const classes = await this.prisma.class.findMany({
+      where: { id: { in: dto.classIds }, schoolId },
+      select: { id: true, name: true, gradeLevelId: true },
+    });
+    if (classes.length === 0) throw new NotFoundException('No matching classes found');
+
+    const subjectIds = [...new Set(dto.subjects.map((s) => s.subjectId))];
+    const validSubjects = await this.prisma.subject.findMany({
+      where: { id: { in: subjectIds }, schoolId },
+      select: { id: true },
+    });
+    const validSubjectIds = new Set(validSubjects.map((s) => s.id));
+
+    // Which subjects each grade level offers — drives the per-class applicability.
+    const gradeLevelIds = [...new Set(classes.map((c) => c.gradeLevelId))];
+    const gls = await this.prisma.gradeLevelSubject.findMany({
+      where: { gradeLevelId: { in: gradeLevelIds } },
+      select: { gradeLevelId: true, subjectId: true },
+    });
+    const subjectsByGradeLevel = new Map<string, Set<string>>();
+    for (const g of gls) {
+      if (!subjectsByGradeLevel.has(g.gradeLevelId)) subjectsByGradeLevel.set(g.gradeLevelId, new Set());
+      subjectsByGradeLevel.get(g.gradeLevelId)!.add(g.subjectId);
+    }
+
+    // Existing assessments for this term that match the batch, so re-runs skip dupes.
+    const existing = await this.prisma.assessment.findMany({
+      where: {
+        schoolId, termId: dto.termId, title: dto.title, category,
+        classId: { in: dto.classIds }, subjectId: { in: subjectIds },
+      },
+      select: { classId: true, subjectId: true },
+    });
+    const existingKeys = new Set(existing.map((e) => `${e.classId}:${e.subjectId}`));
+
+    // Existing batches for the same exam, so a re-run adds to them rather than
+    // creating a second batch for the class.
+    const existingBatches = await this.prisma.assessmentBatch.findMany({
+      where: { schoolId, termId: dto.termId, title: dto.title, category, classId: { in: dto.classIds } },
+      select: { id: true, classId: true },
+    });
+    const batchByClass = new Map(existingBatches.map((b) => [b.classId, b.id]));
+
+    const skipped = { notOnGradeLevel: 0, duplicate: 0, forbidden: 0, unknownSubject: 0 };
+    let createdBatches = 0;
+    let createdAssessments = 0;
+
+    for (const cls of classes) {
+      const offered = subjectsByGradeLevel.get(cls.gradeLevelId) ?? new Set<string>();
+      const rows: { subjectId: string; totalScore: number; weight: number | null }[] = [];
+
+      for (const s of dto.subjects) {
+        if (!validSubjectIds.has(s.subjectId)) { skipped.unknownSubject++; continue; }
+        if (!offered.has(s.subjectId)) { skipped.notOnGradeLevel++; continue; }
+        if (existingKeys.has(`${cls.id}:${s.subjectId}`)) { skipped.duplicate++; continue; }
+        if (!(await this.teacherScope.canManageAssessment(caller.id, caller.roles, s.subjectId, cls.id))) {
+          skipped.forbidden++; continue;
+        }
+        rows.push({ subjectId: s.subjectId, totalScore: s.totalScore, weight: s.weight ?? null });
+      }
+
+      if (rows.length === 0) continue;
+
+      let batchId = batchByClass.get(cls.id);
+      if (!batchId) {
+        const batch = await this.prisma.assessmentBatch.create({
+          data: { schoolId, classId: cls.id, termId: dto.termId, category, title: dto.title, assessmentDate },
+        });
+        batchId = batch.id;
+        createdBatches++;
+      }
+
+      await this.prisma.assessment.createMany({
+        data: rows.map((r) => ({
+          schoolId, subjectId: r.subjectId, classId: cls.id, batchId,
+          category, termId: dto.termId, title: dto.title,
+          totalScore: r.totalScore, weight: r.weight, assessmentDate,
+        })),
+      });
+      createdAssessments += rows.length;
+    }
+
+    return { batches: createdBatches, created: createdAssessments, skipped };
+  }
+
+  // List of exam batches (one row per class) with score-entry progress, scoped to
+  // a restricted teacher's accessible classes.
+  async findBatches(schoolId: string, caller: Caller, termId?: string, classId?: string) {
+    const accessible = await this.teacherScope.accessibleClassIds(caller.id, caller.roles);
+    const batches = await this.prisma.assessmentBatch.findMany({
+      where: {
+        schoolId,
+        ...(termId ? { termId } : {}),
+        ...(classId ? { classId } : {}),
+        ...(accessible ? { classId: { in: accessible.length ? accessible : ['__none__'] } } : {}),
+      },
+      include: {
+        class: { select: { id: true, name: true } },
+        term: { select: { id: true, name: true } },
+        assessments: { select: { id: true, _count: { select: { scores: true } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return batches.map((b) => ({
+      id: b.id,
+      title: b.title,
+      category: b.category,
+      assessmentDate: b.assessmentDate,
+      class: b.class,
+      term: b.term,
+      subjectCount: b.assessments.length,
+      subjectsScored: b.assessments.filter((a) => a._count.scores > 0).length,
+    }));
+  }
+
+  // One batch with its per-subject assessments and score-entry status.
+  async findBatch(schoolId: string, id: string, caller: Caller) {
+    const batch = await this.prisma.assessmentBatch.findFirst({
+      where: { id, schoolId },
+      include: {
+        class: { select: { id: true, name: true } },
+        term: { select: { id: true, name: true } },
+        assessments: {
+          include: { subject: { select: { id: true, name: true } }, _count: { select: { scores: true } } },
+          orderBy: { subject: { name: 'asc' } },
+        },
+      },
+    });
+    if (!batch) throw new NotFoundException('Assessment batch not found');
+
+    const accessible = await this.teacherScope.accessibleClassIds(caller.id, caller.roles);
+    if (accessible && !accessible.includes(batch.classId))
+      throw new NotFoundException('Assessment batch not found');
+
+    const studentCount = await this.prisma.studentClassAssignment.count({
+      where: { classId: batch.classId, schoolId },
+    });
+
+    return {
+      id: batch.id,
+      title: batch.title,
+      category: batch.category,
+      assessmentDate: batch.assessmentDate,
+      class: batch.class,
+      term: batch.term,
+      studentCount,
+      assessments: batch.assessments.map((a) => ({
+        id: a.id,
+        title: a.title,
+        totalScore: Number(a.totalScore),
+        subject: a.subject,
+        scored: a._count.scores,
+      })),
+    };
+  }
+
+  // Delete a whole batch — its assessments and their scores go with it.
+  async deleteBatch(schoolId: string, id: string, caller: Caller) {
+    const batch = await this.prisma.assessmentBatch.findFirst({
+      where: { id, schoolId },
+      include: { assessments: { select: { id: true } } },
+    });
+    if (!batch) throw new NotFoundException('Assessment batch not found');
+
+    const accessible = await this.teacherScope.accessibleClassIds(caller.id, caller.roles);
+    if (accessible && !accessible.includes(batch.classId))
+      throw new NotFoundException('Assessment batch not found');
+
+    const assessmentIds = batch.assessments.map((a) => a.id);
+    await this.prisma.$transaction([
+      this.prisma.assessmentScore.deleteMany({ where: { assessmentId: { in: assessmentIds } } }),
+      this.prisma.assessment.deleteMany({ where: { id: { in: assessmentIds } } }),
+      this.prisma.assessmentBatch.delete({ where: { id } }),
+    ]);
+
+    return { deleted: assessmentIds.length, batchId: id };
   }
 
   async delete(schoolId: string, id: string, caller: Caller) {

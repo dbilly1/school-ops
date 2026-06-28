@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AssessmentsService } from './assessments.service';
-import { CreateAssessmentDto, BulkRecordScoresDto } from './dto/assessment.dto';
+import { CreateAssessmentDto, BatchCreateAssessmentDto, BulkRecordScoresDto } from './dto/assessment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../permissions/permissions.guard';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
@@ -45,6 +45,22 @@ export class AssessmentsController {
     return this.assessmentsService.getScoresByStudent(user.schoolId, studentId, termId);
   }
 
+  @Get('batches')
+  @RequirePermission('academics', 'VIEW')
+  findBatches(
+    @CurrentUser() user: any,
+    @Query('termId') termId?: string,
+    @Query('classId') classId?: string,
+  ) {
+    return this.assessmentsService.findBatches(user.schoolId, { id: user.id, roles: user.roles }, termId, classId);
+  }
+
+  @Get('batches/:id')
+  @RequirePermission('academics', 'VIEW')
+  findBatch(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.assessmentsService.findBatch(user.schoolId, id, { id: user.id, roles: user.roles });
+  }
+
   @Get(':id/scores')
   @RequirePermission('academics', 'VIEW')
   getScores(@CurrentUser() user: any, @Param('id') id: string) {
@@ -61,6 +77,18 @@ export class AssessmentsController {
   @RequirePermission('academics', 'CREATE', 'assessments')
   create(@CurrentUser() user: any, @Body() dto: CreateAssessmentDto) {
     return this.assessmentsService.create(user.schoolId, dto, { id: user.id, roles: user.roles });
+  }
+
+  @Post('batch')
+  @RequirePermission('academics', 'CREATE', 'assessments')
+  batchCreate(@CurrentUser() user: any, @Body() dto: BatchCreateAssessmentDto) {
+    return this.assessmentsService.batchCreate(user.schoolId, dto, { id: user.id, roles: user.roles });
+  }
+
+  @Delete('batches/:id')
+  @RequirePermission('academics', 'DELETE', 'assessments')
+  deleteBatch(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.assessmentsService.deleteBatch(user.schoolId, id, { id: user.id, roles: user.roles });
   }
 
   @Delete(':id')

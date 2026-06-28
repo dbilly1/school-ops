@@ -262,6 +262,7 @@ model School {
   payments                  Payment[]
   timetableConfigs          TimetableConfig[]
   assessments               Assessment[]
+  assessmentBatches         AssessmentBatch[]
   studentAttendance         StudentAttendanceRecord[]
   staffAttendance           StaffAttendanceRecord[]
   vehicles                  Vehicle[]
@@ -542,6 +543,7 @@ model Term {
   academicYear     AcademicYear      @relation(fields: [academicYearId], references: [id])
   timetableConfigs TimetableConfig[]
   assessments      Assessment[]
+  assessmentBatches AssessmentBatch[]
   feeStructures    FeeStructure[]
   invoices         Invoice[]
   reportCards      ReportCard[]
@@ -617,6 +619,7 @@ model Class {
   timetableSlots     TimetableSlot[]
   attendanceRecords  StudentAttendanceRecord[]
   assessments        Assessment[]
+  assessmentBatches  AssessmentBatch[]
   plannerEntries     PlannerEntry[]
   lessonNotes        LessonNote[]
 
@@ -1155,6 +1158,7 @@ model Assessment {
   subjectId      String
   classId        String?
   termId         String
+  batchId        String?
   category       AssessmentCategory @default(CLASS_TEST)
   title          String
   totalScore     Decimal
@@ -1167,11 +1171,38 @@ model Assessment {
   subject Subject           @relation(fields: [subjectId], references: [id])
   class   Class?            @relation(fields: [classId], references: [id])
   term    Term              @relation(fields: [termId], references: [id])
+  batch   AssessmentBatch?  @relation(fields: [batchId], references: [id])
   scores  AssessmentScore[]
 
   @@index([schoolId])
   @@index([classId])
+  @@index([batchId])
   @@map("assessments")
+}
+
+// Groups the per-subject assessments of one term-wide exam for a single class
+// (e.g. "Primary 4 — End of Term Exam"), so the assessments list shows one row
+// per class instead of one row per subject. Created by batchCreate; each child
+// Assessment keeps its own scores/grading so report cards are unaffected.
+model AssessmentBatch {
+  id             String             @id @default(uuid())
+  schoolId       String
+  classId        String
+  termId         String
+  category       AssessmentCategory @default(END_OF_TERM_EXAM)
+  title          String
+  assessmentDate DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  school      School       @relation(fields: [schoolId], references: [id])
+  class       Class        @relation(fields: [classId], references: [id])
+  term        Term         @relation(fields: [termId], references: [id])
+  assessments Assessment[]
+
+  @@index([schoolId])
+  @@index([classId])
+  @@map("assessment_batches")
 }
 
 model AssessmentScore {
