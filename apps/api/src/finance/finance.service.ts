@@ -32,6 +32,60 @@ export class FinanceService {
     });
   }
 
+  // Derived view of the itemised Fee Setup, projected onto the (grade × category)
+  // matrix so the Fee Structures page can show what an itemised category actually
+  // bills. Fee items are term-agnostic, so a single per-(grade,category) total
+  // applies to every term column. We split by billing cadence:
+  //   perTerm        → sum of PER_TERM components (the recurring termly fee)
+  //   oneTimeAnnual  → sum of PER_YEAR + ONE_TIME components (first-invoice extras)
+  async getItemisedFeeTotals(schoolId: string) {
+    const [feeItems, gradeLevels] = await Promise.all([
+      this.prisma.feeItem.findMany({
+        where: { schoolId },
+        include: {
+          component: { select: { billingFrequency: true } },
+          overrides: { select: { gradeLevelId: true, amount: true } },
+        },
+      }),
+      this.prisma.gradeLevel.findMany({ where: { schoolId }, select: { id: true } }),
+    ]);
+
+    const itemisedCategoryIds = [...new Set(feeItems.map((i) => i.studentCategoryId))];
+
+    const byCategory = new Map<string, typeof feeItems>();
+    for (const item of feeItems) {
+      const list = byCategory.get(item.studentCategoryId) ?? [];
+      list.push(item);
+      byCategory.set(item.studentCategoryId, list);
+    }
+
+    const totals: {
+      studentCategoryId: string;
+      gradeLevelId: string;
+      perTerm: number;
+      oneTimeAnnual: number;
+    }[] = [];
+
+    for (const [studentCategoryId, items] of byCategory) {
+      for (const grade of gradeLevels) {
+        let perTerm = 0;
+        let oneTimeAnnual = 0;
+        for (const item of items) {
+          const override = item.overrides.find((o) => o.gradeLevelId === grade.id);
+          const amount = override ? Number(override.amount) : Number(item.defaultAmount);
+          if (amount <= 0) continue;
+          if (item.component.billingFrequency === 'PER_TERM') perTerm += amount;
+          else oneTimeAnnual += amount;
+        }
+        if (perTerm > 0 || oneTimeAnnual > 0) {
+          totals.push({ studentCategoryId, gradeLevelId: grade.id, perTerm, oneTimeAnnual });
+        }
+      }
+    }
+
+    return { itemisedCategoryIds, totals };
+  }
+
   async bulkCreateFeeStructures(schoolId: string, dto: BulkCreateFeeStructuresDto) {
     const results = await Promise.all(
       dto.entries.map(async (entry) => {

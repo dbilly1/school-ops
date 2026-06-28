@@ -21,6 +21,13 @@ export class FinanceController {
     return this.financeService.findFeeStructures(user.schoolId, termId);
   }
 
+  // Derived totals from the itemised Fee Setup, for display on the matrix.
+  @Get('fee-structures/itemised-totals')
+  @RequirePermission('finance', 'VIEW')
+  getItemisedFeeTotals(@CurrentUser() user: any) {
+    return this.financeService.getItemisedFeeTotals(user.schoolId);
+  }
+
   @Post('fee-structures/matrix')
   @RequirePermission('finance', 'CREATE')
   saveFeeMatrix(@CurrentUser() user: any, @Body() dto: SaveFeeMatrixDto) {

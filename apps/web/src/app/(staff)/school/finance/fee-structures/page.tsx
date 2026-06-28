@@ -21,7 +21,31 @@ type FeeStructure    = {
 // cells[termId][gradeId][catId] = amount string
 type CellMap = Record<string, Record<string, Record<string, string>>>;
 
+// Derived totals from the itemised Fee Setup (term-agnostic).
+type ItemisedTotal = {
+  studentCategoryId: string;
+  gradeLevelId: string;
+  perTerm: number;
+  oneTimeAnnual: number;
+};
+type ItemisedTotals = { itemisedCategoryIds: string[]; totals: ItemisedTotal[] };
+
+// itemised[catId][gradeId] = { perTerm, oneTimeAnnual }
+type ItemisedMap = Record<string, Record<string, { perTerm: number; oneTimeAnnual: number }>>;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const ghs = (n: number) =>
+  `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+function buildItemisedMap(data: ItemisedTotals | null): ItemisedMap {
+  const map: ItemisedMap = {};
+  for (const t of data?.totals ?? []) {
+    if (!map[t.studentCategoryId]) map[t.studentCategoryId] = {};
+    map[t.studentCategoryId][t.gradeLevelId] = { perTerm: t.perTerm, oneTimeAnnual: t.oneTimeAnnual };
+  }
+  return map;
+}
 
 function buildCellMap(structures: FeeStructure[]): CellMap {
   const map: CellMap = {};
@@ -48,11 +72,18 @@ export default function FeeStructuresPage() {
   const fetchCats    = useCallback(() => staffApi.get<StudentCategory[]>('/school/student-categories'), []);
   const fetchYears   = useCallback(() => staffApi.get<AcademicYear[]>('/school/academic-years'), []);
   const fetchAll     = useCallback(() => staffApi.get<FeeStructure[]>('/school/finance/fee-structures'), []);
+  const fetchItemised = useCallback(() => staffApi.get<ItemisedTotals>('/school/finance/fee-structures/itemised-totals'), []);
 
   const { data: grades }     = useApi(fetchGrades);
   const { data: categories } = useApi(fetchCats);
   const { data: years, loading: loadingYears } = useApi(fetchYears);
   const { data: structures, loading: loadingFees, refetch } = useApi(fetchAll);
+  const { data: itemisedData } = useApi(fetchItemised);
+
+  // Categories itemised in Fee Setup → their matrix cells become read-only and
+  // show the derived per-term total instead of an editable input.
+  const itemisedCategoryIds = new Set(itemisedData?.itemisedCategoryIds ?? []);
+  const itemisedMap = buildItemisedMap(itemisedData ?? null);
 
   // Use the active year's terms; fall back to the first year if none active
   const activeYear = years?.find(y => y.isActive) ?? years?.[0];
@@ -193,9 +224,10 @@ export default function FeeStructuresPage() {
       {/* ── Itemised-fees pointer ── */}
       <div className="px-4 py-3 mb-4 bg-sky-50 border border-sky-200 rounded-xl text-sm text-sky-800">
         Want to break fees into <strong>Tuition, PTA, Exams…</strong> instead of one figure? Use{' '}
-        <a href="/school/finance/fee-setup" className="font-semibold underline">Fee Setup</a>. When a category
-        is set up there, invoice generation uses those itemised fees and ignores the flat amount below — this
-        page is the simple fallback for categories you haven’t itemised.
+        <a href="/school/finance/fee-setup" className="font-semibold underline">Fee Setup</a>. Categories set up
+        there are marked <span className="font-semibold text-sky-600">set</span> and show their derived per-term
+        total (read-only, same for every term since itemised fees are term-agnostic) — edit those in Fee Setup.
+        The editable cells below are the simple flat fallback for categories you haven’t itemised.
       </div>
 
       {/* ── Setup warnings ── */}
@@ -271,18 +303,27 @@ export default function FeeStructuresPage() {
                   {/* Row 2: category sub-headers */}
                   <tr>
                     {terms.map((term, ti) =>
-                      cats.map((cat, ci) => (
-                        <th
-                          key={`${term.id}-${cat.id}`}
-                          className="px-2 pb-2 pt-1 text-right text-xs font-medium text-slate-400 border-b border-slate-200"
-                          style={{
-                            backgroundColor: term.isActive ? 'var(--accent-tint, #f0fdf4)' : '#f8fafc',
-                            borderLeft: ci === 0 && ti > 0 ? '2px solid #e2e8f0' : undefined,
-                          }}
-                        >
-                          {abbrev(cat.name)}
-                        </th>
-                      ))
+                      cats.map((cat, ci) => {
+                        const itemised = itemisedCategoryIds.has(cat.id);
+                        return (
+                          <th
+                            key={`${term.id}-${cat.id}`}
+                            className="px-2 pb-2 pt-1 text-right text-xs font-medium text-slate-400 border-b border-slate-200"
+                            style={{
+                              backgroundColor: term.isActive ? 'var(--accent-tint, #f0fdf4)' : '#f8fafc',
+                              borderLeft: ci === 0 && ti > 0 ? '2px solid #e2e8f0' : undefined,
+                            }}
+                            title={itemised ? `${cat.name} — fees set in Fee Setup (read-only here)` : cat.name}
+                          >
+                            {abbrev(cat.name)}
+                            {itemised && (
+                              <span className="ml-1 align-middle text-[9px] font-semibold uppercase tracking-wide text-sky-500">
+                                set
+                              </span>
+                            )}
+                          </th>
+                        );
+                      })
                     )}
                   </tr>
                 </thead>
@@ -309,14 +350,45 @@ export default function FeeStructuresPage() {
                       {/* Amount cells — one per term × category */}
                       {terms.map((term, ti) =>
                         cats.map((cat, ci) => {
+                          const cellStyle = {
+                            borderLeft: ci === 0 && ti > 0 ? '2px solid #e2e8f0' : undefined,
+                          } as const;
+
+                          // Itemised in Fee Setup → read-only derived cell. Fees are
+                          // term-agnostic, so the same per-term total fills every term.
+                          if (itemisedCategoryIds.has(cat.id)) {
+                            const derived = itemisedMap[cat.id]?.[grade.id];
+                            const perTerm = derived?.perTerm ?? 0;
+                            const extra = derived?.oneTimeAnnual ?? 0;
+                            const tip = perTerm > 0
+                              ? `From Fee Setup — ${ghs(perTerm)} per term` +
+                                (extra > 0 ? `, plus ${ghs(extra)} one-time/annual on the first invoice` : '')
+                              : 'Set up in Fee Setup (no recurring termly amount)';
+                            return (
+                              <td
+                                key={`${term.id}-${cat.id}`}
+                                className="px-1.5 py-1 border-b border-slate-100"
+                                style={cellStyle}
+                                title={tip}
+                              >
+                                <div className="flex items-center justify-end gap-1 px-2 py-1.5 rounded-lg bg-slate-50/70">
+                                  <span className={`text-sm ${perTerm > 0 ? 'text-slate-500' : 'text-slate-300'}`}>
+                                    {perTerm > 0 ? perTerm.toLocaleString('en-GH', { minimumFractionDigits: 2 }) : '—'}
+                                  </span>
+                                  {extra > 0 && (
+                                    <span className="text-[10px] leading-none text-amber-500" title={tip}>+</span>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          }
+
                           const value = cells[term.id]?.[grade.id]?.[cat.id] ?? '';
                           return (
                             <td
                               key={`${term.id}-${cat.id}`}
                               className="px-1.5 py-1 border-b border-slate-100"
-                              style={{
-                                borderLeft: ci === 0 && ti > 0 ? '2px solid #e2e8f0' : undefined,
-                              }}
+                              style={cellStyle}
                             >
                               <input
                                 type="number"
