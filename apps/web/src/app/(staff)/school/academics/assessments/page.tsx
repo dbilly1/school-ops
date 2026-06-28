@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
@@ -382,6 +382,16 @@ export default function AssessmentsPage() {
   const { data: terms }    = useApi(fetchTerms);
 
   const refetchAll = useCallback(() => { refetch(); refetchBatches(); }, [refetch, refetchBatches]);
+
+  // Default the term filter to the active term once terms load — but only once,
+  // so a later switch to "All terms" (or another term) isn't overridden.
+  const termDefaultApplied = useRef(false);
+  useEffect(() => {
+    if (termDefaultApplied.current || !terms?.length) return;
+    const active = (terms as Term[]).find(t => t.isActive);
+    if (active) setTermFilter(active.id);
+    termDefaultApplied.current = true;
+  }, [terms]);
 
   // For restricted teachers: show subjects they may record for — subject-teacher
   // subjects plus every subject of their class-teacher classes.

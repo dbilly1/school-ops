@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportCardsService } from './report-cards.service';
@@ -10,23 +10,83 @@ export class ReportCardPdfService {
     private reportCards: ReportCardsService,
   ) {}
 
+  // ── Public: single-student PDF ──────────────────────────────
   async generate(schoolId: string, studentId: string, termId: string): Promise<Buffer> {
     const data = await this.reportCards.getStudentReportCard(schoolId, studentId, termId);
-    const school = await this.prisma.school.findUnique({
+    const school = await this.loadSchool(schoolId);
+
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const done = this.collect(doc);
+    this.renderCard(doc, data, school);
+    doc.end();
+    return done;
+  }
+
+  // ── Public: whole-class PDF (one card per student, one per page) ──
+  // Skips students whose card isn't generated yet. With `publishedOnly`, only
+  // published cards are included — the official term-end print run.
+  async generateClass(
+    schoolId: string,
+    classId: string,
+    termId: string,
+    opts: { publishedOnly?: boolean } = {},
+  ): Promise<{ buffer: Buffer; count: number }> {
+    const cards = await this.reportCards.findForClass(schoolId, classId, termId);
+    const wanted = cards.filter((c) =>
+      opts.publishedOnly ? c.status === 'PUBLISHED' : c.status !== 'NOT_GENERATED',
+    );
+    if (wanted.length === 0) {
+      throw new NotFoundException(
+        opts.publishedOnly
+          ? 'No published report cards to download for this class.'
+          : 'No generated report cards to download for this class.',
+      );
+    }
+
+    // Fetch the school header once, then render every student into one document.
+    const school = await this.loadSchool(schoolId);
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const done = this.collect(doc);
+
+    let count = 0;
+    for (const c of wanted) {
+      const data = await this.reportCards.getStudentReportCard(schoolId, c.studentId, termId);
+      if (count > 0) doc.addPage(); // each card starts on a fresh page
+      this.renderCard(doc, data, school);
+      count++;
+    }
+
+    doc.end();
+    return { buffer: await done, count };
+  }
+
+  // School header fields shared by every card in a run.
+  private loadSchool(schoolId: string) {
+    return this.prisma.school.findUnique({
       where: { id: schoolId },
       select: { name: true, primaryColor: true, address: true, phone: true, email: true, logoUrl: true },
     });
+  }
 
+  // Resolve the assembled buffer once the document finishes writing.
+  private collect(doc: PDFKit.PDFDocument): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    doc.on('data', (c: Buffer) => chunks.push(c));
+    return new Promise((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+  }
+
+  // Render one student's report card into the document at the current page.
+  private renderCard(
+    doc: PDFKit.PDFDocument,
+    data: any,
+    school: Awaited<ReturnType<ReportCardPdfService['loadSchool']>>,
+  ) {
     const config = data.config;
     const showGradeLabel = config?.showGradeLabel ?? true;
     const showPosition = config?.showPosition ?? true;
     const holisticLayout = config?.reportCardLayout === 'HOLISTIC';
     const showScale = config?.showAssessmentScale ?? false;
     const showMetrics = config?.showMetricsTable ?? false;
-
-    const doc = new PDFDocument({ size: 'A4', margin: 50 });
-    const chunks: Buffer[] = [];
-    doc.on('data', (c: Buffer) => chunks.push(c));
 
     const accent = school?.primaryColor || '#1a56db';
 
@@ -192,12 +252,6 @@ export class ReportCardPdfService {
       doc.fontSize(8).font('Helvetica-Oblique').fillColor('#777')
         .text(config.footerText, 50, 780, { align: 'center', width: 495 });
     }
-
-    doc.end();
-
-    return new Promise((resolve) => {
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-    });
   }
 
   // Parse a base64 image data URL into a Buffer pdfkit can render. Returns null

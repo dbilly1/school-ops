@@ -8,6 +8,8 @@ import { useTeacherScope } from '@/hooks/use-teacher-scope';
 import { Alert } from '@/components/ui/settings-card';
 import { ClassTabs } from '@/components/ui/class-tabs';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type CardStatus = 'NOT_GENERATED' | 'DRAFT' | 'PUBLISHED';
@@ -25,6 +27,10 @@ type ReportCard = {
   position: number | null;
   classSize: number | null;
 };
+
+type Term = { id: string; name: string; isActive: boolean };
+type AcademicYear = { id: string; name: string; isActive: boolean; terms: Term[] };
+type Enrollment = { inYear: number; total: number; otherYears: number };
 
 // ── Report card row ───────────────────────────────────────────────────────────
 
@@ -93,20 +99,22 @@ export default function ReportCardsPage() {
   const router = useRouter();
   const scope  = useTeacherScope();
   const [classId, setClassId]   = useState('');
+  const [yearId, setYearId]     = useState('');
   const [termId, setTermId]     = useState('');
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [discarding, setDiscarding] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  const [publishedOnly, setPublishedOnly]   = useState(true);
   const [alert, setAlert]       = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
   const fetchClasses = useCallback(() => staffApi.get<{ id: string; name: string }[]>('/school/grade-structure/classes'), []);
-  const fetchTerms   = useCallback(() =>
-    staffApi.get<any>('/school/academic-years/active').then(y => y?.terms ?? []).catch(() => []),
-    [],
-  );
+  // All academic years (each with its terms), so report cards for past years are
+  // reachable too — not just the active year. GET is open to any staff.
+  const fetchYears = useCallback(() => staffApi.get<AcademicYear[]>('/school/academic-years').catch(() => []), []);
 
   const { data: allClasses } = useApi(fetchClasses);
-  const { data: terms }      = useApi(fetchTerms);
+  const { data: years }      = useApi(fetchYears);
 
   // Restrict the class list for teachers to their assigned classes (mirrors the
   // grade-book / assessments pages); admins see every class.
@@ -114,7 +122,14 @@ export default function ReportCardsPage() {
     ? (allClasses ?? []).filter(c => scope.assignedClassIds.includes(c.id))
     : (allClasses ?? []);
 
-  const activeTermId  = termId  || terms?.find((t: any) => t.isActive)?.id  || '';
+  // Default to the active year, then its active (or first) term. A manual year
+  // pick ignores a stale term from the previous year and falls back cleanly.
+  const activeYearId  = yearId || years?.find(y => y.isActive)?.id || years?.[0]?.id || '';
+  const selectedYear  = years?.find(y => y.id === activeYearId);
+  const terms         = selectedYear?.terms ?? [];
+  const activeTermId  = (termId && terms.some(t => t.id === termId))
+    ? termId
+    : (terms.find(t => t.isActive)?.id ?? terms[0]?.id ?? '');
   const activeClassId = classId || classes?.[0]?.id || '';
 
   // Only the class teacher (or an unrestricted owner/admin) may generate, publish
@@ -130,13 +145,65 @@ export default function ReportCardsPage() {
   );
   const { data: cards, loading, refetch } = useApi(fetchCards, `${activeClassId}|${activeTermId}`);
 
+  // Roster counts, used only to explain an empty list (enrolled this year vs.
+  // students who sit in this class in another year).
+  const fetchEnrollment = useCallback(
+    () => activeClassId && activeTermId
+      ? staffApi.get<Enrollment>(`/school/report-cards/class/${activeClassId}/enrollment?termId=${activeTermId}`).catch(() => null)
+      : Promise.resolve(null),
+    [activeClassId, activeTermId],
+  );
+  const { data: enrollment } = useApi(fetchEnrollment, `e|${activeClassId}|${activeTermId}`);
+
   const generatedCount   = cards?.filter(c => c.status !== 'NOT_GENERATED').length ?? 0;
   const publishedCount   = cards?.filter(c => c.status === 'PUBLISHED').length ?? 0;
   const unpublishedCount = cards?.filter(c => c.status === 'DRAFT').length ?? 0;
   const staleCount       = cards?.filter(c => c.stale).length ?? 0;
 
+  // How many cards the "Download all" button will bundle, given the toggle.
+  const downloadCount = publishedOnly ? publishedCount : generatedCount;
+
+  // Explain an empty roster: enrolment is per-year, so a class can be empty for
+  // the chosen year while its students sit in it under a different year.
+  const yearName = selectedYear?.name ?? 'this year';
+  const emptyMessage =
+    enrollment && enrollment.total > 0 && enrollment.inYear === 0
+      ? `No students are enrolled in this class for ${yearName}. ${enrollment.otherYears} ${enrollment.otherYears === 1 ? 'student sits' : 'students sit'} in this class in another year — promote or enrol them into ${yearName} (Settings → Progression).`
+      : 'No students assigned to this class yet.';
+
   function openPreview(studentId: string) {
     router.push(`/school/academics/report-cards/${studentId}?termId=${activeTermId}`);
+  }
+
+  // Download every (published, or all generated) card in the class as one PDF —
+  // one student per page. Uses a raw fetch so the auth header rides along on the
+  // binary response (mirrors the single-card download).
+  async function downloadAll() {
+    if (!activeClassId || !activeTermId || downloadCount === 0) return;
+    setAlert(null); setDownloadingAll(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/school/report-cards/class/${activeClassId}/pdf?termId=${activeTermId}&publishedOnly=${publishedOnly}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('so_staff_access')}` } },
+      );
+      if (!res.ok) {
+        let message = 'Failed to download report cards.';
+        try { const b = await res.json(); message = b.message ?? message; } catch {}
+        setAlert({ type: 'error', message });
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const className = (classes.find(c => c.id === activeClassId)?.name ?? 'class').replace(/[\\/]/g, '-');
+      const termName  = (terms?.find((t: any) => t.id === activeTermId)?.name ?? '').replace(/[\\/]/g, '-');
+      a.download = `report-cards-${className}${termName ? `-${termName}` : ''}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingAll(false);
+    }
   }
 
   async function generate() {
@@ -200,11 +267,17 @@ export default function ReportCardsPage() {
           <p className="text-sm text-slate-500 mt-0.5">Generate, review, and publish term report cards per class.</p>
         </div>
 
-        <select value={activeTermId} onChange={e => setTermId(e.target.value)}
-          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-          <option value="">Select term…</option>
-          {terms?.map((t: any) => <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' ✓' : ''}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          <select value={activeYearId} onChange={e => { setYearId(e.target.value); setTermId(''); }}
+            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
+            {years?.map(y => <option key={y.id} value={y.id}>{y.name}{y.isActive ? ' (Active)' : ''}</option>)}
+          </select>
+          <select value={activeTermId} onChange={e => setTermId(e.target.value)}
+            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
+            <option value="">Select term…</option>
+            {terms.map(t => <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' ✓' : ''}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* Class tabs */}
@@ -224,7 +297,7 @@ export default function ReportCardsPage() {
                 <span className="font-semibold text-amber-600">{unpublishedCount}</span> draft
               </p>
             ) : (
-              <p className="text-sm text-slate-500">No students in this class.</p>
+              <p className="text-sm text-slate-500">{emptyMessage}</p>
             )}
           </div>
 
@@ -232,6 +305,25 @@ export default function ReportCardsPage() {
             <span className="text-xs text-slate-400" title="Only the class teacher can generate or publish report cards.">
               View only — managed by the class teacher
             </span>
+          )}
+
+          {/* Download the whole class as one PDF — available to anyone who can
+              view (printing is allowed for subject teachers too). */}
+          {generatedCount > 0 && (
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer" title="Include only published cards. Uncheck to include drafts too.">
+                <input type="checkbox" checked={publishedOnly} onChange={e => setPublishedOnly(e.target.checked)} />
+                Published only
+              </label>
+              <button
+                onClick={downloadAll}
+                disabled={downloadingAll || downloadCount === 0}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+                title={downloadCount === 0 ? (publishedOnly ? 'No published cards yet' : 'No generated cards yet') : undefined}
+              >
+                {downloadingAll ? 'Preparing…' : `↓ Download all (${downloadCount})`}
+              </button>
+            </div>
           )}
 
           {canManage && (
@@ -311,7 +403,7 @@ export default function ReportCardsPage() {
               ))}
               {!loading && (!cards || cards.length === 0) && (
                 <tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
-                  No students in this class. Assign students to it first.
+                  {emptyMessage}
                 </td></tr>
               )}
             </tbody>

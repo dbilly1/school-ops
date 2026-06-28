@@ -371,6 +371,25 @@ export class ReportCardsService {
     });
   }
 
+  // Roster counts for a class: how many students are enrolled for the selected
+  // term's academic year vs. any other year. Lets the UI explain an empty list
+  // ("no one enrolled for this year — promote them") instead of a bare blank.
+  async classEnrollmentSummary(schoolId: string, classId: string, termId: string) {
+    const term = await this.prisma.term.findFirst({
+      where: { id: termId, schoolId },
+      select: { academicYearId: true },
+    });
+    if (!term) throw new NotFoundException('Term not found');
+
+    const [inYear, total] = await Promise.all([
+      this.prisma.studentClassAssignment.count({
+        where: { classId, schoolId, academicYearId: term.academicYearId },
+      }),
+      this.prisma.studentClassAssignment.count({ where: { classId, schoolId } }),
+    ]);
+    return { inYear, total, otherYears: total - inYear };
+  }
+
   async getStudentReportCard(schoolId: string, studentId: string, termId: string) {
     const student = await this.prisma.student.findFirst({ where: { id: studentId, schoolId } });
     if (!student) throw new NotFoundException('Student not found');

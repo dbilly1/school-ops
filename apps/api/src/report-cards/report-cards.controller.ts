@@ -35,6 +35,16 @@ export class ReportCardsController {
     return this.reportCardsService.findForClass(user.schoolId, classId, termId);
   }
 
+  @Get('class/:classId/enrollment')
+  @RequirePermission('academics', 'VIEW', 'report_cards')
+  classEnrollment(
+    @CurrentUser() user: any,
+    @Param('classId') classId: string,
+    @Query('termId') termId: string,
+  ) {
+    return this.reportCardsService.classEnrollmentSummary(user.schoolId, classId, termId);
+  }
+
   @Get('student/:studentId')
   @RequirePermission('academics', 'VIEW', 'report_cards')
   getStudentReportCard(
@@ -60,6 +70,26 @@ export class ReportCardsController {
       'Content-Length': pdf.length,
     });
     res.end(pdf);
+  }
+
+  @Get('class/:classId/pdf')
+  @RequirePermission('academics', 'VIEW', 'report_cards')
+  async getClassPdf(
+    @CurrentUser() user: any,
+    @Param('classId') classId: string,
+    @Query('termId') termId: string,
+    @Query('publishedOnly') publishedOnly: string,
+    @Res() res: Response,
+  ) {
+    const { buffer } = await this.pdfService.generateClass(user.schoolId, classId, termId, {
+      publishedOnly: publishedOnly === 'true',
+    });
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="report-cards-${classId}.pdf"`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
   }
 
   @Post('publish')
