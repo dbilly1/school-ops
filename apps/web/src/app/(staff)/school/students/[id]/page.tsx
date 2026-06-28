@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useCallback, use } from 'react';
+import { useState, useCallback, useMemo, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { FormField, Input, SaveButton, Alert } from '@/components/ui/settings-card';
 import { Modal } from '@/components/ui/modal';
 import { cn } from '@/lib/cn';
+import { useStaffAuth } from '@/contexts/staff-auth';
+import { InvoicePreviewModal, type InvoicePreviewData } from '@/components/finance/invoice-preview-modal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -61,6 +63,14 @@ type PerformanceData = {
   history: PerformanceTerm[];
   declining: boolean;
   termsTracked: number;
+};
+
+type BillingFrequency = 'PER_TERM' | 'PER_YEAR' | 'ONE_TIME';
+type FeeComponent = { id: string; name: string; sequence: number; billingFrequency: BillingFrequency };
+type FeeItem = { feeComponentId: string; defaultAmount: number; overrides: { gradeLevelId: string; amount: number }[] };
+
+const FREQ_LABEL: Record<BillingFrequency, string> = {
+  PER_TERM: 'Every term', PER_YEAR: 'Once a year', ONE_TIME: 'One-time',
 };
 
 const TABS = ['Profile', 'Guardians', 'Academic History', 'Performance'] as const;
@@ -551,10 +561,52 @@ function PerformanceTab({ studentId }: { studentId: string }) {
 export default function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router  = useRouter();
+  const { user } = useStaffAuth();
   const [tab, setTab] = useState<Tab>('Profile');
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const fetchStudent = useCallback(() => staffApi.get<Student>(`/school/students/${id}`), [id]);
   const { data: student, loading, refetch } = useApi(fetchStudent);
+
+  // ── Bill preview — built from the current Fee Setup for this student's
+  // category + grade (same computation as invoice generation). ──────────────────
+  const categoryId = student?.studentCategory?.id ?? '';
+  const fetchComponents = useCallback(() => staffApi.get<FeeComponent[]>('/school/finance/fee-components'), []);
+  const fetchFeeItems = useCallback(() => {
+    if (!categoryId) return Promise.resolve([] as FeeItem[]);
+    return staffApi.get<FeeItem[]>(`/school/finance/fee-items?studentCategoryId=${categoryId}`);
+  }, [categoryId]);
+  const { data: components } = useApi(fetchComponents);
+  const { data: feeItems }   = useApi(fetchFeeItems, categoryId);
+
+  const billPreview: InvoicePreviewData | null = useMemo(() => {
+    if (!student) return null;
+    const assignment = student.classAssignments[0];
+    const gradeId = assignment?.class.gradeLevel.id;
+    const lines = (components ?? [])
+      .slice()
+      .sort((a, b) => a.sequence - b.sequence)
+      .map(c => {
+        const item = feeItems?.find(i => i.feeComponentId === c.id);
+        if (!item) return null;
+        const ov = gradeId ? item.overrides.find(o => o.gradeLevelId === gradeId) : undefined;
+        const amount = ov && ov.amount > 0 ? ov.amount : item.defaultAmount;
+        const tag = c.billingFrequency !== 'PER_TERM' ? FREQ_LABEL[c.billingFrequency] : undefined;
+        return amount > 0 ? { name: c.name, amount, tag } : null;
+      })
+      .filter((l): l is NonNullable<typeof l> => !!l);
+    const primary = student.guardians.find(g => g.isPrimary) ?? student.guardians[0];
+    return {
+      className: assignment?.class.name ?? '—',
+      lines,
+      student: {
+        name: `${student.firstName} ${student.lastName}`,
+        studentId: student.studentId,
+        guardianName: primary?.name ?? null,
+      },
+      issuedBy: user ? `${user.firstName} ${user.lastName}`.trim() : null,
+    };
+  }, [student, components, feeItems, user]);
 
   if (loading) return (
     <div className="space-y-4">
@@ -615,6 +667,14 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             Enrolled {new Date(student.enrolledAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
+
+        <button
+          onClick={() => setPreviewOpen(true)}
+          className="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold text-white transition"
+          style={{ backgroundColor: 'var(--accent)' }}
+        >
+          Preview bill
+        </button>
       </div>
 
       {/* Tabs */}
@@ -640,6 +700,8 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         {tab === 'Academic History' && <AcademicHistoryTab student={student} />}
         {tab === 'Performance'      && <PerformanceTab     studentId={student.id} />}
       </div>
+
+      <InvoicePreviewModal data={previewOpen ? billPreview : null} onClose={() => setPreviewOpen(false)} />
     </div>
   );
 }

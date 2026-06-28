@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useCallback, use } from 'react';
+import { useState, useCallback, useMemo, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { FormField, Input, SaveButton, Alert } from '@/components/ui/settings-card';
 import { ReceiptModal, type ReceiptData } from '@/components/finance/receipt-modal';
+import { InvoicePreviewModal, type InvoicePreviewData } from '@/components/finance/invoice-preview-modal';
 
 type Payment = {
   id: string;
@@ -24,12 +25,15 @@ type InvoiceItem = {
   sequence: number;
 };
 
+type Guardian = { name: string; isPrimary: boolean };
+
 type InvoiceDetail = {
   id: string;
   amount: number;
   amountPaid: number;
   status: 'UNPAID' | 'PARTIAL' | 'PAID';
   dueDate: string | null;
+  issuedAt: string;
   student: { id: string; firstName: string; lastName: string; studentId: string };
   term: { name: string };
   gradeLevel: { name: string };
@@ -49,6 +53,36 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [saving, setSaving] = useState(false);
   const [alert, setAlert]   = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  // The invoice endpoint doesn't carry the guardian, so pull it from the student
+  // record for the printable invoice document.
+  const studentId = invoice?.student.id ?? '';
+  const fetchStudentGuardians = useCallback(() => {
+    if (!studentId) return Promise.resolve<{ guardians: Guardian[] } | null>(null);
+    return staffApi.get<{ guardians: Guardian[] }>(`/school/students/${studentId}`).catch(() => null);
+  }, [studentId]);
+  const { data: studentRecord } = useApi(fetchStudentGuardians, studentId);
+
+  const billDoc: InvoicePreviewData | null = useMemo(() => {
+    if (!invoice) return null;
+    const primary = studentRecord?.guardians?.find(g => g.isPrimary) ?? studentRecord?.guardians?.[0];
+    return {
+      className: [invoice.gradeLevel?.name, invoice.term.name].filter(Boolean).join(' · ') || '—',
+      lines: invoice.items.map(it => ({
+        name: it.name,
+        amount: it.amount,
+        tag: it.isCarryForward ? 'Arrears' : undefined,
+      })),
+      student: {
+        name: `${invoice.student.firstName} ${invoice.student.lastName}`,
+        studentId: invoice.student.studentId,
+        guardianName: primary?.name ?? null,
+      },
+      date: invoice.issuedAt,
+      preview: false,
+    };
+  }, [invoice, studentRecord]);
 
   function paymentReceipt(p: Payment): ReceiptData {
     return {
@@ -115,7 +149,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           </p>
           <p className="text-xs font-mono text-slate-400 mt-0.5">{invoice.student.studentId}</p>
         </div>
-        <div className="text-right">
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            onClick={() => setPreviewOpen(true)}
+            className="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition">
+            Print invoice
+          </button>
           <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
             invoice.status === 'PAID'    ? 'bg-emerald-100 text-emerald-700' :
             invoice.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' :
@@ -279,6 +318,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       </div>
 
       <ReceiptModal receipt={receipt} onClose={() => setReceipt(null)} />
+      <InvoicePreviewModal data={previewOpen ? billDoc : null} onClose={() => setPreviewOpen(false)} />
     </div>
   );
 }

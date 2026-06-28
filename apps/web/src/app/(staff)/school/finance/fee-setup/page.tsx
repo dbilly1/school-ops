@@ -3,6 +3,8 @@
 import { useState, useCallback, useEffect, useMemo, Fragment } from 'react';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
+import { InvoicePreviewModal, type InvoicePreviewData } from '@/components/finance/invoice-preview-modal';
+import { useStaffAuth } from '@/contexts/staff-auth';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -34,6 +36,9 @@ const FREQ_LABEL: Record<BillingFrequency, string> = {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function FeeSetupPage() {
+  const { user } = useStaffAuth();
+  const issuedBy = user ? `${user.firstName} ${user.lastName}`.trim() : null;
+
   const fetchGrades = useCallback(() => staffApi.get<GradeLevel[]>('/school/grade-structure/grade-levels'), []);
   const fetchCats   = useCallback(() => staffApi.get<StudentCategory[]>('/school/student-categories'), []);
   const fetchComps  = useCallback(() => staffApi.get<FeeComponent[]>('/school/finance/fee-components'), []);
@@ -100,6 +105,28 @@ export default function FeeSetupPage() {
   function gradeTotal(gradeId: string): number {
     return comps.reduce((sum, c) => sum + effective(c.id, gradeId), 0);
   }
+
+  // ── Invoice preview ──────────────────────────────────────────────────────────
+  const [previewGradeId, setPreviewGradeId] = useState<string | null>(null);
+  const previewData: InvoicePreviewData | null = useMemo(() => {
+    if (!previewGradeId) return null;
+    const grade = sortedGrades.find(g => g.id === previewGradeId);
+    if (!grade) return null;
+    const lines = comps
+      .map(c => ({
+        name: c.name,
+        amount: effective(c.id, previewGradeId),
+        tag: c.billingFrequency !== 'PER_TERM' ? FREQ_LABEL[c.billingFrequency] : undefined,
+      }))
+      .filter(l => l.amount > 0);
+    return {
+      className: grade.name,
+      lines,
+      issuedBy,
+    };
+    // effective() reads `rows`, so recompute when rows change too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewGradeId, sortedGrades, comps, categoryId, rows, issuedBy]);
 
   // ── Save ─────────────────────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
@@ -346,10 +373,11 @@ export default function FeeSetupPage() {
 
               {/* Totals preview */}
               <div className="mt-5 bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                   <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
                     Total per class — {cats.find(c => c.id === categoryId)?.name}
                   </h3>
+                  <span className="text-[11px] text-slate-400">Click a class to preview its invoice</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -357,10 +385,16 @@ export default function FeeSetupPage() {
                       {sortedGrades.map((g, gi) => {
                         const total = gradeTotal(g.id);
                         return (
-                          <tr key={g.id} style={{ backgroundColor: gi % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                          <tr key={g.id}
+                            onClick={() => setPreviewGradeId(g.id)}
+                            className="cursor-pointer hover:bg-slate-100/70 transition"
+                            style={{ backgroundColor: gi % 2 === 0 ? '#fff' : '#f9fafb' }}>
                             <td className="px-4 py-2 text-slate-600">{g.name}</td>
-                            <td className="px-4 py-2 text-right font-semibold text-slate-800">
-                              {total > 0 ? ghs(total) : <span className="text-slate-300">—</span>}
+                            <td className="px-4 py-2 text-right">
+                              <span className="font-semibold text-slate-800">
+                                {total > 0 ? ghs(total) : <span className="text-slate-300">—</span>}
+                              </span>
+                              <span className="ml-2 text-[11px] font-medium" style={{ color: 'var(--accent)' }}>Preview →</span>
                             </td>
                           </tr>
                         );
@@ -378,6 +412,8 @@ export default function FeeSetupPage() {
           )}
         </>
       )}
+
+      <InvoicePreviewModal data={previewData} onClose={() => setPreviewGradeId(null)} />
     </div>
   );
 }
