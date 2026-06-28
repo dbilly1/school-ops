@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, use, useRef } from 'react';
+import { useState, useCallback, use, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
@@ -93,45 +93,40 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
   const studentsKey = assessment ? (effectiveClass || 'all') : 'pending';
   const { data: students, loading: studLoading } = useApi(fetchStudents, studentsKey);
 
-  // Score state — keyed by studentId. Re-seed (mapping already-recorded scores)
-  // once the real roster for the current view has finished loading. We key the
-  // guard on studentsKey and skip the 'pending' placeholder + any in-flight
-  // refetch, so we never seed against the transient empty roster useApi holds
-  // during a key change (which previously stuck the page on blank scores).
-  const [scores, setScores] = useState<Record<string, { rawScore: string; remarks: string }>>({});
-  const initialisedFor = useRef<string | null>(null);
+  // Displayed values derive from the fetched scores; `edits` only holds what the
+  // user has typed this session and takes precedence. Deriving (instead of
+  // copying recorded scores into state on load) avoids the race where the roster
+  // briefly lags behind the selected class and the page got stuck showing blanks.
+  const [edits, setEdits] = useState<Record<string, { rawScore: string; remarks: string }>>({});
 
-  if (
-    !sLoading && !studLoading && existingScores && students &&
-    studentsKey !== 'pending' && initialisedFor.current !== studentsKey
-  ) {
-    const init: typeof scores = {};
-    students.forEach(s => {
-      const existing = existingScores.find(e => e.studentId === s.id);
-      init[s.id] = {
-        rawScore: existing ? String(existing.rawScore) : '',
-        remarks:  existing?.remarks ?? '',
-      };
-    });
-    setScores(init);
-    initialisedFor.current = studentsKey;
-  }
+  const existingById = useMemo(() => {
+    const m = new Map<string, { rawScore: string; remarks: string }>();
+    (existingScores ?? []).forEach(e => m.set(e.studentId, { rawScore: String(e.rawScore), remarks: e.remarks ?? '' }));
+    return m;
+  }, [existingScores]);
+
+  const valueFor = (studentId: string) =>
+    edits[studentId] ?? existingById.get(studentId) ?? { rawScore: '', remarks: '' };
 
   const [saving, setSaving] = useState(false);
   const [alert, setAlert]   = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
   function setScore(studentId: string, field: 'rawScore' | 'remarks', value: string) {
-    setScores(s => ({ ...s, [studentId]: { ...(s[studentId] ?? { rawScore: '', remarks: '' }), [field]: value } }));
+    setEdits(prev => {
+      const base = prev[studentId] ?? existingById.get(studentId) ?? { rawScore: '', remarks: '' };
+      return { ...prev, [studentId]: { ...base, [field]: value } };
+    });
   }
 
   async function saveAll() {
     if (!assessment) return;
     setAlert(null); setSaving(true);
     try {
-      const entries = Object.entries(scores)
-        .filter(([, v]) => v.rawScore !== '')
-        .map(([studentId, v]) => ({
-          studentId,
+      const entries = (students ?? [])
+        .map(s => ({ studentId: s.id, ...valueFor(s.id) }))
+        .filter(v => v.rawScore !== '')
+        .map(v => ({
+          studentId: v.studentId,
           rawScore: parseFloat(v.rawScore),
           remarks:  v.remarks || null,
         }));
@@ -175,9 +170,12 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
   if (!assessment) return <p className="text-sm text-slate-400">Assessment not found.</p>;
 
   const bands = gradingScale?.bands ?? [];
-  const filledCount = Object.values(scores).filter(v => v.rawScore !== '').length;
+  const enteredScores = (students ?? [])
+    .map(s => valueFor(s.id).rawScore)
+    .filter(v => v !== '');
+  const filledCount = enteredScores.length;
   const avgScore = filledCount > 0
-    ? Math.round(Object.values(scores).filter(v => v.rawScore !== '').reduce((s, v) => s + parseFloat(v.rawScore), 0) / filledCount)
+    ? Math.round(enteredScores.reduce((s, v) => s + parseFloat(v), 0) / filledCount)
     : null;
 
   return (
@@ -276,7 +274,7 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
               </tr>
             ))}
             {!loading && students?.map(student => {
-              const score  = scores[student.id] ?? { rawScore: '', remarks: '' };
+              const score  = valueFor(student.id);
               const cls    = student.classAssignments[0]?.class;
               const raw    = parseFloat(score.rawScore);
               const isOver = !isNaN(raw) && raw > assessment.totalScore;
