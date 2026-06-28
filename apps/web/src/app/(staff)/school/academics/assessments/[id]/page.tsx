@@ -15,6 +15,7 @@ type Assessment = {
   weight: number | null;
   category: string;
   assessmentDate: string | null;
+  batchId: string | null;
   subject: { id: string; name: string };
   class: { id: string; name: string } | null;
   term: { id: string; name: string };
@@ -92,12 +93,18 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
   const studentsKey = assessment ? (effectiveClass || 'all') : 'pending';
   const { data: students, loading: studLoading } = useApi(fetchStudents, studentsKey);
 
-  // Score state — keyed by studentId. Re-seed whenever the visible class (and
-  // therefore the student set) changes, mapping any already-recorded scores.
+  // Score state — keyed by studentId. Re-seed (mapping already-recorded scores)
+  // once the real roster for the current view has finished loading. We key the
+  // guard on studentsKey and skip the 'pending' placeholder + any in-flight
+  // refetch, so we never seed against the transient empty roster useApi holds
+  // during a key change (which previously stuck the page on blank scores).
   const [scores, setScores] = useState<Record<string, { rawScore: string; remarks: string }>>({});
   const initialisedFor = useRef<string | null>(null);
 
-  if (!sLoading && existingScores && students && initialisedFor.current !== effectiveClass) {
+  if (
+    !sLoading && !studLoading && existingScores && students &&
+    studentsKey !== 'pending' && initialisedFor.current !== studentsKey
+  ) {
     const init: typeof scores = {};
     students.forEach(s => {
       const existing = existingScores.find(e => e.studentId === s.id);
@@ -107,7 +114,7 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
       };
     });
     setScores(init);
-    initialisedFor.current = effectiveClass;
+    initialisedFor.current = studentsKey;
   }
 
   const [saving, setSaving] = useState(false);
@@ -138,6 +145,24 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
     }
   }
 
+  // ── Delete ────────────────────────────────────────────────────────────────
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function deleteAssessment() {
+    setDeleting(true); setAlert(null);
+    try {
+      const res = await staffApi.delete<{ batchId: string | null; batchDeleted: boolean }>(`/school/assessments/${id}`);
+      // Go back to the parent batch if it still exists, else the main list.
+      router.push(res.batchId && !res.batchDeleted
+        ? `/school/academics/assessments/batch/${res.batchId}`
+        : '/school/academics/assessments');
+    } catch (err) {
+      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to delete assessment.' });
+      setDeleting(false);
+    }
+  }
+
   const loading = aLoading || sLoading || studLoading;
 
   if (aLoading) return (
@@ -157,11 +182,31 @@ export default function ScoreEntryPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div>
-      {/* Back */}
-      <button onClick={() => router.push('/school/academics/assessments')}
-        className="text-sm text-slate-400 hover:text-slate-700 transition mb-5 flex items-center gap-1">
-        ← Back to assessments
-      </button>
+      {/* Back + delete */}
+      <div className="flex items-center justify-between mb-5">
+        <button onClick={() => router.push('/school/academics/assessments')}
+          className="text-sm text-slate-400 hover:text-slate-700 transition flex items-center gap-1">
+          ← Back to assessments
+        </button>
+        {confirmingDelete ? (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-slate-500">
+              {(existingScores?.length ?? 0) > 0
+                ? `Delete this assessment and its ${existingScores!.length} recorded score${existingScores!.length === 1 ? '' : 's'}?`
+                : 'Delete this assessment?'}
+            </span>
+            <button onClick={() => setConfirmingDelete(false)} className="text-sm font-medium text-slate-500 hover:text-slate-700">Cancel</button>
+            <button onClick={deleteAssessment} disabled={deleting}
+              className="px-3.5 py-1.5 text-sm font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg transition disabled:opacity-60">
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirmingDelete(true)} className="text-sm font-medium text-red-500 hover:text-red-600">
+            Delete assessment
+          </button>
+        )}
+      </div>
 
       {/* Assessment header */}
       <div className="flex items-start justify-between mb-5">

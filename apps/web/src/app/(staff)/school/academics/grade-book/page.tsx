@@ -13,6 +13,7 @@ type GradeBookEntry = {
   assessments: {
     assessmentId: string;
     title: string;
+    subject: string;
     totalScore: number;
     rawScore: number | null;
     displayGrade: string | null;
@@ -100,9 +101,9 @@ export default function GradeBookPage() {
                     Student
                   </th>
                   {assessmentCols.map(a => (
-                    <th key={a.assessmentId} className="px-3 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide min-w-[100px]">
-                      <div>{a.title}</div>
-                      <div className="text-slate-300 font-normal normal-case">/{a.totalScore}</div>
+                    <th key={a.assessmentId} className="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide min-w-[100px]">
+                      <div>{a.subject}</div>
+                      <div className="text-slate-300 font-normal normal-case">{a.title} · /{a.totalScore}</div>
                     </th>
                   ))}
                   <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide min-w-[100px]" style={{ color: 'var(--accent)' }}>

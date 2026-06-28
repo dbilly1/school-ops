@@ -296,7 +296,24 @@ export class AssessmentsService {
     const assessment = await this.prisma.assessment.findFirst({ where: { id, schoolId } });
     if (!assessment) throw new NotFoundException('Assessment not found');
     await this.teacherScope.assertCanManageAssessment(caller.id, caller.roles, assessment.subjectId, assessment.classId);
-    return this.prisma.assessment.delete({ where: { id } });
+
+    // Scores have no cascade, so clear them first or the delete FK-throws.
+    await this.prisma.$transaction([
+      this.prisma.assessmentScore.deleteMany({ where: { assessmentId: id } }),
+      this.prisma.assessment.delete({ where: { id } }),
+    ]);
+
+    // If this was the last subject in its batch, drop the now-empty batch row.
+    let batchDeleted = false;
+    if (assessment.batchId) {
+      const remaining = await this.prisma.assessment.count({ where: { batchId: assessment.batchId } });
+      if (remaining === 0) {
+        await this.prisma.assessmentBatch.delete({ where: { id: assessment.batchId } });
+        batchDeleted = true;
+      }
+    }
+
+    return { deleted: id, batchId: assessment.batchId, batchDeleted };
   }
 
   async recordScores(schoolId: string, assessmentId: string, dto: BulkRecordScoresDto, caller: Caller) {
@@ -398,8 +415,10 @@ export class AssessmentsService {
 
     const assessments = await this.prisma.assessment.findMany({
       where: { schoolId, termId, classId },
-      include: { scores: true },
-      orderBy: [{ assessmentDate: 'asc' }, { createdAt: 'asc' }],
+      include: { scores: true, subject: { select: { name: true } } },
+      // Group columns by subject so same-titled exams (e.g. "Mid-Term") are
+      // distinguishable; date/created keep a stable order within a subject.
+      orderBy: [{ subject: { name: 'asc' } }, { assessmentDate: 'asc' }, { createdAt: 'asc' }],
     });
 
     // Per-student row matching the grade-book UI: a column per assessment (raw
@@ -415,6 +434,7 @@ export class AssessmentsService {
             return {
               assessmentId: a.id,
               title: a.title,
+              subject: a.subject.name,
               totalScore: total,
               rawScore,
               displayGrade: pct !== null ? await this.gradingService.deriveGrade(schoolId, Math.round(pct), cls.gradeLevelId) : null,

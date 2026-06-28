@@ -39,11 +39,30 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const router = useRouter();
 
   const fetchBatch = useCallback(() => staffApi.get<Batch>(`/school/assessments/batches/${id}`), [id]);
-  const { data: batch, loading } = useApi(fetchBatch);
+  const { data: batch, loading, refetch } = useApi(fetchBatch);
 
   const [deleting, setDeleting] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [alert, setAlert] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+
+  // Per-subject delete (drops one subject from the exam; removes the batch if it
+  // was the last subject).
+  const [confirmId, setConfirmId]   = useState<string | null>(null);
+  const [rowDeleting, setRowDeleting] = useState<string | null>(null);
+
+  async function deleteSubject(assessmentId: string) {
+    setRowDeleting(assessmentId); setAlert(null);
+    try {
+      const res = await staffApi.delete<{ batchDeleted: boolean }>(`/school/assessments/${assessmentId}`);
+      if (res.batchDeleted) { router.push('/school/academics/assessments'); return; }
+      setConfirmId(null);
+      refetch();
+    } catch (err) {
+      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to delete subject.' });
+    } finally {
+      setRowDeleting(null);
+    }
+  }
 
   async function deleteBatch() {
     setDeleting(true); setAlert(null);
@@ -131,7 +150,29 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                   )}
                 </td>
                 <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                  <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>Enter scores →</span>
+                  {confirmId === a.id ? (
+                    <span className="inline-flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <span className="text-xs text-slate-500">
+                        {a.scored > 0 ? `Delete + ${a.scored} score${a.scored === 1 ? '' : 's'}?` : 'Delete?'}
+                      </span>
+                      <button onClick={() => setConfirmId(null)} className="text-xs font-medium text-slate-500 hover:text-slate-700">Cancel</button>
+                      <button onClick={() => deleteSubject(a.id)} disabled={rowDeleting === a.id}
+                        className="text-xs font-semibold text-red-500 hover:text-red-600 disabled:opacity-60">
+                        {rowDeleting === a.id ? '…' : 'Delete'}
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-3">
+                      <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>Enter scores →</span>
+                      <button
+                        onClick={e => { e.stopPropagation(); setConfirmId(a.id); }}
+                        className="text-slate-300 hover:text-red-500 transition"
+                        title="Delete subject"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
