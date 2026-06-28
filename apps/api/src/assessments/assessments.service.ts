@@ -270,6 +270,126 @@ export class AssessmentsService {
     };
   }
 
+  // Broadsheet for one exam batch: students × subjects, per-subject percentage +
+  // grade, each student's average (normalised across subjects so a 50-mark and a
+  // 100-mark paper count equally) and class position. Purely read/aggregate — the
+  // terminal report card and its freeze/publish snapshot are untouched.
+  async getBatchResults(schoolId: string, id: string, caller: Caller) {
+    const batch = await this.prisma.assessmentBatch.findFirst({
+      where: { id, schoolId },
+      include: {
+        class: { select: { id: true, name: true, gradeLevelId: true } },
+        term: { select: { id: true, name: true } },
+        assessments: {
+          include: { subject: { select: { id: true, name: true } }, scores: true },
+          orderBy: { subject: { name: 'asc' } },
+        },
+      },
+    });
+    if (!batch) throw new NotFoundException('Assessment batch not found');
+
+    const accessible = await this.teacherScope.accessibleClassIds(caller.id, caller.roles);
+    if (accessible && !accessible.includes(batch.classId))
+      throw new NotFoundException('Assessment batch not found');
+
+    const gradeLevelId = batch.class.gradeLevelId;
+
+    // Subject columns, in display order.
+    const subjects = batch.assessments.map((a) => ({
+      assessmentId: a.id,
+      subjectId: a.subject.id,
+      name: a.subject.name,
+      totalScore: Number(a.totalScore),
+    }));
+
+    // Class roster (per-class, as gradebook/attendance do).
+    const roster = await this.prisma.studentClassAssignment.findMany({
+      where: { classId: batch.classId, schoolId },
+      include: { student: { select: { id: true, studentId: true, firstName: true, lastName: true } } },
+      orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
+    });
+
+    // Quick lookup: assessmentId → (studentId → rawScore).
+    const scoreMap = new Map<string, Map<string, number>>();
+    for (const a of batch.assessments) {
+      const m = new Map<string, number>();
+      for (const s of a.scores) m.set(s.studentId, Number(s.rawScore));
+      scoreMap.set(a.id, m);
+    }
+
+    // Build each student's row with per-subject percentages.
+    const rows = await Promise.all(
+      roster.map(async ({ student }) => {
+        const cells = await Promise.all(
+          batch.assessments.map(async (a) => {
+            const total = Number(a.totalScore);
+            const raw = scoreMap.get(a.id)!.get(student.id);
+            const has = raw !== undefined;
+            const percent = has && total > 0 ? (raw! / total) * 100 : null;
+            return {
+              assessmentId: a.id,
+              subjectId: a.subject.id,
+              rawScore: has ? raw! : null,
+              totalScore: total,
+              percent: percent !== null ? Math.round(percent) : null,
+              grade: percent !== null ? await this.gradingService.deriveGrade(schoolId, Math.round(percent), gradeLevelId) : null,
+            };
+          }),
+        );
+
+        const recorded = cells.filter((c) => c.percent !== null);
+        const totalRaw = cells.reduce((sum, c) => sum + (c.rawScore ?? 0), 0);
+        const totalPossible = cells.reduce((sum, c) => sum + c.totalScore, 0);
+        const average = recorded.length
+          ? Math.round(recorded.reduce((sum, c) => sum + c.percent!, 0) / recorded.length)
+          : null;
+
+        return {
+          student,
+          cells,
+          subjectsScored: recorded.length,
+          totalRaw,
+          totalPossible,
+          average,
+          overallGrade: average !== null ? await this.gradingService.deriveGrade(schoolId, average, gradeLevelId) : null,
+          position: null as number | null,
+        };
+      }),
+    );
+
+    // Standard competition ranking by average (desc); students with no scores
+    // stay unranked. Ties share a position, the next rank skips accordingly.
+    const ranked = rows.filter((r) => r.average !== null).sort((a, b) => b.average! - a.average!);
+    let lastAvg: number | null = null;
+    let lastPos = 0;
+    ranked.forEach((r, i) => {
+      if (lastAvg === null || r.average! < lastAvg) { lastPos = i + 1; lastAvg = r.average!; }
+      r.position = lastPos;
+    });
+
+    const classAverage = ranked.length
+      ? Math.round(ranked.reduce((sum, r) => sum + r.average!, 0) / ranked.length)
+      : null;
+
+    return {
+      id: batch.id,
+      title: batch.title,
+      category: batch.category,
+      assessmentDate: batch.assessmentDate,
+      class: { id: batch.class.id, name: batch.class.name },
+      term: batch.term,
+      subjects,
+      students: rows,
+      summary: {
+        studentCount: rows.length,
+        rankedCount: ranked.length,
+        classAverage,
+        subjectCount: subjects.length,
+        fullyScored: subjects.length > 0 && batch.assessments.every((a) => a.scores.length > 0),
+      },
+    };
+  }
+
   // Delete a whole batch — its assessments and their scores go with it.
   async deleteBatch(schoolId: string, id: string, caller: Caller) {
     const batch = await this.prisma.assessmentBatch.findFirst({

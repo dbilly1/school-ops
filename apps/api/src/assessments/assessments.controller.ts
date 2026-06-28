@@ -1,6 +1,8 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AssessmentsService } from './assessments.service';
+import { AssessmentResultsPdfService } from './assessment-results-pdf.service';
 import { CreateAssessmentDto, BatchCreateAssessmentDto, BulkRecordScoresDto } from './dto/assessment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../permissions/permissions.guard';
@@ -12,7 +14,10 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('school/assessments')
 export class AssessmentsController {
-  constructor(private assessmentsService: AssessmentsService) {}
+  constructor(
+    private assessmentsService: AssessmentsService,
+    private resultsPdfService: AssessmentResultsPdfService,
+  ) {}
 
   @Get()
   @RequirePermission('academics', 'VIEW')
@@ -59,6 +64,31 @@ export class AssessmentsController {
   @RequirePermission('academics', 'VIEW')
   findBatch(@CurrentUser() user: any, @Param('id') id: string) {
     return this.assessmentsService.findBatch(user.schoolId, id, { id: user.id, roles: user.roles });
+  }
+
+  @Get('batches/:id/results')
+  @RequirePermission('academics', 'VIEW')
+  batchResults(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.assessmentsService.getBatchResults(user.schoolId, id, { id: user.id, roles: user.roles });
+  }
+
+  @Get('batches/:id/results/pdf')
+  @RequirePermission('academics', 'VIEW')
+  async batchResultsPdf(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Query('slips') slips: string,
+    @Res() res: Response,
+  ) {
+    const pdf = await this.resultsPdfService.generate(
+      user.schoolId, id, { id: user.id, roles: user.roles }, { slips: slips === 'true' },
+    );
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="results-${id}.pdf"`,
+      'Content-Length': pdf.length,
+    });
+    res.end(pdf);
   }
 
   @Get(':id/scores')

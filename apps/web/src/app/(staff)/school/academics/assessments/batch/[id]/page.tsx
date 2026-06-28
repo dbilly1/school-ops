@@ -107,9 +107,18 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
             {batch.assessmentDate && ` · ${new Date(batch.assessmentDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`}
           </p>
         </div>
-        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${allDone ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-          {scored}/{total} subjects scored
-        </span>
+        <div className="flex items-center gap-3 shrink-0">
+          <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${allDone ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+            {scored}/{total} subjects scored
+          </span>
+          {scored > 0 && (
+            <button onClick={() => router.push(`/school/academics/assessments/batch/${id}/results`)}
+              className="px-3.5 py-2 text-sm font-semibold text-white rounded-lg transition"
+              style={{ backgroundColor: 'var(--accent)' }}>
+              View results →
+            </button>
+          )}
+        </div>
       </div>
 
       {alert && <div className="mb-4"><Alert type={alert.type} message={alert.message} /></div>}
