@@ -9,6 +9,7 @@ import { Modal } from '@/components/ui/modal';
 import { cn } from '@/lib/cn';
 import { useStaffAuth } from '@/contexts/staff-auth';
 import { InvoicePreviewModal, type InvoicePreviewData } from '@/components/finance/invoice-preview-modal';
+import { AdmissionLetterModal, type AdmissionLetterData } from '@/components/admissions/admission-letter-modal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -564,6 +565,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
   const { user } = useStaffAuth();
   const [tab, setTab] = useState<Tab>('Profile');
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [letterOpen, setLetterOpen]   = useState(false);
 
   const fetchStudent = useCallback(() => staffApi.get<Student>(`/school/students/${id}`), [id]);
   const { data: student, loading, refetch } = useApi(fetchStudent);
@@ -607,6 +609,27 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
       issuedBy: user ? `${user.firstName} ${user.lastName}`.trim() : null,
     };
   }, [student, components, feeItems, user]);
+
+  // Admission letter, built from the student's own record — class + year come
+  // from their current assignment, guardian from the primary guardian. No
+  // reporting date is stored for directly-added students, so it falls back to
+  // "(to be confirmed)" in the letter.
+  const letterData: AdmissionLetterData | null = useMemo(() => {
+    if (!student) return null;
+    const assignment = student.classAssignments[0];
+    const primary = student.guardians.find(g => g.isPrimary) ?? student.guardians[0];
+    return {
+      applicantName: `${student.firstName} ${student.lastName}`.trim(),
+      formData: {
+        firstName: student.firstName,
+        lastName: student.lastName,
+        guardianName: primary?.name ?? '',
+      },
+      reportingDate: null,
+      admittedClass: assignment ? { id: assignment.class.id, name: assignment.class.name } : null,
+      academicYear: assignment ? { id: assignment.academicYear.id, name: assignment.academicYear.name } : null,
+    };
+  }, [student]);
 
   if (loading) return (
     <div className="space-y-4">
@@ -668,13 +691,22 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           </p>
         </div>
 
-        <button
-          onClick={() => setPreviewOpen(true)}
-          className="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold text-white transition"
-          style={{ backgroundColor: 'var(--accent)' }}
-        >
-          Preview bill
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setLetterOpen(true)}
+            className="px-4 py-2 rounded-lg text-sm font-semibold border transition"
+            style={{ color: 'var(--accent)', borderColor: 'var(--accent)' }}
+          >
+            Admission letter
+          </button>
+          <button
+            onClick={() => setPreviewOpen(true)}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition"
+            style={{ backgroundColor: 'var(--accent)' }}
+          >
+            Preview bill
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -702,6 +734,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
       </div>
 
       <InvoicePreviewModal data={previewOpen ? billPreview : null} onClose={() => setPreviewOpen(false)} />
+      <AdmissionLetterModal data={letterOpen ? letterData : null} onClose={() => setLetterOpen(false)} />
     </div>
   );
 }
