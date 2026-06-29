@@ -1,5 +1,13 @@
-import { IsString, IsNumber, IsOptional, IsPositive, IsDateString, IsBoolean, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsPositive, IsDateString, IsBoolean, IsArray, ValidateNested, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ExpenseMode } from '@prisma/client';
+
+// ── Operating mode ────────────────────────────────────────
+
+export class SetExpenseModeDto {
+  @IsEnum(ExpenseMode)
+  mode!: ExpenseMode;
+}
 
 // ── Categories ────────────────────────────────────────────
 

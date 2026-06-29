@@ -7,10 +7,11 @@ import { Input, Alert } from '@/components/ui/settings-card';
 import type { ExpenseCategory } from './expense-form-modal';
 
 export function ManageCategoriesModal({
-  open, categories, onClose, onChanged,
+  open, categories, endpointBase = '/school/finance', onClose, onChanged,
 }: {
   open: boolean;
   categories: ExpenseCategory[];
+  endpointBase?: string;   // '/school/finance' | '/school/transport' | '/school/feeding'
   onClose: () => void;
   onChanged: () => void;   // refetch categories in the parent
 }) {
@@ -38,25 +39,25 @@ export function ManageCategoriesModal({
   async function add() {
     const name = newName.trim();
     if (!name) return;
-    await run(async () => { await staffApi.post('/school/finance/expense-categories', { name }); }, 'Category added.');
+    await run(async () => { await staffApi.post(`${endpointBase}/expense-categories`, { name }); }, 'Category added.');
     setNewName('');
   }
 
   async function rename(id: string) {
     const name = editName.trim();
     if (!name) return;
-    await run(async () => { await staffApi.patch(`/school/finance/expense-categories/${id}`, { name }); });
+    await run(async () => { await staffApi.patch(`${endpointBase}/expense-categories/${id}`, { name }); });
     setEditingId(null);
   }
 
   async function setArchived(id: string, isArchived: boolean) {
-    await run(async () => { await staffApi.patch(`/school/finance/expense-categories/${id}`, { isArchived }); });
+    await run(async () => { await staffApi.patch(`${endpointBase}/expense-categories/${id}`, { isArchived }); });
   }
 
   async function remove(id: string, name: string) {
     if (!confirm(`Delete "${name}"? If it has expenses it will be archived instead.`)) return;
     await run(async () => {
-      const res = await staffApi.delete<{ archived?: boolean; message?: string }>(`/school/finance/expense-categories/${id}`);
+      const res = await staffApi.delete<{ archived?: boolean; message?: string }>(`${endpointBase}/expense-categories/${id}`);
       if (res?.message) setAlert({ type: 'success', message: res.message });
     });
   }

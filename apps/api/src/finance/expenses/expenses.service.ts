@@ -1,8 +1,15 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { CostCenter, ExpenseMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateExpenseCategoryDto, UpdateExpenseCategoryDto, CreateExpenseDto, UpdateExpenseDto, SaveBudgetsDto } from './dto/expenses.dto';
 
-const DEFAULT_CATEGORIES = ['Salaries', 'Utilities', 'Supplies', 'Rent', 'Maintenance', 'Transport', 'Other'];
+// Default catalogs are per cost center — each stream gets categories that make
+// sense for it. Seeded lazily the first time a stream's categories are opened.
+const DEFAULT_CATEGORIES: Record<CostCenter, string[]> = {
+  GENERAL:   ['Salaries', 'Utilities', 'Supplies', 'Rent', 'Maintenance', 'Other'],
+  FEEDING:   ['Ingredients', 'Gas', 'Utensils', 'Water', 'Other'],
+  TRANSPORT: ['Fuel', 'Spare Parts', 'Maintenance', 'Driver Allowance', 'Other'],
+};
 
 @Injectable()
 export class ExpensesService {
@@ -10,42 +17,43 @@ export class ExpensesService {
 
   // ── Categories ────────────────────────────────────────────
 
-  // Seed the platform default categories the first time a school opens expenses.
-  // Lazy (vs a migration) so existing live schools get them on first use too.
-  private async ensureDefaultCategories(schoolId: string) {
-    const count = await this.prisma.expenseCategory.count({ where: { schoolId } });
+  // Seed the platform default categories the first time a school opens a given
+  // stream's expenses. Lazy (vs a migration) so existing live schools get them
+  // on first use too. Scoped per cost center so each stream seeds independently.
+  private async ensureDefaultCategories(schoolId: string, costCenter: CostCenter) {
+    const count = await this.prisma.expenseCategory.count({ where: { schoolId, costCenter } });
     if (count > 0) return;
     await this.prisma.expenseCategory.createMany({
-      data: DEFAULT_CATEGORIES.map((name) => ({ schoolId, name })),
+      data: DEFAULT_CATEGORIES[costCenter].map((name) => ({ schoolId, costCenter, name })),
       skipDuplicates: true,
     });
   }
 
-  async findCategories(schoolId: string) {
-    await this.ensureDefaultCategories(schoolId);
+  async findCategories(schoolId: string, costCenter: CostCenter) {
+    await this.ensureDefaultCategories(schoolId, costCenter);
     return this.prisma.expenseCategory.findMany({
-      where: { schoolId },
+      where: { schoolId, costCenter },
       orderBy: [{ isArchived: 'asc' }, { name: 'asc' }],
     });
   }
 
-  async createCategory(schoolId: string, dto: CreateExpenseCategoryDto) {
+  async createCategory(schoolId: string, costCenter: CostCenter, dto: CreateExpenseCategoryDto) {
     const name = dto.name.trim();
     if (!name) throw new BadRequestException('Category name is required');
-    const existing = await this.prisma.expenseCategory.findFirst({ where: { schoolId, name } });
+    const existing = await this.prisma.expenseCategory.findFirst({ where: { schoolId, costCenter, name } });
     if (existing) throw new ConflictException('A category with this name already exists');
-    return this.prisma.expenseCategory.create({ data: { schoolId, name } });
+    return this.prisma.expenseCategory.create({ data: { schoolId, costCenter, name } });
   }
 
-  async updateCategory(schoolId: string, id: string, dto: UpdateExpenseCategoryDto) {
-    const category = await this.prisma.expenseCategory.findFirst({ where: { id, schoolId } });
+  async updateCategory(schoolId: string, costCenter: CostCenter, id: string, dto: UpdateExpenseCategoryDto) {
+    const category = await this.prisma.expenseCategory.findFirst({ where: { id, schoolId, costCenter } });
     if (!category) throw new NotFoundException('Category not found');
 
     if (dto.name !== undefined) {
       const name = dto.name.trim();
       if (!name) throw new BadRequestException('Category name is required');
       const clash = await this.prisma.expenseCategory.findFirst({
-        where: { schoolId, name, id: { not: id } },
+        where: { schoolId, costCenter, name, id: { not: id } },
       });
       if (clash) throw new ConflictException('A category with this name already exists');
     }
@@ -59,8 +67,8 @@ export class ExpensesService {
     });
   }
 
-  async deleteCategory(schoolId: string, id: string) {
-    const category = await this.prisma.expenseCategory.findFirst({ where: { id, schoolId } });
+  async deleteCategory(schoolId: string, costCenter: CostCenter, id: string) {
+    const category = await this.prisma.expenseCategory.findFirst({ where: { id, schoolId, costCenter } });
     if (!category) throw new NotFoundException('Category not found');
 
     const used = await this.prisma.expense.count({ where: { schoolId, categoryId: id } });
@@ -80,9 +88,25 @@ export class ExpensesService {
 
   // ── Expenses ──────────────────────────────────────────────
 
-  async findExpenses(schoolId: string, termId?: string, categoryId?: string) {
+  private mapExpense(e: any) {
+    return { ...e, amount: Number(e.amount), recordedBy: e.recordedByUser };
+  }
+
+  private async listExpenses(
+    schoolId: string,
+    costCenterFilter: CostCenter | CostCenter[] | undefined,
+    termId?: string,
+    categoryId?: string,
+  ) {
     const expenses = await this.prisma.expense.findMany({
-      where: { schoolId, ...(termId ? { termId } : {}), ...(categoryId ? { categoryId } : {}) },
+      where: {
+        schoolId,
+        ...(costCenterFilter
+          ? { costCenter: Array.isArray(costCenterFilter) ? { in: costCenterFilter } : costCenterFilter }
+          : {}),
+        ...(termId ? { termId } : {}),
+        ...(categoryId ? { categoryId } : {}),
+      },
       orderBy: [{ expenseDate: 'desc' }, { createdAt: 'desc' }],
       include: {
         category: { select: { id: true, name: true } },
@@ -90,16 +114,23 @@ export class ExpensesService {
         recordedByUser: { select: { firstName: true, lastName: true } },
       },
     });
-
-    return expenses.map((e) => ({
-      ...e,
-      amount: Number(e.amount),
-      recordedBy: e.recordedByUser,
-    }));
+    return expenses.map((e) => this.mapExpense(e));
   }
 
-  async createExpense(schoolId: string, dto: CreateExpenseDto, recordedBy: string) {
-    const category = await this.prisma.expenseCategory.findFirst({ where: { id: dto.categoryId, schoolId } });
+  // Per-stream surfaces (feeding/transport) always list their own cost center.
+  findExpenses(schoolId: string, costCenter: CostCenter, termId?: string, categoryId?: string) {
+    return this.listExpenses(schoolId, costCenter, termId, categoryId);
+  }
+
+  // General Expenses page: SEPARATED → GENERAL only; UNIFIED → all streams pooled.
+  async findGeneralExpenses(schoolId: string, termId?: string, categoryId?: string) {
+    const mode = await this.getExpenseMode(schoolId);
+    const filter = mode === ExpenseMode.UNIFIED ? undefined : CostCenter.GENERAL;
+    return this.listExpenses(schoolId, filter, termId, categoryId);
+  }
+
+  async createExpense(schoolId: string, costCenter: CostCenter, dto: CreateExpenseDto, recordedBy: string) {
+    const category = await this.prisma.expenseCategory.findFirst({ where: { id: dto.categoryId, schoolId, costCenter } });
     if (!category) throw new NotFoundException('Category not found');
 
     const term = await this.prisma.term.findFirst({ where: { id: dto.termId, schoolId } });
@@ -108,6 +139,7 @@ export class ExpensesService {
     return this.prisma.expense.create({
       data: {
         schoolId,
+        costCenter,
         categoryId: dto.categoryId,
         termId: dto.termId,
         amount: dto.amount,
@@ -121,12 +153,13 @@ export class ExpensesService {
     });
   }
 
-  async updateExpense(schoolId: string, id: string, dto: UpdateExpenseDto) {
-    const expense = await this.prisma.expense.findFirst({ where: { id, schoolId } });
+  async updateExpense(schoolId: string, costCenter: CostCenter, id: string, dto: UpdateExpenseDto) {
+    const expense = await this.prisma.expense.findFirst({ where: { id, schoolId, costCenter } });
     if (!expense) throw new NotFoundException('Expense not found');
 
     if (dto.categoryId) {
-      const category = await this.prisma.expenseCategory.findFirst({ where: { id: dto.categoryId, schoolId } });
+      // A category can only be reassigned within the same stream.
+      const category = await this.prisma.expenseCategory.findFirst({ where: { id: dto.categoryId, schoolId, costCenter } });
       if (!category) throw new NotFoundException('Category not found');
     }
     if (dto.termId) {
@@ -149,14 +182,14 @@ export class ExpensesService {
     });
   }
 
-  async deleteExpense(schoolId: string, id: string) {
-    const expense = await this.prisma.expense.findFirst({ where: { id, schoolId } });
+  async deleteExpense(schoolId: string, costCenter: CostCenter, id: string) {
+    const expense = await this.prisma.expense.findFirst({ where: { id, schoolId, costCenter } });
     if (!expense) throw new NotFoundException('Expense not found');
     await this.prisma.expense.delete({ where: { id } });
     return { deleted: true };
   }
 
-  // ── Budgets ───────────────────────────────────────────────
+  // ── Budgets (General stream only) ─────────────────────────
 
   async findBudgets(schoolId: string, termId: string) {
     const budgets = await this.prisma.expenseBudget.findMany({ where: { schoolId, termId } });
@@ -188,7 +221,54 @@ export class ExpensesService {
     return { saved: results.filter(Boolean).length };
   }
 
-  // ── Summary (income vs expense) ───────────────────────────
+  // ── Operating mode ────────────────────────────────────────
+
+  async getExpenseMode(schoolId: string): Promise<ExpenseMode> {
+    const school = await this.prisma.school.findUnique({ where: { id: schoolId }, select: { expenseMode: true } });
+    return school?.expenseMode ?? ExpenseMode.SEPARATED;
+  }
+
+  async setExpenseMode(schoolId: string, mode: ExpenseMode) {
+    await this.prisma.school.update({ where: { id: schoolId }, data: { expenseMode: mode } });
+    return { mode };
+  }
+
+  // ── Per-stream summary (feeding/transport pages) ──────────
+
+  // Income − expense for a single stream within a term. Income comes from that
+  // stream's daily-collection payments attributed by payment date inside the
+  // term window (those models have no termId), mirroring getSummary.
+  async getStreamSummary(schoolId: string, costCenter: CostCenter, termId: string) {
+    const term = await this.prisma.term.findFirst({
+      where: { id: termId, schoolId },
+      select: { id: true, name: true, startDate: true, endDate: true },
+    });
+    if (!term) throw new NotFoundException('Term not found');
+
+    const dateWindow =
+      term.startDate && term.endDate
+        ? { paymentDate: { gte: term.startDate, lte: term.endDate } }
+        : null;
+
+    let income = 0;
+    if (dateWindow && costCenter === CostCenter.FEEDING) {
+      const agg = await this.prisma.feedingPayment.aggregate({ where: { schoolId, ...dateWindow }, _sum: { amountPaid: true } });
+      income = Number(agg._sum.amountPaid ?? 0);
+    } else if (dateWindow && costCenter === CostCenter.TRANSPORT) {
+      const agg = await this.prisma.transportPayment.aggregate({ where: { schoolId, ...dateWindow }, _sum: { amountPaid: true } });
+      income = Number(agg._sum.amountPaid ?? 0);
+    }
+
+    const expAgg = await this.prisma.expense.aggregate({
+      where: { schoolId, costCenter, termId },
+      _sum: { amount: true },
+    });
+    const expense = Number(expAgg._sum.amount ?? 0);
+
+    return { term: { id: term.id, name: term.name }, income, expense, net: income - expense };
+  }
+
+  // ── Summary (income vs expense) — General Overview ────────
 
   async getSummary(schoolId: string, termId: string) {
     const term = await this.prisma.term.findFirst({
@@ -197,10 +277,14 @@ export class ExpensesService {
     });
     if (!term) throw new NotFoundException('Term not found');
 
+    const mode = await this.getExpenseMode(schoolId);
+    const unified = mode === ExpenseMode.UNIFIED;
+
     // Income — school fees attributed by invoice term; feeding/transport cash
     // attributed by payment date falling inside the term window (those models
     // have no termId). When the term has no date range, we can't attribute the
-    // daily-collection cash, so it stays 0.
+    // daily-collection cash, so it stays 0. In SEPARATED mode the General
+    // Overview is fees-only — feeding/transport each report on their own page.
     const dateWindow =
       term.startDate && term.endDate
         ? { paymentDate: { gte: term.startDate, lte: term.endDate } }
@@ -211,14 +295,15 @@ export class ExpensesService {
         where: { schoolId, invoice: { termId } },
         _sum: { amount: true },
       }),
-      dateWindow
+      unified && dateWindow
         ? this.prisma.feedingPayment.aggregate({ where: { schoolId, ...dateWindow }, _sum: { amountPaid: true } })
         : Promise.resolve({ _sum: { amountPaid: null } } as any),
-      dateWindow
+      unified && dateWindow
         ? this.prisma.transportPayment.aggregate({ where: { schoolId, ...dateWindow }, _sum: { amountPaid: true } })
         : Promise.resolve({ _sum: { amountPaid: null } } as any),
       this.prisma.expense.findMany({
-        where: { schoolId, termId },
+        // SEPARATED → GENERAL expenses only; UNIFIED → all streams pooled.
+        where: { schoolId, termId, ...(unified ? {} : { costCenter: CostCenter.GENERAL }) },
         select: { amount: true, categoryId: true, category: { select: { name: true } } },
       }),
       this.prisma.expenseBudget.findMany({ where: { schoolId, termId } }),
@@ -263,6 +348,7 @@ export class ExpensesService {
     const expenseTotal = byCategory.reduce((s, c) => s + c.spent, 0);
 
     return {
+      mode,
       term: { id: term.id, name: term.name },
       income: { fees, feeding, transport, total: incomeTotal },
       expenses: { total: expenseTotal, byCategory },

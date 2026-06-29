@@ -25,13 +25,14 @@ export type EditableExpense = {
 function today() { return new Date().toISOString().split('T')[0]; }
 
 export function ExpenseFormModal({
-  open, expense, categories, terms, activeTermId, onClose, onSaved,
+  open, expense, categories, terms, activeTermId, endpointBase = '/school/finance', onClose, onSaved,
 }: {
   open: boolean;
   expense: EditableExpense | null;   // null = create
   categories: ExpenseCategory[];
   terms: TermOption[];
   activeTermId: string;
+  endpointBase?: string;             // '/school/finance' | '/school/transport' | '/school/feeding'
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -81,8 +82,8 @@ export function ExpenseFormModal({
       notes:       form.notes || null,
     };
     try {
-      if (expense) await staffApi.patch(`/school/finance/expenses/${expense.id}`, payload);
-      else         await staffApi.post('/school/finance/expenses', payload);
+      if (expense) await staffApi.patch(`${endpointBase}/expenses/${expense.id}`, payload);
+      else         await staffApi.post(`${endpointBase}/expenses`, payload);
       onSaved();
       onClose();
     } catch (err) {

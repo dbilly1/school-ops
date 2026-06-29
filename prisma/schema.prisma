@@ -238,6 +238,7 @@ model School {
   onboardingComplete        Boolean           @default(false)
   adminCanManagePermissions Boolean           @default(true)
   lessonNoteFormatPolicy    LessonNoteFormatPolicy @default(STRUCTURED_ONLY)
+  expenseMode               ExpenseMode       @default(SEPARATED) // How the General Expenses page treats feeding/transport expenses (SEPARATED hides them there; UNIFIED pools them).
   feePaymentGuidelines      String? // Free-text payment instructions (bank/MoMo/deadlines) printed on fee invoices.
   admissionLetterTemplate   String? // Editable admission-letter body with {{merge}} tokens; blank uses the built-in default.
   createdAt                 DateTime          @default(now())
@@ -1463,24 +1464,46 @@ model StudentDiscount {
 // EXPENSES (school outflow)
 // ============================================================
 
+// A school receives funds through three streams (school fees, feeding,
+// transport) and each can incur its own expenses. CostCenter tags every
+// expense + category to its stream so they can be kept separate or pooled.
+enum CostCenter {
+  GENERAL
+  FEEDING
+  TRANSPORT
+}
+
+// How the General Expenses page treats the three streams' expenses:
+//   SEPARATED — General page shows GENERAL only; feeding/transport expenses
+//               live solely on their own surfaces.
+//   UNIFIED   — General page pools all three streams together.
+// The cost-center tag on each expense is identical in both modes; the mode is
+// only a filter, so a school can switch without migrating data.
+enum ExpenseMode {
+  UNIFIED
+  SEPARATED
+}
+
 model ExpenseCategory {
-  id         String   @id @default(uuid())
+  id         String     @id @default(uuid())
   schoolId   String
+  costCenter CostCenter @default(GENERAL)
   name       String
-  isArchived Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  isArchived Boolean    @default(false)
+  createdAt  DateTime   @default(now())
 
   school   School          @relation(fields: [schoolId], references: [id])
   expenses Expense[]
   budgets  ExpenseBudget[]
 
-  @@unique([schoolId, name])
+  @@unique([schoolId, costCenter, name])
   @@map("expense_categories")
 }
 
 model Expense {
-  id          String   @id @default(uuid())
+  id          String     @id @default(uuid())
   schoolId    String
+  costCenter  CostCenter @default(GENERAL)
   categoryId  String
   termId      String
   amount      Decimal
@@ -1490,8 +1513,8 @@ model Expense {
   reference   String?
   notes       String?
   recordedBy  String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   school         School          @relation(fields: [schoolId], references: [id])
   category       ExpenseCategory @relation(fields: [categoryId], references: [id])
@@ -1499,6 +1522,7 @@ model Expense {
   recordedByUser User            @relation("ExpenseRecordedBy", fields: [recordedBy], references: [id])
 
   @@index([schoolId])
+  @@index([schoolId, costCenter])
   @@index([categoryId])
   @@index([termId])
   @@map("expenses")

@@ -9,6 +9,7 @@ const SUB_PAGES = [
   { label: 'Vehicles',   href: '/school/transport/vehicles' },
   { label: 'Drivers',    href: '/school/transport/drivers'  },
   { label: 'Daily Fees', href: '/school/transport/fees'     },
+  { label: 'Expenses',   href: '/school/transport/expenses' },
 ];
 
 export default function TransportLayout({ children }: { children: React.ReactNode }) {

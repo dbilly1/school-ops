@@ -1,192 +1,22 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
-import { staffApi } from '@/lib/api';
-import { useApi } from '@/hooks/use-api';
-import { PermissionGate } from '@/components/guards/permission-gate';
-import { ExpenseFormModal, type EditableExpense, type ExpenseCategory, type TermOption } from '@/components/finance/expense-form-modal';
-import { ManageCategoriesModal } from '@/components/finance/manage-categories-modal';
-import { BudgetEditorModal } from '@/components/finance/budget-editor-modal';
-
-type Expense = {
-  id: string;
-  amount: number;
-  expenseDate: string;
-  payee: string | null;
-  method: string | null;
-  reference: string | null;
-  notes: string | null;
-  categoryId: string;
-  category: { id: string; name: string };
-  termId: string;
-  term: { id: string; name: string };
-  recordedBy: { firstName: string; lastName: string };
-};
-
-function fmt(n: number) {
-  return n.toLocaleString('en-GH', { minimumFractionDigits: 2 });
-}
+import { ExpensesPanel } from '@/components/finance/expenses-panel';
 
 export default function ExpensesPage() {
-  const [termFilter, setTermFilter]         = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [formOpen, setFormOpen]             = useState(false);
-  const [editing, setEditing]               = useState<EditableExpense | null>(null);
-  const [catsOpen, setCatsOpen]             = useState(false);
-  const [budgetOpen, setBudgetOpen]         = useState(false);
-
-  const fetchTerms = useCallback(() =>
-    staffApi.get<any>('/school/academic-years/active').then(y => (y?.terms ?? []) as TermOption[]).catch(() => []),
-    [],
-  );
-  const fetchCategories = useCallback(() =>
-    staffApi.get<ExpenseCategory[]>('/school/finance/expense-categories').catch(() => []),
-    [],
-  );
-  const fetchExpenses = useCallback(() => {
-    const params = new URLSearchParams();
-    if (termFilter)     params.set('termId', termFilter);
-    if (categoryFilter) params.set('categoryId', categoryFilter);
-    const qs = params.toString();
-    return staffApi.get<Expense[]>(`/school/finance/expenses${qs ? `?${qs}` : ''}`).catch(() => []);
-  }, [termFilter, categoryFilter]);
-
-  const { data: terms }                    = useApi(fetchTerms);
-  const { data: categories, refetch: refetchCats } = useApi(fetchCategories);
-  const { data: expenses, loading, refetch: refetchExpenses } = useApi(fetchExpenses, `${termFilter}|${categoryFilter}`);
-
-  const activeTermId = useMemo(() => terms?.find(t => t.isActive)?.id ?? terms?.[0]?.id ?? '', [terms]);
-  const total = (expenses ?? []).reduce((s, e) => s + e.amount, 0);
-
-  function openCreate() { setEditing(null); setFormOpen(true); }
-  function openEdit(e: Expense) {
-    setEditing({
-      id: e.id, categoryId: e.categoryId, termId: e.termId, amount: e.amount,
-      expenseDate: e.expenseDate, payee: e.payee, method: e.method, reference: e.reference, notes: e.notes,
-    });
-    setFormOpen(true);
-  }
-  async function del(e: Expense) {
-    if (!confirm(`Delete this ${e.category.name} expense of GHS ${fmt(e.amount)}?`)) return;
-    await staffApi.delete(`/school/finance/expenses/${e.id}`).catch(() => {});
-    refetchExpenses();
-  }
-
-  const activeTermName = terms?.find(t => t.id === (termFilter || activeTermId))?.name ?? 'this term';
-
   return (
     <div>
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+      <div className="mb-5">
         <h2 className="text-lg font-bold text-slate-900">Expenses</h2>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
-          <select value={termFilter} onChange={e => setTermFilter(e.target.value)}
-            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-            <option value="">All terms</option>
-            {terms?.map(t => <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' ✓' : ''}</option>)}
-          </select>
-          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
-            className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none">
-            <option value="">All categories</option>
-            {categories?.filter(c => !c.isArchived).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <PermissionGate featureKey="finance" subFeatureKey="expense_management" action="EDIT">
-            <button onClick={() => setCatsOpen(true)}
-              className="px-3.5 py-2 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition">
-              Categories
-            </button>
-            <button onClick={() => setBudgetOpen(true)}
-              className="px-3.5 py-2 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition">
-              Budgets
-            </button>
-          </PermissionGate>
-          <PermissionGate featureKey="finance" subFeatureKey="expense_management" action="CREATE">
-            <button onClick={openCreate}
-              className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition"
-              style={{ backgroundColor: 'var(--accent)' }}>
-              + Record expense
-            </button>
-          </PermissionGate>
-        </div>
+        <p className="text-sm text-slate-500 mt-0.5">School outflow — salaries, utilities, supplies and more.</p>
       </div>
 
-      {(expenses?.length ?? 0) > 0 && (
-        <div className="bg-white border border-slate-100 shadow-sm rounded-xl px-5 py-4 mb-5 flex items-center justify-between">
-          <p className="text-sm text-slate-500">
-            <span className="font-semibold text-slate-800">{expenses!.length}</span> expense{expenses!.length !== 1 ? 's' : ''}
-          </p>
-          <p className="text-lg font-bold text-red-500">GHS {fmt(total)} spent</p>
-        </div>
-      )}
-
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
-        <table className="w-full min-w-[820px]">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              {['Date', 'Category', 'Payee', 'Term', 'Method', 'Recorded by'].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{h}</th>
-              ))}
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount</th>
-              <th className="px-4 py-3" />
-            </tr>
-          </thead>
-          <tbody>
-            {loading && Array.from({ length: 8 }).map((_, i) => (
-              <tr key={i} className="border-b border-slate-50">
-                <td colSpan={8} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td>
-              </tr>
-            ))}
-            {!loading && (expenses ?? []).map(e => (
-              <tr key={e.id} className="border-b border-slate-50 hover:bg-slate-50/40 transition">
-                <td className="px-4 py-3.5 text-sm text-slate-600 whitespace-nowrap">
-                  {new Date(e.expenseDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                </td>
-                <td className="px-4 py-3.5 text-sm font-medium text-slate-800">{e.category.name}</td>
-                <td className="px-4 py-3.5 text-sm text-slate-500">{e.payee ?? '—'}</td>
-                <td className="px-4 py-3.5 text-sm text-slate-500">{e.term.name}</td>
-                <td className="px-4 py-3.5 text-sm text-slate-500">{e.method ?? '—'}</td>
-                <td className="px-4 py-3.5 text-xs text-slate-500">{e.recordedBy.firstName} {e.recordedBy.lastName}</td>
-                <td className="px-4 py-3.5 text-right text-sm font-semibold text-red-500 whitespace-nowrap">GHS {fmt(e.amount)}</td>
-                <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                  <PermissionGate featureKey="finance" subFeatureKey="expense_management" action="EDIT">
-                    <button onClick={() => openEdit(e)} className="text-xs font-medium px-1.5" style={{ color: 'var(--accent)' }}>Edit</button>
-                  </PermissionGate>
-                  <PermissionGate featureKey="finance" subFeatureKey="expense_management" action="DELETE">
-                    <button onClick={() => del(e)} className="text-xs font-medium text-red-500 hover:text-red-700 px-1.5">Delete</button>
-                  </PermissionGate>
-                </td>
-              </tr>
-            ))}
-            {!loading && (expenses?.length ?? 0) === 0 && (
-              <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-400">
-                {termFilter || categoryFilter ? 'No expenses match your filters.' : 'No expenses recorded yet. Record your first expense to get started.'}
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <ExpenseFormModal
-        open={formOpen}
-        expense={editing}
-        categories={categories ?? []}
-        terms={terms ?? []}
-        activeTermId={activeTermId}
-        onClose={() => setFormOpen(false)}
-        onSaved={refetchExpenses}
-      />
-      <ManageCategoriesModal
-        open={catsOpen}
-        categories={categories ?? []}
-        onClose={() => setCatsOpen(false)}
-        onChanged={refetchCats}
-      />
-      <BudgetEditorModal
-        open={budgetOpen}
-        categories={categories ?? []}
-        termId={termFilter || activeTermId}
-        termName={activeTermName}
-        onClose={() => setBudgetOpen(false)}
-        onSaved={() => {}}
+      {/* What this page includes (General only, or all streams pooled) is driven
+          by the school's Expense Mode setting — see Settings → Expenses. */}
+      <ExpensesPanel
+        endpointBase="/school/finance"
+        ownCenter="GENERAL"
+        perm={{ featureKey: 'finance', subFeatureKey: 'expense_management' }}
+        showBudgets
       />
     </div>
   );

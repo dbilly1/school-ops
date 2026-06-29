@@ -256,6 +256,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
           { label: 'Vehicles',   href: '/school/transport/vehicles' },
           { label: 'Drivers',    href: '/school/transport/drivers'  },
           { label: 'Daily Fees', href: '/school/transport/fees'     },
+          { label: 'Expenses',   href: '/school/transport/expenses' },
         ],
       },
     ],

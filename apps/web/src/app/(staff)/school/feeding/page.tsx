@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { staffApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { PaymentsCalendarModal } from '@/components/fees/payments-calendar-modal';
+import { ExpensesPanel } from '@/components/finance/expenses-panel';
 import { cn } from '@/lib/cn';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -326,7 +327,7 @@ function ReconciliationTab() {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function FeedingPage() {
-  const [tab, setTab] = useState<'collection' | 'reconciliation'>('collection');
+  const [tab, setTab] = useState<'collection' | 'expenses' | 'reconciliation'>('collection');
 
   return (
     <div>
@@ -338,7 +339,7 @@ export default function FeedingPage() {
       </div>
 
       <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-xl w-fit">
-        {([['collection', 'Daily Collection'], ['reconciliation', 'Reconciliation']] as const).map(([key, label]) => (
+        {([['collection', 'Daily Collection'], ['expenses', 'Expenses'], ['reconciliation', 'Reconciliation']] as const).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={cn('px-5 py-1.5 rounded-lg text-sm font-medium transition', tab === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>
             {label}
@@ -347,6 +348,15 @@ export default function FeedingPage() {
       </div>
 
       {tab === 'collection'     && <DailyCollectionTab />}
+      {tab === 'expenses'       && (
+        <ExpensesPanel
+          endpointBase="/school/feeding"
+          ownCenter="FEEDING"
+          perm={{ featureKey: 'feeding_fees', subFeatureKey: 'fee_collection' }}
+          summaryEndpoint="/school/feeding/expense-summary"
+          streamLabel="Feeding"
+        />
+      )}
       {tab === 'reconciliation' && <ReconciliationTab />}
     </div>
   );

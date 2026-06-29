@@ -27,7 +27,8 @@ const NAV = [
   {
     section: 'Operations',
     items: [
-      { label: 'Feeding Fees', href: '/school/settings/feeding' },
+      { label: 'Feeding Fees', href: '/school/settings/feeding'  },
+      { label: 'Expenses',     href: '/school/settings/expenses' },
     ],
   },
 ];
