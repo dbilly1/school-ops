@@ -57,3 +57,19 @@ export class AddFollowUpDto {
   @IsOptional()
   followUpDate?: string;
 }
+
+// Admission-offer details that back the admission letter. All optional so the
+// school can fill them progressively; an empty string clears a value.
+export class SetAdmissionOfferDto {
+  @IsString()
+  @IsOptional()
+  admittedClassId?: string;
+
+  @IsString()
+  @IsOptional()
+  academicYearId?: string;
+
+  @IsString()
+  @IsOptional()
+  reportingDate?: string;
+}

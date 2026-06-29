@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { SaveButton, Alert } from '@/components/ui/settings-card';
+import { AdmissionLetterTemplateCard } from '@/components/admissions/admission-letter-template-card';
+import { useStaffAuth } from '@/contexts/staff-auth';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -115,6 +117,7 @@ function FieldRow({ field, onChange, onMoveUp, onMoveDown, isFirst, isLast, savi
 
 export default function AdmissionSettingsPage() {
   const router = useRouter();
+  const { isOwner, isAdmin } = useStaffAuth();
 
   const fetchFields = useCallback(() =>
     staffApi.get<FieldConfig[]>('/school/admissions/field-config').catch(() => []),
@@ -251,6 +254,8 @@ export default function AdmissionSettingsPage() {
           First name and last name are always required and always carry over.
         </p>
       </div>
+
+      {(isOwner || isAdmin) && <AdmissionLetterTemplateCard />}
     </div>
   );
 }

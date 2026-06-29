@@ -13,7 +13,7 @@ export class ProfileService {
       select: {
         id: true, name: true, country: true, address: true,
         phone: true, email: true, logoUrl: true, primaryColor: true,
-        feePaymentGuidelines: true,
+        feePaymentGuidelines: true, admissionLetterTemplate: true,
         subscriptionState: true, createdAt: true,
         package: { select: { id: true, name: true } },
       },
@@ -29,7 +29,7 @@ export class ProfileService {
       select: {
         id: true, name: true, country: true, address: true,
         phone: true, email: true, logoUrl: true, primaryColor: true,
-        feePaymentGuidelines: true,
+        feePaymentGuidelines: true, admissionLetterTemplate: true,
       },
     });
   }

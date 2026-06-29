@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useCallback, use } from 'react';
+import { useState, useCallback, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffApi, type ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { FormField, Input, SaveButton, Alert } from '@/components/ui/settings-card';
+import { AdmissionLetterModal, type AdmissionLetterData } from '@/components/admissions/admission-letter-modal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,8 @@ type FollowUp = {
   createdBy: string;
 };
 
+type NamedRef = { id: string; name: string };
+
 type AdmissionRecord = {
   id: string;
   stage: AdmissionStage;
@@ -27,6 +30,9 @@ type AdmissionRecord = {
   updatedAt: string;
   followUps: FollowUp[];
   student: { id: string } | null;
+  admittedClass: NamedRef | null;
+  academicYear: NamedRef | null;
+  reportingDate: string | null;
 };
 
 const STAGE_ORDER: AdmissionStage[] = ['LEAD', 'INQUIRY', 'APPLICATION', 'INTERVIEW', 'ACCEPTED', 'ENROLLED'];
@@ -286,6 +292,127 @@ function FormDataCard({ formData }: { formData: Record<string, unknown> }) {
   );
 }
 
+// ── Admission offer (admitted class / year / reporting date) ───────────────────
+// Captured once at ACCEPTED and pinned to the record — it's the factual basis of
+// the admission letter. Kept informational (does not drive enrolment).
+
+function toDateInput(iso: string | null): string {
+  return iso ? new Date(iso).toISOString().slice(0, 10) : '';
+}
+
+function AdmissionOfferCard({ record, onUpdated, onPrint }: {
+  record: AdmissionRecord;
+  onUpdated: () => void;
+  onPrint: () => void;
+}) {
+  const fetchClasses = useCallback(() => staffApi.get<NamedRef[]>('/school/grade-structure/classes'), []);
+  const fetchYears   = useCallback(() => staffApi.get<(NamedRef & { isActive: boolean })[]>('/school/academic-years'), []);
+  const { data: classes } = useApi(fetchClasses);
+  const { data: years }   = useApi(fetchYears);
+
+  const [classId, setClassId]   = useState(record.admittedClass?.id ?? '');
+  const [yearId, setYearId]     = useState(record.academicYear?.id ?? '');
+  const [reporting, setReporting] = useState(toDateInput(record.reportingDate));
+  const [saving, setSaving]     = useState(false);
+  const [alert, setAlert]       = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+
+  // Default the year to the active one once years load (only if none chosen yet).
+  const yearDefaulted = useRef(false);
+  if (!yearDefaulted.current && !yearId && years?.length) {
+    const active = years.find(y => y.isActive);
+    if (active) setYearId(active.id);
+    yearDefaulted.current = true;
+  }
+
+  const dirty =
+    classId !== (record.admittedClass?.id ?? '') ||
+    yearId !== (record.academicYear?.id ?? '') ||
+    reporting !== toDateInput(record.reportingDate);
+
+  async function save() {
+    setAlert(null); setSaving(true);
+    try {
+      await staffApi.patch(`/school/admissions/${record.id}/offer`, {
+        admittedClassId: classId,
+        academicYearId: yearId,
+        reportingDate: reporting,
+      });
+      setAlert({ type: 'success', message: 'Admission offer saved.' });
+      onUpdated();
+    } catch (err) {
+      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to save.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const hasClass = !!record.admittedClass;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-5">
+      <h3 className="text-sm font-semibold text-slate-700 mb-1">Admission offer</h3>
+      <p className="text-xs text-slate-400 mb-4">The class, year and reporting date used on the admission letter.</p>
+
+      {alert && <div className="mb-3"><Alert type={alert.type} message={alert.message} /></div>}
+
+      <div className="space-y-3">
+        <FormField label="Admitted class">
+          <select
+            value={classId}
+            onChange={e => setClassId(e.target.value)}
+            className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none"
+            onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+            onBlur={e => e.currentTarget.style.boxShadow = ''}
+          >
+            <option value="">Select a class…</option>
+            {(classes ?? []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </FormField>
+
+        <FormField label="Academic year">
+          <select
+            value={yearId}
+            onChange={e => setYearId(e.target.value)}
+            className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none"
+            onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+            onBlur={e => e.currentTarget.style.boxShadow = ''}
+          >
+            <option value="">Select a year…</option>
+            {(years ?? []).map(y => <option key={y.id} value={y.id}>{y.name}{y.isActive ? ' (active)' : ''}</option>)}
+          </select>
+        </FormField>
+
+        <FormField label="Reporting date">
+          <input
+            type="date"
+            value={reporting}
+            onChange={e => setReporting(e.target.value)}
+            className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none"
+            onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+            onBlur={e => e.currentTarget.style.boxShadow = ''}
+          />
+        </FormField>
+      </div>
+
+      <div className="flex items-center gap-2 mt-4">
+        <SaveButton loading={saving} onClick={save} label={dirty ? 'Save offer' : 'Saved'} disabled={!dirty} />
+        <button
+          onClick={onPrint}
+          disabled={!hasClass}
+          title={hasClass ? undefined : 'Set and save the admitted class first'}
+          className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition disabled:opacity-40"
+          style={{ backgroundColor: 'var(--accent)' }}
+        >
+          Print admission letter
+        </button>
+      </div>
+      {dirty && hasClass && (
+        <p className="mt-2 text-[11px] text-amber-600">Save your changes to include them on the letter.</p>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AdmissionDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -294,6 +421,7 @@ export default function AdmissionDetailPage({ params }: { params: Promise<{ id: 
 
   const fetchRecord = useCallback(() => staffApi.get<AdmissionRecord>(`/school/admissions/${id}`), [id]);
   const { data: record, loading, refetch } = useApi(fetchRecord);
+  const [letterData, setLetterData] = useState<AdmissionLetterData | null>(null);
 
   if (loading) return (
     <div className="space-y-4">
@@ -305,6 +433,18 @@ export default function AdmissionDetailPage({ params }: { params: Promise<{ id: 
   if (!record) return <p className="text-sm text-slate-400">Record not found.</p>;
 
   const name = `${record.formData.firstName ?? ''} ${record.formData.lastName ?? ''}`.trim() || 'Unnamed applicant';
+  const offerAvailable = record.stage === 'ACCEPTED' || record.stage === 'ENROLLED';
+
+  function openLetter() {
+    if (!record) return;
+    setLetterData({
+      applicantName: name,
+      formData: record.formData,
+      reportingDate: record.reportingDate,
+      admittedClass: record.admittedClass,
+      academicYear: record.academicYear,
+    });
+  }
 
   return (
     <div>
@@ -353,14 +493,20 @@ export default function AdmissionDetailPage({ params }: { params: Promise<{ id: 
           </div>
         </div>
 
-        {/* Right: stage panel */}
-        <div className="col-span-1">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-5 sticky top-4">
+        {/* Right: stage panel + admission offer */}
+        <div className="col-span-1 space-y-6">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-5">
             <h3 className="text-sm font-semibold text-slate-700 mb-4">Pipeline stage</h3>
             <StagePanel record={record} onUpdated={refetch} />
           </div>
+
+          {offerAvailable && (
+            <AdmissionOfferCard record={record} onUpdated={refetch} onPrint={openLetter} />
+          )}
         </div>
       </div>
+
+      <AdmissionLetterModal data={letterData} onClose={() => setLetterData(null)} />
     </div>
   );
 }

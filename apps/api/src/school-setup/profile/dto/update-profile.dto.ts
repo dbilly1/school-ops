@@ -37,4 +37,11 @@ export class UpdateSchoolProfileDto {
   @IsOptional()
   @MaxLength(4000)
   feePaymentGuidelines?: string;
+
+  // Admission-letter body template with {{merge}} tokens. Empty string resets
+  // to the built-in default.
+  @IsString()
+  @IsOptional()
+  @MaxLength(8000)
+  admissionLetterTemplate?: string;
 }

@@ -6,7 +6,7 @@ import { nextStudentId } from '../common/student-id';
 import { generateTempPassword } from '../common/password.util';
 import {
   CreateAdmissionDto, UpdateAdmissionStageDto,
-  AddFollowUpDto, AdmissionFieldConfigDto,
+  AddFollowUpDto, AdmissionFieldConfigDto, SetAdmissionOfferDto,
 } from './dto/admissions.dto';
 
 @Injectable()
@@ -46,10 +46,51 @@ export class AdmissionsService {
   async findOne(schoolId: string, id: string) {
     const record = await this.prisma.admissionRecord.findFirst({
       where: { id, schoolId },
-      include: { followUps: { orderBy: { createdAt: 'desc' } }, student: true },
+      include: {
+        followUps: { orderBy: { createdAt: 'desc' } },
+        student: true,
+        admittedClass: { select: { id: true, name: true } },
+        academicYear: { select: { id: true, name: true } },
+      },
     });
     if (!record) throw new NotFoundException('Admission record not found');
     return record;
+  }
+
+  // Set/clear the admission-offer details (admitted class, academic year,
+  // reporting date) that back the admission letter. Each field is independent:
+  // undefined leaves it unchanged, an empty string clears it. Class/year are
+  // validated against the school to keep tenants isolated.
+  async setOffer(schoolId: string, id: string, dto: SetAdmissionOfferDto) {
+    const record = await this.prisma.admissionRecord.findFirst({ where: { id, schoolId } });
+    if (!record) throw new NotFoundException('Admission record not found');
+
+    const data: Record<string, any> = {};
+
+    if (dto.admittedClassId !== undefined) {
+      const classId = dto.admittedClassId || null;
+      if (classId) {
+        const cls = await this.prisma.class.findFirst({ where: { id: classId, schoolId } });
+        if (!cls) throw new BadRequestException('Invalid class');
+      }
+      data.admittedClassId = classId;
+    }
+
+    if (dto.academicYearId !== undefined) {
+      const yearId = dto.academicYearId || null;
+      if (yearId) {
+        const year = await this.prisma.academicYear.findFirst({ where: { id: yearId, schoolId } });
+        if (!year) throw new BadRequestException('Invalid academic year');
+      }
+      data.academicYearId = yearId;
+    }
+
+    if (dto.reportingDate !== undefined) {
+      data.reportingDate = dto.reportingDate ? new Date(dto.reportingDate) : null;
+    }
+
+    await this.prisma.admissionRecord.update({ where: { id }, data });
+    return this.findOne(schoolId, id);
   }
 
   async create(schoolId: string, dto: CreateAdmissionDto, userId: string) {

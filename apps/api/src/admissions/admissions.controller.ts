@@ -3,7 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AdmissionsService } from './admissions.service';
 import {
   CreateAdmissionDto, UpdateAdmissionStageDto,
-  AddFollowUpDto, AdmissionFieldConfigDto,
+  AddFollowUpDto, AdmissionFieldConfigDto, SetAdmissionOfferDto,
 } from './dto/admissions.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../permissions/permissions.guard';
@@ -61,6 +61,16 @@ export class AdmissionsController {
     @Body() dto: UpdateAdmissionStageDto,
   ) {
     return this.admissionsService.updateStage(user.schoolId, id, dto, user.id);
+  }
+
+  @Patch(':id/offer')
+  @RequirePermission('admissions', 'EDIT')
+  setOffer(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() dto: SetAdmissionOfferDto,
+  ) {
+    return this.admissionsService.setOffer(user.schoolId, id, dto);
   }
 
   @Post(':id/follow-ups')

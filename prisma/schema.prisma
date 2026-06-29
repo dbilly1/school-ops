@@ -239,6 +239,7 @@ model School {
   adminCanManagePermissions Boolean           @default(true)
   lessonNoteFormatPolicy    LessonNoteFormatPolicy @default(STRUCTURED_ONLY)
   feePaymentGuidelines      String? // Free-text payment instructions (bank/MoMo/deadlines) printed on fee invoices.
+  admissionLetterTemplate   String? // Editable admission-letter body with {{merge}} tokens; blank uses the built-in default.
   createdAt                 DateTime          @default(now())
   updatedAt                 DateTime          @updatedAt
 
@@ -525,6 +526,7 @@ model AcademicYear {
   calendarEvents     SchoolCalendarEvent[]
   studentAssignments StudentClassAssignment[]
   timetableConfigs   TimetableConfig[]
+  admissionRecords   AdmissionRecord[]
 
   @@unique([schoolId, name])
   @@map("academic_years")
@@ -626,6 +628,7 @@ model Class {
   assessmentBatches  AssessmentBatch[]
   plannerEntries     PlannerEntry[]
   lessonNotes        LessonNote[]
+  admissionRecords   AdmissionRecord[]
 
   @@unique([schoolId, name])
   @@map("classes")
@@ -987,12 +990,21 @@ model AdmissionRecord {
   stage     AdmissionStage @default(LEAD)
   formData  Json
   notes     String?
+  // Admission-offer details — the factual basis of the admission letter,
+  // captured once at ACCEPTED and pinned to the record. admittedClass is the
+  // first class the applicant is offered. Kept informational (does not drive
+  // enrollment class assignment).
+  admittedClassId String?
+  academicYearId  String?
+  reportingDate   DateTime?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
-  school    School              @relation(fields: [schoolId], references: [id])
-  followUps AdmissionFollowUp[]
-  student   Student?
+  school        School              @relation(fields: [schoolId], references: [id])
+  admittedClass Class?              @relation(fields: [admittedClassId], references: [id])
+  academicYear  AcademicYear?       @relation(fields: [academicYearId], references: [id])
+  followUps     AdmissionFollowUp[]
+  student       Student?
 
   @@index([schoolId])
   @@map("admission_records")
