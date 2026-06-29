@@ -17,6 +17,10 @@ import {
 
 export type AdmissionLetterData = AdmissionLetterSource & {
   applicantName: string;
+  // Whether to stamp the letter with today's date. True for a fresh offer;
+  // omitted for retrospective letters (e.g. an already-enrolled student) where
+  // today's date would misrepresent when the admission happened.
+  showDate?: boolean;
 };
 
 type SchoolProfile = {
@@ -40,6 +44,9 @@ function todayLong() {
 function mergedBody(d: AdmissionLetterData, school: SchoolProfile | null): string {
   const template = school?.admissionLetterTemplate?.trim() || DEFAULT_ADMISSION_LETTER_TEMPLATE;
   const values = buildLetterValues(d, school?.name || 'School');
+  // When the date is suppressed, blank the {{date}} token too so a custom
+  // template that uses it doesn't leak today's date.
+  if (d.showDate === false) values.date = '';
   return applyLetterTemplate(template, values);
 }
 
@@ -82,7 +89,7 @@ function buildLetterHtml(d: AdmissionLetterData, school: SchoolProfile | null) {
     </div>
 
     <p class="title">Letter of Admission</p>
-    <div class="meta">${escapeHtml(todayLong())}</div>
+    ${d.showDate === false ? '' : `<div class="meta">${escapeHtml(todayLong())}</div>`}
     <div class="body">${escapeHtml(body)}</div>
 
     <div class="footer">${escapeHtml(school?.name || 'School')} &middot; This is an official admission letter.</div>
@@ -150,7 +157,7 @@ export function AdmissionLetterModal({ data, onClose }: { data: AdmissionLetterD
           <p className="text-center text-sm font-bold uppercase tracking-wider mb-5" style={{ color: 'var(--accent)' }}>
             Letter of Admission
           </p>
-          <p className="text-xs text-slate-500 mb-5">{todayLong()}</p>
+          {data.showDate !== false && <p className="text-xs text-slate-500 mb-5">{todayLong()}</p>}
           <div className="text-[15px] leading-relaxed text-slate-700 whitespace-pre-line font-serif">{body}</div>
         </div>
       </div>

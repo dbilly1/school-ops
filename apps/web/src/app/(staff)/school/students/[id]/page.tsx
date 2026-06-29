@@ -628,6 +628,8 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
       reportingDate: null,
       admittedClass: assignment ? { id: assignment.class.id, name: assignment.class.name } : null,
       academicYear: assignment ? { id: assignment.academicYear.id, name: assignment.academicYear.name } : null,
+      // Already-enrolled student — today's date would misdate the admission.
+      showDate: false,
     };
   }, [student]);
 
