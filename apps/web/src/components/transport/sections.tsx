@@ -715,3 +715,159 @@ export function TransportFeesTab() {
   );
 }
 
+// ── Reconciliation tab ─────────────────────────────────────────────────────────
+// How much transport cash was collected on a given day — prepayments, arrears
+// settlements, and same-day cash, backed by GET /school/transport-fees/reconciliation.
+
+type ReconExpense = { id: string; category: string; payee: string | null; method: string | null; amount: number; isCash: boolean };
+type ReconResponse = {
+  date: string;
+  cashCollectedToday: number;
+  prePayments: { student: Student; amount: number; daysCovered: number }[];
+  paidToday: { student: Student }[];
+  totalTransactions: number;
+  expenses: ReconExpense[];
+  cashPaidOut: number;
+  totalPaidOut: number;
+  expectedCashInHand: number;
+};
+
+export function TransportReconciliationTab() {
+  const today = new Date().toISOString().split('T')[0];
+  const [date, setDate] = useState(today);
+
+  const fetchRecon = useCallback(
+    () => staffApi.get<ReconResponse>(`/school/transport-fees/reconciliation?date=${date}`).catch(() => null),
+    [date],
+  );
+  const { data: recon, loading } = useApi(fetchRecon, date);
+
+  return (
+    <div>
+      <div className="mb-5">
+        <input type="date" value={date} max={today} onChange={e => setDate(e.target.value)}
+          className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
+          onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
+          onBlur={e => e.currentTarget.style.boxShadow = ''} />
+      </div>
+
+      {loading && <div className="h-48 bg-slate-100 rounded-2xl animate-pulse" />}
+
+      {!loading && !recon && (
+        <div className="bg-white rounded-2xl border border-slate-100 px-6 py-12 text-center text-sm text-slate-400">
+          No reconciliation data for this date.
+        </div>
+      )}
+
+      {!loading && recon && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-6">
+            <h3 className="text-sm font-semibold text-slate-700 mb-5">
+              Daily reconciliation — {new Date(recon.date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            </h3>
+            <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
+              <span className="text-sm text-slate-600">Total transactions</span>
+              <span className="text-sm font-bold text-slate-800">{recon.totalTransactions}</span>
+            </div>
+
+            {/* Cash drawer: collected in − cash paid out = expected in hand */}
+            <div className="rounded-xl overflow-hidden border border-slate-100">
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-sm text-slate-600">Cash collected today</span>
+                <span className="text-sm font-semibold text-emerald-600">+ GHS {Number(recon.cashCollectedToday).toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100">
+                <span className="text-sm text-slate-600">Cash expenses paid today</span>
+                <span className="text-sm font-semibold text-red-500">− GHS {Number(recon.cashPaidOut).toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200"
+                style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 8%, white)' }}>
+                <span className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>Expected cash in hand</span>
+                <span className="text-xl font-bold" style={{ color: 'var(--accent)' }}>GHS {Number(recon.expectedCashInHand).toFixed(2)}</span>
+              </div>
+            </div>
+            <p className="text-xs mt-2 text-slate-500">
+              Collected includes prepayments, arrears settlements and same-day cash. Match “Expected cash in hand” against the cash counted in the drawer. Non-cash expenses are listed below but don’t affect it.
+            </p>
+          </div>
+
+          {recon.expenses.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Expenses paid today</p>
+              </div>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Category</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Payee</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Method</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recon.expenses.map(e => (
+                    <tr key={e.id} className="border-b border-slate-50 hover:bg-slate-50/40">
+                      <td className="px-4 py-3 text-sm text-slate-700">{e.category}</td>
+                      <td className="px-4 py-3 text-sm text-slate-500">{e.payee ?? '—'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-500">
+                        {e.method ?? '—'}
+                        {!e.isCash && <span className="ml-1.5 text-[10px] uppercase tracking-wide text-slate-400">non-cash</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right font-medium text-red-500">GHS {e.amount.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {recon.prePayments.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Payments received</p>
+              </div>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Student</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-400 uppercase tracking-wide">Days</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recon.prePayments.map((p, i) => (
+                    <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/40">
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        {p.student.lastName}, {p.student.firstName}
+                        <span className="ml-2 text-xs font-mono text-slate-400">{p.student.studentId}</span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right font-medium text-slate-700">GHS {Number(p.amount).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-sm text-right text-blue-600 font-medium">{p.daysCovered}d</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {recon.paidToday.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Paid cash today ({recon.paidToday.length})</p>
+              </div>
+              <div className="px-4 py-3 flex flex-wrap gap-2">
+                {recon.paidToday.map((p, i) => (
+                  <span key={i} className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full">
+                    {p.student.firstName} {p.student.lastName}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+

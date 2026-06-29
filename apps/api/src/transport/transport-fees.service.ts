@@ -379,7 +379,23 @@ export class TransportFeesService {
       },
     });
 
+    // Same-day transport outflow — needed to reconcile the cash drawer. Only
+    // cash-method expenses reduce the physical cash; other methods are listed
+    // for context but don't count toward the expected-in-hand figure.
+    const expenses = await this.prisma.expense.findMany({
+      where: {
+        schoolId,
+        costCenter: 'TRANSPORT',
+        expenseDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
+      },
+      include: { category: { select: { name: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+
     const totalCashCollected = payments.reduce((sum, p) => sum + Number(p.amountPaid), 0);
+    const isCash = (m: string | null) => (m ?? '').trim().toLowerCase() === 'cash';
+    const cashPaidOut = expenses.filter((e) => isCash(e.method)).reduce((s, e) => s + Number(e.amount), 0);
+    const totalPaidOut = expenses.reduce((s, e) => s + Number(e.amount), 0);
 
     return {
       date,
@@ -387,6 +403,17 @@ export class TransportFeesService {
       prePayments: payments.map((p) => ({ student: p.student, amount: p.amountPaid, daysCovered: p.daysCovered })),
       paidToday: dailyPaid.map((r) => ({ student: r.student })),
       totalTransactions: payments.length + dailyPaid.length,
+      expenses: expenses.map((e) => ({
+        id: e.id,
+        category: e.category.name,
+        payee: e.payee,
+        method: e.method,
+        amount: Number(e.amount),
+        isCash: isCash(e.method),
+      })),
+      cashPaidOut,
+      totalPaidOut,
+      expectedCashInHand: totalCashCollected - cashPaidOut,
     };
   }
 

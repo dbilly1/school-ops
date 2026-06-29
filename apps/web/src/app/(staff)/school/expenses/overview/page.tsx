@@ -6,6 +6,7 @@ import { useApi } from '@/hooks/use-api';
 import type { TermOption } from '@/components/finance/expense-form-modal';
 
 type Summary = {
+  mode: 'SEPARATED' | 'UNIFIED';
   term: { id: string; name: string };
   income: { fees: number; feeding: number; transport: number; total: number };
   expenses: { total: number; byCategory: { categoryId: string; name: string; spent: number; budget: number }[] };
@@ -70,15 +71,19 @@ export default function ExpensesOverviewPage() {
             <StatCard label="Net" value={summary.net} tone="net" />
           </div>
 
-          {/* Income breakdown */}
-          <div className="bg-white border border-slate-100 shadow-sm rounded-2xl px-5 py-4 mb-6">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Income breakdown</p>
-            <div className="flex flex-wrap gap-x-10 gap-y-2 text-sm">
-              <div><span className="text-slate-500">School fees</span> <span className="font-semibold text-slate-800 ml-2">GHS {fmt(summary.income.fees)}</span></div>
-              <div><span className="text-slate-500">Feeding</span> <span className="font-semibold text-slate-800 ml-2">GHS {fmt(summary.income.feeding)}</span></div>
-              <div><span className="text-slate-500">Transport</span> <span className="font-semibold text-slate-800 ml-2">GHS {fmt(summary.income.transport)}</span></div>
+          {/* Income breakdown — only meaningful when streams are pooled (Unified mode).
+              In Separated mode feeding/transport income is reported on their own pages
+              (always 0 here), so the breakdown is redundant. */}
+          {summary.mode === 'UNIFIED' && (
+            <div className="bg-white border border-slate-100 shadow-sm rounded-2xl px-5 py-4 mb-6">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Income breakdown</p>
+              <div className="flex flex-wrap gap-x-10 gap-y-2 text-sm">
+                <div><span className="text-slate-500">School fees</span> <span className="font-semibold text-slate-800 ml-2">GHS {fmt(summary.income.fees)}</span></div>
+                <div><span className="text-slate-500">Feeding</span> <span className="font-semibold text-slate-800 ml-2">GHS {fmt(summary.income.feeding)}</span></div>
+                <div><span className="text-slate-500">Transport</span> <span className="font-semibold text-slate-800 ml-2">GHS {fmt(summary.income.transport)}</span></div>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Budget vs spent */}
           <div className="bg-white border border-slate-100 shadow-sm rounded-2xl overflow-hidden">

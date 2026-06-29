@@ -26,8 +26,6 @@ type Expense = {
   recordedBy: { firstName: string; lastName: string };
 };
 
-type StreamSummary = { income: number; expense: number; net: number };
-
 const CENTER_LABEL: Record<CostCenter, string> = { GENERAL: 'General', FEEDING: 'Feeding', TRANSPORT: 'Transport' };
 
 function fmt(n: number) {
@@ -39,21 +37,22 @@ function fmt(n: number) {
  * Feeding expense surfaces. Each instance is pinned to one cost center via its
  * `endpointBase`; the General page may additionally show pooled rows from other
  * streams (UNIFIED mode), which are rendered read-only with a stream tag.
+ *
+ * This surface intentionally shows only the outflow an officer records — never
+ * stream income or net. The per-term collected/spent/net figures live on
+ * Reports (leadership), and same-day cash reconciliation lives on each stream's
+ * Reconciliation page.
  */
 export function ExpensesPanel({
   endpointBase,
   ownCenter,
   perm,
   showBudgets = false,
-  summaryEndpoint,
-  streamLabel,
 }: {
   endpointBase: string;                       // '/school/finance' | '/school/transport' | '/school/feeding'
   ownCenter: CostCenter;                       // rows of other centers are read-only here
   perm: { featureKey: string; subFeatureKey?: string };
   showBudgets?: boolean;                        // General only
-  summaryEndpoint?: string;                     // stream net card (Feeding / Transport)
-  streamLabel?: string;                         // e.g. 'Feeding'
 }) {
   const [termFilter, setTermFilter]         = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -83,15 +82,8 @@ export function ExpensesPanel({
   const { data: expenses, loading, refetch: refetchExpenses } = useApi(fetchExpenses, `${endpointBase}|${termFilter}|${categoryFilter}`);
 
   const activeTermId = useMemo(() => terms?.find(t => t.isActive)?.id ?? terms?.[0]?.id ?? '', [terms]);
-  const summaryTermId = termFilter || activeTermId;
-
-  const fetchSummary = useCallback(() =>
-    summaryEndpoint && summaryTermId
-      ? staffApi.get<StreamSummary>(`${summaryEndpoint}?termId=${summaryTermId}`).catch(() => null)
-      : Promise.resolve(null),
-    [summaryEndpoint, summaryTermId],
-  );
-  const { data: summary } = useApi(fetchSummary, `${summaryEndpoint ?? ''}|${summaryTermId}`);
+  // Term that the budgets editor targets (the filtered term, or the active one).
+  const budgetTermId = termFilter || activeTermId;
 
   const total = (expenses ?? []).reduce((s, e) => s + e.amount, 0);
   const hasForeign = (expenses ?? []).some(e => e.costCenter !== ownCenter);
@@ -110,7 +102,7 @@ export function ExpensesPanel({
     refetchExpenses();
   }
 
-  const activeTermName = terms?.find(t => t.id === summaryTermId)?.name ?? 'this term';
+  const activeTermName = terms?.find(t => t.id === budgetTermId)?.name ?? 'this term';
 
   return (
     <div>
@@ -150,23 +142,7 @@ export function ExpensesPanel({
         </div>
       </div>
 
-      {/* Stream net card (Feeding / Transport) */}
-      {summaryEndpoint && summary && (
-        <div className="grid grid-cols-3 gap-3 mb-5">
-          {[
-            { label: `${streamLabel ?? ''} collected`, value: summary.income, color: '#22c55e' },
-            { label: `${streamLabel ?? ''} spent`,     value: summary.expense, color: '#ef4444' },
-            { label: 'Net this term',                  value: summary.net,     color: summary.net >= 0 ? 'var(--accent)' : '#b45309' },
-          ].map(c => (
-            <div key={c.label} className="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-3">
-              <p className="text-xs text-slate-400">{c.label.trim()}</p>
-              <p className="text-lg font-bold" style={{ color: c.color }}>GHS {fmt(c.value)}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {!summaryEndpoint && (expenses?.length ?? 0) > 0 && (
+      {(expenses?.length ?? 0) > 0 && (
         <div className="bg-white border border-slate-100 shadow-sm rounded-xl px-5 py-4 mb-5 flex items-center justify-between">
           <p className="text-sm text-slate-500">
             <span className="font-semibold text-slate-800">{expenses!.length}</span> expense{expenses!.length !== 1 ? 's' : ''}
@@ -264,7 +240,7 @@ export function ExpensesPanel({
         <BudgetEditorModal
           open={budgetOpen}
           categories={categories ?? []}
-          termId={summaryTermId}
+          termId={budgetTermId}
           termName={activeTermName}
           onClose={() => setBudgetOpen(false)}
           onSaved={() => {}}

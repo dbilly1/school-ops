@@ -225,12 +225,17 @@ function ReconciliationTab() {
   const today = new Date().toISOString().split('T')[0];
   const [date, setDate] = useState(today);
 
+  type ReconExpense = { id: string; category: string; payee: string | null; method: string | null; amount: number; isCash: boolean };
   type ReconResponse = {
     date: string;
     cashCollectedToday: number;
     prePayments: { student: Student; amount: number; daysCovered: number }[];
     paidToday: { student: Student }[];
     totalTransactions: number;
+    expenses: ReconExpense[];
+    cashPaidOut: number;
+    totalPaidOut: number;
+    expectedCashInHand: number;
   };
 
   const fetchRecon = useCallback(
@@ -266,14 +271,58 @@ function ReconciliationTab() {
               <span className="text-sm text-slate-600">Total transactions</span>
               <span className="text-sm font-bold text-slate-800">{recon.totalTransactions}</span>
             </div>
-            <div className="px-4 py-3 rounded-xl" style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 8%, white)' }}>
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>Total cash collected today</span>
-                <span className="text-xl font-bold" style={{ color: 'var(--accent)' }}>GHS {Number(recon.cashCollectedToday).toFixed(2)}</span>
+
+            {/* Cash drawer: collected in − cash paid out = expected in hand */}
+            <div className="rounded-xl overflow-hidden border border-slate-100">
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-sm text-slate-600">Cash collected today</span>
+                <span className="text-sm font-semibold text-emerald-600">+ GHS {Number(recon.cashCollectedToday).toFixed(2)}</span>
               </div>
-              <p className="text-xs mt-1 text-slate-500">Includes prepayments, arrears settlements, and same-day cash.</p>
+              <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100">
+                <span className="text-sm text-slate-600">Cash expenses paid today</span>
+                <span className="text-sm font-semibold text-red-500">− GHS {Number(recon.cashPaidOut).toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200"
+                style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 8%, white)' }}>
+                <span className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>Expected cash in hand</span>
+                <span className="text-xl font-bold" style={{ color: 'var(--accent)' }}>GHS {Number(recon.expectedCashInHand).toFixed(2)}</span>
+              </div>
             </div>
+            <p className="text-xs mt-2 text-slate-500">
+              Collected includes prepayments, arrears settlements and same-day cash. Match “Expected cash in hand” against the cash counted in the drawer. Non-cash expenses are listed below but don’t affect it.
+            </p>
           </div>
+
+          {recon.expenses.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Expenses paid today</p>
+              </div>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Category</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Payee</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Method</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recon.expenses.map(e => (
+                    <tr key={e.id} className="border-b border-slate-50 hover:bg-slate-50/40">
+                      <td className="px-4 py-3 text-sm text-slate-700">{e.category}</td>
+                      <td className="px-4 py-3 text-sm text-slate-500">{e.payee ?? '—'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-500">
+                        {e.method ?? '—'}
+                        {!e.isCash && <span className="ml-1.5 text-[10px] uppercase tracking-wide text-slate-400">non-cash</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right font-medium text-red-500">GHS {e.amount.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {recon.prePayments.length > 0 && (
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -353,8 +402,6 @@ export default function FeedingPage() {
           endpointBase="/school/feeding"
           ownCenter="FEEDING"
           perm={{ featureKey: 'feeding_fees', subFeatureKey: 'fee_collection' }}
-          summaryEndpoint="/school/feeding/expense-summary"
-          streamLabel="Feeding"
         />
       )}
       {tab === 'reconciliation' && <ReconciliationTab />}

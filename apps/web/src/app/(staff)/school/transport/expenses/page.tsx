@@ -8,8 +8,6 @@ export default function TransportExpensesPage() {
       endpointBase="/school/transport"
       ownCenter="TRANSPORT"
       perm={{ featureKey: 'transport' }}
-      summaryEndpoint="/school/transport/expense-summary"
-      streamLabel="Transport"
     />
   );
 }

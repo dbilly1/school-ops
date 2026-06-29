@@ -78,10 +78,12 @@ type TransportData = {
 };
 type TransportDailyData = {
   days: { date: string; paid: number; preCovered: number; unpaid: number; absent: number; collected: number; riders: number }[];
+  totals: { collected: number; spent: number; net: number };
 };
 
 type FeedingData = {
-  totalCollected: number; paymentCount: number; dailyPaidCount: number; unpaidCount: number;
+  totalCollected: number; totalSpent: number; net: number;
+  paymentCount: number; dailyPaidCount: number; unpaidCount: number;
   payments: { id: string; amountPaid: number | string; paymentDate: string; student: StudentRef; recordedByUser: { firstName: string; lastName: string } | null }[];
 };
 
@@ -737,6 +739,15 @@ function TransportReport({ range }: { range: { start: string; end: string } }) {
         </>
       )}
 
+      {/* Income vs expense — whole stream, for the selected period */}
+      {daily?.totals && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatCard label="Collected" value={ghs(daily.totals.collected)} color="text-emerald-600" sub="Selected period" />
+          <StatCard label="Expenses" value={ghs(daily.totals.spent)} color="text-red-500" />
+          <StatCard label="Net" value={ghs(daily.totals.net)} color={daily.totals.net >= 0 ? undefined : 'text-red-500'} />
+        </div>
+      )}
+
       {/* Daily history */}
       <div>
         <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
@@ -803,8 +814,12 @@ function FeedingReport({ range }: { range: { start: string; end: string } }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <StatCard label="Cash collected" value={ghs(data.totalCollected)} color="text-emerald-600" sub={`${data.paymentCount} payment${data.paymentCount !== 1 ? 's' : ''}`} />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard label="Collected" value={ghs(data.totalCollected)} color="text-emerald-600" sub={`${data.paymentCount} payment${data.paymentCount !== 1 ? 's' : ''}`} />
+        <StatCard label="Expenses" value={ghs(data.totalSpent)} color="text-red-500" />
+        <StatCard label="Net" value={ghs(data.net)} color={data.net >= 0 ? undefined : 'text-red-500'} />
+      </div>
+      <div className="grid grid-cols-3 gap-4">
         <StatCard label="Days paid" value={data.dailyPaidCount} />
         <StatCard label="Days unpaid" value={data.unpaidCount} color="text-red-500" />
         <StatCard label="Payments" value={data.paymentCount} />

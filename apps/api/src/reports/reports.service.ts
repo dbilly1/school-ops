@@ -348,11 +348,22 @@ export class ReportsService {
       },
     });
 
+    const spentAgg = await this.prisma.expense.aggregate({
+      where: {
+        schoolId, costCenter: 'FEEDING',
+        expenseDate: { gte: new Date(startDate), lte: new Date(endDate) },
+      },
+      _sum: { amount: true },
+    });
+
     const totalCollected = payments.reduce((s, p) => s + Number(p.amountPaid), 0);
+    const totalSpent = Number(spentAgg._sum.amount ?? 0);
 
     return {
       startDate, endDate,
       totalCollected,
+      totalSpent,
+      net: totalCollected - totalSpent,
       paymentCount: payments.length,
       dailyPaidCount: dailyPaid,
       unpaidCount: unpaid,
@@ -553,7 +564,23 @@ export class ReportsService {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, e]) => ({ date, ...e, riders: e.paid + e.preCovered + e.unpaid }));
 
-    return { days };
+    // Period financials are always whole-stream: collected can be route-scoped
+    // but expenses aren't attributable to a route, so the net summary ignores the
+    // route filter (which only governs the daily-history table above).
+    const [collectedAgg, spentAgg] = await Promise.all([
+      this.prisma.transportPayment.aggregate({
+        where: { schoolId, paymentDate: { gte: new Date(startDate), lte: new Date(endDate) } },
+        _sum: { amountPaid: true },
+      }),
+      this.prisma.expense.aggregate({
+        where: { schoolId, costCenter: 'TRANSPORT', expenseDate: { gte: new Date(startDate), lte: new Date(endDate) } },
+        _sum: { amount: true },
+      }),
+    ]);
+    const collected = Number(collectedAgg._sum.amountPaid ?? 0);
+    const spent = Number(spentAgg._sum.amount ?? 0);
+
+    return { days, totals: { collected, spent, net: collected - spent } };
   }
 
   private async getActiveYearId(schoolId: string): Promise<string> {
