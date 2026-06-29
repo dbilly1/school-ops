@@ -43,6 +43,24 @@
   background-color: rgba(255, 255, 255, 0.45);
 }
 
+/* Light-surface variant — same slim pill, but a slate thumb so it stays
+   visible on white backgrounds (modals, panels). Same no-`scrollbar-width`
+   rationale as above. */
+.scrollbar-slim-light::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-slim-light::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-slim-light::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.35);
+  border-radius: 9999px;
+}
+.scrollbar-slim-light::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(100, 116, 139, 0.55);
+}
+
 /* Rich-text lesson notes — the editor surface and the read-only render share
    these so what you type matches what reviewers see. Tailwind's preflight
    strips list/heading styling, so we re-assert it within these scopes only. */
