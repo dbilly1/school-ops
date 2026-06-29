@@ -54,9 +54,44 @@ function buildReceiptHtml(r: ReceiptData, school: SchoolProfile | null) {
 
   const row = (label: string, value: string) => `
     <tr>
-      <td style="padding:7px 0;color:#64748b;font-size:13px;">${label}</td>
-      <td style="padding:7px 0;text-align:right;font-size:13px;color:#0f172a;font-weight:500;">${value}</td>
+      <td style="padding:5px 0;color:#64748b;font-size:12.5px;">${label}</td>
+      <td style="padding:5px 0;text-align:right;font-size:12.5px;color:#0f172a;font-weight:500;">${value}</td>
     </tr>`;
+
+  // One receipt copy. We print two per page (parent + school) so the cut line
+  // separates a copy for the payer and one the school files.
+  const copy = (copyLabel: string) => `
+    <section class="copy">
+      <div class="copy-tag">${copyLabel}</div>
+      <div class="header">
+        ${school?.logoUrl ? `<img src="${escapeHtml(school.logoUrl)}" alt="" />` : ''}
+        <div>
+          <p class="school-name">${escapeHtml(school?.name || 'School')}</p>
+          ${contactBits ? `<p class="school-contact">${contactBits}</p>` : ''}
+        </div>
+      </div>
+
+      <p class="title">Payment Receipt</p>
+      <p class="amount">${ghs(r.amount)}</p>
+
+      <table>
+        ${row('Receipt No.', escapeHtml(r.receiptNo))}
+        ${row('Date', formatDate(r.paymentDate))}
+        ${row('Student', escapeHtml(r.studentName))}
+        ${row('Student ID', escapeHtml(r.studentId))}
+        ${row('For', escapeHtml(r.description))}
+        ${row('Method', escapeHtml(r.method || '—'))}
+        ${r.reference ? row('Reference', escapeHtml(r.reference)) : ''}
+        ${r.paidBy ? row('Paid by', escapeHtml(r.paidBy)) : ''}
+        ${row('Received by', escapeHtml(r.recordedBy))}
+        ${balance != null ? `<tr class="divider"><td colspan="2"></td></tr>
+        ${row('Invoice total', ghs(r.invoiceTotal!))}
+        ${row('Total paid', ghs(r.invoicePaid!))}
+        ${row('Balance', ghs(balance))}` : ''}
+      </table>
+
+      <div class="footer">Thank you. This is a computer-generated receipt.</div>
+    </section>`;
 
   return `<!doctype html>
 <html>
@@ -66,51 +101,29 @@ function buildReceiptHtml(r: ReceiptData, school: SchoolProfile | null) {
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; color: #0f172a; }
-  .wrap { max-width: 560px; margin: 0 auto; padding: 40px 36px; }
-  .header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid ${accent}; padding-bottom: 18px; }
-  .header img { height: 52px; width: 52px; object-fit: contain; border-radius: 8px; }
-  .school-name { font-size: 20px; font-weight: 700; color: ${accent}; margin: 0; }
-  .school-contact { font-size: 11px; color: #64748b; margin-top: 3px; }
-  .title { text-align: center; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: #94a3b8; margin: 26px 0 4px; }
-  .amount { text-align: center; font-size: 34px; font-weight: 800; color: ${accent}; margin: 0 0 26px; }
+  .sheet { max-width: 580px; margin: 0 auto; }
+  .copy { padding: 22px 34px; page-break-inside: avoid; break-inside: avoid; }
+  .copy-tag { text-align: right; font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; color: #94a3b8; font-weight: 700; margin-bottom: 6px; }
+  .header { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid ${accent}; padding-bottom: 14px; }
+  .header img { height: 44px; width: 44px; object-fit: contain; border-radius: 8px; }
+  .school-name { font-size: 18px; font-weight: 700; color: ${accent}; margin: 0; }
+  .school-contact { font-size: 10.5px; color: #64748b; margin-top: 3px; }
+  .title { text-align: center; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: #94a3b8; margin: 16px 0 2px; }
+  .amount { text-align: center; font-size: 28px; font-weight: 800; color: ${accent}; margin: 0 0 14px; }
   table { width: 100%; border-collapse: collapse; }
   .divider td { border-top: 1px dashed #e2e8f0; padding-top: 0; }
-  .footer { margin-top: 32px; padding-top: 18px; border-top: 1px solid #f1f5f9; font-size: 11px; color: #94a3b8; text-align: center; }
-  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .wrap { padding: 24px; } }
+  .footer { margin-top: 18px; padding-top: 12px; border-top: 1px solid #f1f5f9; font-size: 10.5px; color: #94a3b8; text-align: center; }
+  .cut { display: flex; align-items: center; gap: 8px; color: #cbd5e1; font-size: 11px; margin: 0 34px; }
+  .cut::before, .cut::after { content: ""; flex: 1; border-top: 1px dashed #cbd5e1; }
+  @page { margin: 10mm; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .copy { padding: 14px 30px; } }
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="header">
-      ${school?.logoUrl ? `<img src="${escapeHtml(school.logoUrl)}" alt="" />` : ''}
-      <div>
-        <p class="school-name">${escapeHtml(school?.name || 'School')}</p>
-        ${contactBits ? `<p class="school-contact">${contactBits}</p>` : ''}
-      </div>
-    </div>
-
-    <p class="title">Payment Receipt</p>
-    <p class="amount">${ghs(r.amount)}</p>
-
-    <table>
-      ${row('Receipt No.', escapeHtml(r.receiptNo))}
-      ${row('Date', formatDate(r.paymentDate))}
-      ${row('Student', escapeHtml(r.studentName))}
-      ${row('Student ID', escapeHtml(r.studentId))}
-      ${row('For', escapeHtml(r.description))}
-      ${row('Method', escapeHtml(r.method || '—'))}
-      ${r.reference ? row('Reference', escapeHtml(r.reference)) : ''}
-      ${r.paidBy ? row('Paid by', escapeHtml(r.paidBy)) : ''}
-      ${row('Received by', escapeHtml(r.recordedBy))}
-      ${balance != null ? `<tr class="divider"><td colspan="2"></td></tr>
-      ${row('Invoice total', ghs(r.invoiceTotal!))}
-      ${row('Total paid', ghs(r.invoicePaid!))}
-      ${row('Balance', ghs(balance))}` : ''}
-    </table>
-
-    <div class="footer">
-      Thank you. This is a computer-generated receipt.
-    </div>
+  <div class="sheet">
+    ${copy("Customer's Copy")}
+    <div class="cut">&#9986; cut here</div>
+    ${copy("School's Copy")}
   </div>
 </body>
 </html>`;
@@ -220,7 +233,10 @@ export function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData | null
         </div>
       </div>
 
-      <div className="flex gap-2 mt-5">
+      <p className="mt-4 text-[11px] text-slate-400 text-center">
+        Prints two copies per page — one for the payer, one for the school to keep.
+      </p>
+      <div className="flex gap-2 mt-2">
         <button
           onClick={onClose}
           className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 transition">

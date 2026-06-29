@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn';
 import { useStaffAuth } from '@/contexts/staff-auth';
 import { InvoicePreviewModal, type InvoicePreviewData } from '@/components/finance/invoice-preview-modal';
 import { AdmissionLetterModal, type AdmissionLetterData } from '@/components/admissions/admission-letter-modal';
+import { DiscountFormModal, KIND_LABEL, type Discount } from '@/components/finance/discount-form-modal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -72,24 +73,6 @@ type FeeItem = { feeComponentId: string; defaultAmount: number; overrides: { gra
 
 const FREQ_LABEL: Record<BillingFrequency, string> = {
   PER_TERM: 'Every term', PER_YEAR: 'Once a year', ONE_TIME: 'One-time',
-};
-
-type DiscountKind = 'DISCOUNT' | 'SCHOLARSHIP' | 'BURSARY';
-type DiscountType = 'PERCENT' | 'FIXED';
-type Discount = {
-  id: string;
-  feeComponentId: string | null;
-  component: { id: string; name: string } | null;
-  kind: DiscountKind;
-  type: DiscountType;
-  value: number;
-  label: string | null;
-  frequency: BillingFrequency;
-  isActive: boolean;
-};
-
-const KIND_LABEL: Record<DiscountKind, string> = {
-  DISCOUNT: 'Discount', SCHOLARSHIP: 'Scholarship', BURSARY: 'Bursary',
 };
 
 const ghs = (n: number) => `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -621,43 +604,12 @@ function DiscountsTab({
   discounts: Discount[] | null;
   onChanged: () => void;
 }) {
-  const [showAdd, setShowAdd] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [alert, setAlert] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
-  const [form, setForm] = useState({
-    kind: 'DISCOUNT' as DiscountKind,
-    type: 'PERCENT' as DiscountType,
-    value: '',
-    feeComponentId: '',
-    label: '',
-    frequency: 'PER_TERM' as BillingFrequency,
-  });
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing]     = useState<Discount | null>(null);
+  const [busy, setBusy]           = useState<string | null>(null);
 
-  async function add() {
-    const value = parseFloat(form.value);
-    if (!value || value <= 0) { setAlert({ type: 'error', message: 'Enter a value greater than 0.' }); return; }
-    if (form.type === 'PERCENT' && value > 100) { setAlert({ type: 'error', message: 'A percentage cannot exceed 100.' }); return; }
-    setAlert(null); setSaving(true);
-    try {
-      await staffApi.post('/school/finance/discounts', {
-        studentId,
-        kind: form.kind,
-        type: form.type,
-        value,
-        feeComponentId: form.feeComponentId || null,
-        label: form.label.trim() || null,
-        frequency: form.frequency,
-      });
-      setForm({ kind: 'DISCOUNT', type: 'PERCENT', value: '', feeComponentId: '', label: '', frequency: 'PER_TERM' });
-      setShowAdd(false);
-      onChanged();
-    } catch (err) {
-      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to add discount.' });
-    } finally {
-      setSaving(false);
-    }
-  }
+  function openAdd()  { setEditing(null); setModalOpen(true); }
+  function openEdit(d: Discount) { setEditing(d); setModalOpen(true); }
 
   async function toggleActive(d: Discount) {
     setBusy(d.id);
@@ -683,107 +635,86 @@ function DiscountsTab({
 
   return (
     <div className="space-y-4">
-      {alert && <Alert type={alert.type} message={alert.message} />}
-
-      <p className="text-xs text-slate-400">
-        Discounts apply automatically as a credit line on invoices generated from now on. They never reduce
-        carried-forward arrears, and stacked discounts can&apos;t take the fees below zero.
-      </p>
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-xs text-slate-400 max-w-xl">
+          Discounts apply automatically as a credit line on invoices generated from now on. They never reduce
+          carried-forward arrears, and stacked discounts can&apos;t take the fees below zero.
+        </p>
+        <button onClick={openAdd}
+          className="shrink-0 px-3.5 py-2 rounded-lg text-sm font-semibold text-white transition"
+          style={{ backgroundColor: 'var(--accent)' }}>
+          + Add discount
+        </button>
+      </div>
 
       {discounts === null ? (
         <div className="space-y-2">
           {[1, 2].map(i => <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse" />)}
         </div>
-      ) : (discounts?.length ?? 0) === 0 ? (
-        <p className="text-sm text-slate-400 italic py-4 text-center">No discounts or scholarships for this student.</p>
+      ) : discounts.length === 0 ? (
+        <div className="border border-dashed border-slate-200 rounded-xl py-10 text-center">
+          <p className="text-sm text-slate-400">No discounts or scholarships yet.</p>
+          <button onClick={openAdd} className="mt-2 text-sm font-medium" style={{ color: 'var(--accent)' }}>
+            Add the first one
+          </button>
+        </div>
       ) : (
-        <div className="space-y-3">
-          {discounts!.map(d => (
-            <div key={d.id} className={cn('border rounded-xl px-4 py-3.5', d.isActive ? 'border-slate-100' : 'border-slate-100 bg-slate-50 opacity-70')}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <p className="text-sm font-semibold text-slate-800">{d.label?.trim() || KIND_LABEL[d.kind]}</p>
-                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{KIND_LABEL[d.kind]}</span>
-                    {!d.isActive && <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-500">Paused</span>}
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    <span className="font-semibold text-slate-700">{valueLabel(d)}</span>
-                    {' off '}{d.component ? d.component.name : 'the whole bill'}
-                    {' · '}{FREQ_LABEL[d.frequency]}
-                  </p>
+        <div className="space-y-2.5">
+          {discounts.map(d => (
+            <div key={d.id}
+              className={cn(
+                'group flex items-center gap-4 border rounded-xl px-4 py-3 transition',
+                d.isActive ? 'border-slate-100 hover:border-slate-200' : 'border-slate-100 bg-slate-50',
+              )}>
+              {/* Value badge */}
+              <div className={cn(
+                'shrink-0 w-16 h-14 rounded-xl flex flex-col items-center justify-center text-center',
+                d.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-400',
+              )}>
+                <span className="text-sm font-extrabold leading-none">{valueLabel(d)}</span>
+                <span className="text-[9px] font-semibold uppercase tracking-wide mt-1">off</span>
+              </div>
+
+              {/* Details */}
+              <div className={cn('flex-1 min-w-0', !d.isActive && 'opacity-60')}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-semibold text-slate-800 truncate">{d.label?.trim() || KIND_LABEL[d.kind]}</p>
+                  <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">{KIND_LABEL[d.kind]}</span>
+                  {!d.isActive && <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Paused</span>}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button onClick={() => toggleActive(d)} disabled={busy === d.id}
-                    className="text-xs font-medium text-slate-500 hover:text-slate-800 transition disabled:opacity-40">
-                    {d.isActive ? 'Pause' : 'Resume'}
-                  </button>
-                  <button onClick={() => remove(d.id)} disabled={busy === d.id}
-                    className="text-slate-300 hover:text-red-400 transition text-lg disabled:opacity-40">
-                    {busy === d.id ? '…' : '×'}
-                  </button>
-                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {d.component ? d.component.name : 'Whole bill'} · {FREQ_LABEL[d.frequency]}
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={() => openEdit(d)}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition">
+                  Edit
+                </button>
+                <button onClick={() => toggleActive(d)} disabled={busy === d.id}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition disabled:opacity-40">
+                  {d.isActive ? 'Pause' : 'Resume'}
+                </button>
+                <button onClick={() => remove(d.id)} disabled={busy === d.id} aria-label="Delete discount"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-red-50 hover:text-red-500 transition text-lg disabled:opacity-40">
+                  {busy === d.id ? '…' : '×'}
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {!showAdd ? (
-        <button onClick={() => setShowAdd(true)}
-          className="w-full py-2.5 border border-dashed border-slate-300 rounded-xl text-sm text-slate-400 hover:border-slate-400 hover:text-slate-600 transition">
-          + Add discount or scholarship
-        </button>
-      ) : (
-        <div className="border border-slate-200 rounded-xl p-4 space-y-3">
-          <p className="text-sm font-semibold text-slate-700">Add discount or scholarship</p>
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Type">
-              <select value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value as DiscountKind }))}
-                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
-                {(['DISCOUNT', 'SCHOLARSHIP', 'BURSARY'] as DiscountKind[]).map(k => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
-              </select>
-            </FormField>
-            <FormField label="Applies to">
-              <select value={form.feeComponentId} onChange={e => setForm(f => ({ ...f, feeComponentId: e.target.value }))}
-                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
-                <option value="">Whole bill</option>
-                {(components ?? []).slice().sort((a, b) => a.sequence - b.sequence).map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </FormField>
-            <FormField label="Amount type">
-              <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as DiscountType }))}
-                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
-                <option value="PERCENT">Percentage (%)</option>
-                <option value="FIXED">Fixed amount (GHS)</option>
-              </select>
-            </FormField>
-            <FormField label={form.type === 'PERCENT' ? 'Percentage' : 'Amount (GHS)'} required>
-              <Input type="number" min="0.01" step="0.01" max={form.type === 'PERCENT' ? '100' : undefined}
-                value={form.value} onChange={e => setForm(f => ({ ...f, value: e.target.value }))}
-                placeholder={form.type === 'PERCENT' ? 'e.g. 50' : 'e.g. 200'} />
-            </FormField>
-            <FormField label="Recurs">
-              <select value={form.frequency} onChange={e => setForm(f => ({ ...f, frequency: e.target.value as BillingFrequency }))}
-                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
-                <option value="PER_TERM">Every term</option>
-                <option value="PER_YEAR">First invoice of each year</option>
-                <option value="ONE_TIME">One-time (first invoice only)</option>
-              </select>
-            </FormField>
-            <FormField label="Reason / label">
-              <Input value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
-                placeholder="e.g. Staff child, Sibling" />
-            </FormField>
-          </div>
-          <div className="flex justify-end gap-2">
-            <button onClick={() => setShowAdd(false)} className="text-sm text-slate-400 hover:text-slate-600 transition">Cancel</button>
-            <SaveButton loading={saving} onClick={add} label="Add" />
-          </div>
-        </div>
-      )}
+      <DiscountFormModal
+        open={modalOpen}
+        discount={editing}
+        studentId={studentId}
+        components={components}
+        onClose={() => setModalOpen(false)}
+        onSaved={onChanged}
+      />
     </div>
   );
 }
