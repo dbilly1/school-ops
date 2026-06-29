@@ -294,6 +294,7 @@ model School {
   expenseCategories         ExpenseCategory[]
   expenses                  Expense[]
   expenseBudgets            ExpenseBudget[]
+  cashReconciliations       CashReconciliation[]
   plannerEntries            PlannerEntry[]
   lessonNotes               LessonNote[]
   curriculumLinks           SchoolCurriculumLink[]
@@ -439,6 +440,7 @@ model User {
   transportRecorded   TransportPayment[]       @relation("TransportRecordedBy")
   paymentsRecorded    Payment[]                @relation("PaymentRecordedBy")
   expensesRecorded    Expense[]                @relation("ExpenseRecordedBy")
+  cashReconciliations CashReconciliation[]     @relation("CashReconciledBy")
   plannerEntries      PlannerEntry[]
   lessonNotesAuthored LessonNote[]             @relation("LessonNoteAuthor")
   lessonNotesReviewed LessonNote[]             @relation("LessonNoteReviewer")
@@ -1543,6 +1545,42 @@ model ExpenseBudget {
 
   @@unique([schoolId, categoryId, termId])
   @@map("expense_budgets")
+}
+
+// Which daily cash drawer an end-of-day count belongs to. Each stream (feeding /
+// transport) is counted independently because their cash is collected and held
+// separately.
+enum CashStream {
+  FEEDING
+  TRANSPORT
+}
+
+// One end-of-day cash count per stream per day. Figures are SNAPSHOTTED at the
+// moment the count is recorded (expected vs counted), so a later expense/payment
+// edit never silently rewrites a closed day's variance. Re-recording the same
+// day re-snapshots (upsert on the unique key). variance = countedCash − expectedCash
+// (positive = surplus, negative = shortage).
+model CashReconciliation {
+  id            String     @id @default(uuid())
+  schoolId      String
+  stream        CashStream
+  date          DateTime // business day, stored at start-of-day
+  expectedCash  Decimal
+  countedCash   Decimal
+  variance      Decimal
+  cashCollected Decimal
+  cashPaidOut   Decimal
+  note          String?
+  reconciledBy  String
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  school           School @relation(fields: [schoolId], references: [id])
+  reconciledByUser User   @relation("CashReconciledBy", fields: [reconciledBy], references: [id])
+
+  @@unique([schoolId, stream, date])
+  @@index([schoolId, stream, date])
+  @@map("cash_reconciliations")
 }
 
 // ============================================================

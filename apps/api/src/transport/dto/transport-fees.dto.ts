@@ -1,4 +1,19 @@
-import { IsString, IsInt, IsDateString, IsOptional, Min } from 'class-validator';
+import { IsString, IsInt, IsNumber, IsDateString, IsOptional, Min } from 'class-validator';
+
+// Record the actual cash counted in the drawer at end of day for the transport
+// stream. Expected/variance are computed server-side and snapshotted.
+export class RecordCashCountDto {
+  @IsDateString()
+  date!: string;
+
+  @IsNumber()
+  @Min(0)
+  countedCash!: number;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
+}
 
 export class TransportMarkPaidDto {
   @IsString()

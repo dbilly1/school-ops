@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { TransportFeesService } from './transport-fees.service';
-import { TransportPrepayDto, TransportRefundDto, TransportSettleArrearsDto, TransportMarkPaidDto } from './dto/transport-fees.dto';
+import { TransportPrepayDto, TransportRefundDto, TransportSettleArrearsDto, TransportMarkPaidDto, RecordCashCountDto } from './dto/transport-fees.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../permissions/permissions.guard';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
@@ -65,5 +65,11 @@ export class TransportFeesController {
   @RequirePermission('transport', 'VIEW', 'fee_collection')
   getDailyReconciliation(@CurrentUser() user: any, @Query('date') date: string) {
     return this.transportFeesService.getDailyReconciliation(user.schoolId, date);
+  }
+
+  @Post('cash-count')
+  @RequirePermission('transport', 'CREATE', 'fee_collection')
+  recordCashCount(@CurrentUser() user: any, @Body() dto: RecordCashCountDto) {
+    return this.transportFeesService.recordCashCount(user.schoolId, dto, user.id);
   }
 }

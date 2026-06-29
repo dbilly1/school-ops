@@ -397,6 +397,13 @@ export class TransportFeesService {
     const cashPaidOut = expenses.filter((e) => isCash(e.method)).reduce((s, e) => s + Number(e.amount), 0);
     const totalPaidOut = expenses.reduce((s, e) => s + Number(e.amount), 0);
 
+    // Any end-of-day cash count already recorded for this date (so the page can
+    // show the saved figure and whether the drawer balanced).
+    const cashCount = await this.prisma.cashReconciliation.findUnique({
+      where: { schoolId_stream_date: { schoolId, stream: 'TRANSPORT', date: this.startOfDay(dateObj) } },
+      include: { reconciledByUser: { select: { firstName: true, lastName: true } } },
+    });
+
     return {
       date,
       cashCollectedToday: totalCashCollected,
@@ -414,6 +421,49 @@ export class TransportFeesService {
       cashPaidOut,
       totalPaidOut,
       expectedCashInHand: totalCashCollected - cashPaidOut,
+      cashCount: this.mapCashCount(cashCount),
+    };
+  }
+
+  // Record (or re-record) the actual cash counted in the drawer for a day. The
+  // expected figure is recomputed now and snapshotted alongside the count, so a
+  // later expense/payment edit never silently rewrites a closed day's variance.
+  async recordCashCount(schoolId: string, dto: { date: string; countedCash: number; note?: string }, userId: string) {
+    const recon = await this.getDailyReconciliation(schoolId, dto.date);
+    const date = this.startOfDay(new Date(dto.date));
+    const expectedCash = recon.expectedCashInHand;
+    const variance = dto.countedCash - expectedCash;
+
+    const saved = await this.prisma.cashReconciliation.upsert({
+      where: { schoolId_stream_date: { schoolId, stream: 'TRANSPORT', date } },
+      create: {
+        schoolId, stream: 'TRANSPORT', date,
+        expectedCash, countedCash: dto.countedCash, variance,
+        cashCollected: recon.cashCollectedToday, cashPaidOut: recon.cashPaidOut,
+        note: dto.note ?? null, reconciledBy: userId,
+      },
+      update: {
+        expectedCash, countedCash: dto.countedCash, variance,
+        cashCollected: recon.cashCollectedToday, cashPaidOut: recon.cashPaidOut,
+        note: dto.note ?? null, reconciledBy: userId,
+      },
+      include: { reconciledByUser: { select: { firstName: true, lastName: true } } },
+    });
+    return this.mapCashCount(saved);
+  }
+
+  private mapCashCount(r: any) {
+    if (!r) return null;
+    return {
+      date: this.dayKey(r.date),
+      expectedCash: Number(r.expectedCash),
+      countedCash: Number(r.countedCash),
+      variance: Number(r.variance),
+      cashCollected: Number(r.cashCollected),
+      cashPaidOut: Number(r.cashPaidOut),
+      note: r.note ?? null,
+      reconciledBy: r.reconciledByUser ? `${r.reconciledByUser.firstName} ${r.reconciledByUser.lastName}` : null,
+      recordedAt: r.updatedAt,
     };
   }
 

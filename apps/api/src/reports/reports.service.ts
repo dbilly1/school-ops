@@ -371,6 +371,42 @@ export class ReportsService {
     };
   }
 
+  // ── Cash reconciliation history (end-of-day counts) ──────
+
+  async cashReconciliations(
+    schoolId: string,
+    stream: 'FEEDING' | 'TRANSPORT',
+    startDate: string,
+    endDate: string,
+  ) {
+    const rows = await this.prisma.cashReconciliation.findMany({
+      where: { schoolId, stream, date: { gte: new Date(startDate), lte: new Date(endDate) } },
+      include: { reconciledByUser: { select: { firstName: true, lastName: true } } },
+      orderBy: { date: 'desc' },
+    });
+
+    const mapped = rows.map((r) => ({
+      date: r.date.toISOString().slice(0, 10),
+      expectedCash: Number(r.expectedCash),
+      countedCash: Number(r.countedCash),
+      variance: Number(r.variance),
+      note: r.note,
+      reconciledBy: r.reconciledByUser ? `${r.reconciledByUser.firstName} ${r.reconciledByUser.lastName}` : null,
+      recordedAt: r.updatedAt,
+    }));
+
+    return {
+      rows: mapped,
+      summary: {
+        days: mapped.length,
+        balanced: mapped.filter((r) => r.variance === 0).length,
+        over: mapped.filter((r) => r.variance > 0).length,
+        short: mapped.filter((r) => r.variance < 0).length,
+        netVariance: mapped.reduce((s, r) => s + r.variance, 0),
+      },
+    };
+  }
+
   // ── Performance Tracking (Longitudinal) ──────────────────
 
   async performanceTracking(schoolId: string, studentId: string) {

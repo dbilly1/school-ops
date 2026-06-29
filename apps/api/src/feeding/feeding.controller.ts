@@ -3,7 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { FeedingService } from './feeding.service';
 import {
   EnrollStudentDto, MarkPaidDto, FeedingExemptDto,
-  FeedingPrepayDto, FeedingRefundDto, FeedingSettleArrearsDto,
+  FeedingPrepayDto, FeedingRefundDto, FeedingSettleArrearsDto, RecordCashCountDto,
 } from './dto/feeding.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffRolesGuard } from '../auth/guards/staff-roles.guard';
@@ -109,5 +109,11 @@ export class FeedingController {
   @RequirePermission('feeding_fees', 'VIEW', 'fee_collection')
   getDailyReconciliation(@CurrentUser() user: any, @Query('date') date: string) {
     return this.feedingService.getDailyReconciliation(user.schoolId, date);
+  }
+
+  @Post('cash-count')
+  @RequirePermission('feeding_fees', 'CREATE', 'fee_collection')
+  recordCashCount(@CurrentUser() user: any, @Body() dto: RecordCashCountDto) {
+    return this.feedingService.recordCashCount(user.schoolId, dto, user.id);
   }
 }

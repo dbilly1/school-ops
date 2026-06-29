@@ -87,6 +87,11 @@ type FeedingData = {
   payments: { id: string; amountPaid: number | string; paymentDate: string; student: StudentRef; recordedByUser: { firstName: string; lastName: string } | null }[];
 };
 
+type CashCountsData = {
+  rows: { date: string; expectedCash: number; countedCash: number; variance: number; note: string | null; reconciledBy: string | null; recordedAt: string }[];
+  summary: { days: number; balanced: number; over: number; short: number; netVariance: number };
+};
+
 // ── Shared bits ─────────────────────────────────────────────────────────────────
 
 function ghs(n: number) { return `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
@@ -678,6 +683,66 @@ function FeesReport({ termId }: { termId: string }) {
   );
 }
 
+// ── Cash counts (end-of-day reconciliation history) ──────────────────────────────
+
+function varianceColor(v: number) { return v === 0 ? 'text-emerald-600' : v > 0 ? 'text-blue-500' : 'text-red-500'; }
+function varianceLabel(v: number) { return v === 0 ? 'Balanced' : v > 0 ? 'Over' : 'Short'; }
+
+function CashCountsSection({ stream, range }: { stream: 'transport' | 'feeding'; range: { start: string; end: string } }) {
+  const { data, loading } = useApi(useCallback(
+    () => staffApi.get<CashCountsData>(`/school/reports/${stream}/cash-counts?startDate=${range.start}&endDate=${range.end}`).catch(() => null),
+    [stream, range.start, range.end]), `${stream}|${range.start}|${range.end}`);
+
+  function exportCsv() {
+    if (!data) return;
+    downloadCsv(`${stream}-cash-counts`, ['Date', 'Expected', 'Counted', 'Variance', 'Status', 'Recorded by', 'Note'],
+      data.rows.map(r => [r.date, r.expectedCash.toFixed(2), r.countedCash.toFixed(2), r.variance.toFixed(2), varianceLabel(r.variance), r.reconciledBy ?? '', r.note ?? '']));
+  }
+
+  return (
+    <div>
+      <SectionHeader title="Cash counts — end of day" action={<ExportButton onClick={exportCsv} disabled={!data?.rows.length} />} />
+      {loading ? <Skeleton /> : (
+        <>
+          {data && data.rows.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+              <StatCard label="Days counted" value={data.summary.days} />
+              <StatCard label="Balanced" value={data.summary.balanced} color="text-emerald-600" />
+              <StatCard label="Over / Short" value={`${data.summary.over} / ${data.summary.short}`} />
+              <StatCard label="Net variance" value={ghs(data.summary.netVariance)} color={data.summary.netVariance < 0 ? 'text-red-500' : data.summary.netVariance > 0 ? 'text-blue-500' : undefined} />
+            </div>
+          )}
+          <div className={cn(card, 'overflow-x-auto')}>
+            <table className="w-full min-w-[680px]">
+              <thead><tr className="border-b border-slate-100 bg-slate-50">
+                <th className={`${thBase} text-left`}>Date</th>
+                <th className={`${thBase} text-right`}>Expected</th>
+                <th className={`${thBase} text-right`}>Counted</th>
+                <th className={`${thBase} text-right`}>Variance</th>
+                <th className={`${thBase} text-left`}>Recorded by</th>
+              </tr></thead>
+              <tbody>
+                {data?.rows.map(r => (
+                  <tr key={r.date} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/40 transition">
+                    <td className="px-4 py-2.5 text-sm text-slate-700">{fmtDay(r.date)}{r.note && <span className="block text-xs text-slate-400">{r.note}</span>}</td>
+                    <td className="px-4 py-2.5 text-right text-sm text-slate-600">{ghs(r.expectedCash)}</td>
+                    <td className="px-4 py-2.5 text-right text-sm text-slate-800 font-medium">{ghs(r.countedCash)}</td>
+                    <td className={`px-4 py-2.5 text-right text-sm font-semibold ${varianceColor(r.variance)}`}>
+                      {r.variance > 0 ? '+' : ''}{ghs(r.variance)}<span className="block text-[11px] font-normal">{varianceLabel(r.variance)}</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500">{r.reconciledBy ?? '—'}</td>
+                  </tr>
+                ))}
+                {!data?.rows.length && <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-slate-400">No end-of-day cash counts recorded in this period.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Transport ───────────────────────────────────────────────────────────────────
 
 function TransportReport({ range }: { range: { start: string; end: string } }) {
@@ -790,11 +855,13 @@ function TransportReport({ range }: { range: { start: string; end: string } }) {
           </div>
         )}
       </div>
+
+      <CashCountsSection stream="transport" range={range} />
     </div>
   );
 }
 
-// ── Feeding (unchanged) ──────────────────────────────────────────────────────────
+// ── Feeding ──────────────────────────────────────────────────────────────────────
 
 function FeedingReport({ range }: { range: { start: string; end: string } }) {
   const fetchReport = useCallback(
@@ -851,6 +918,8 @@ function FeedingReport({ range }: { range: { start: string; end: string } }) {
           </table>
         </div>
       </div>
+
+      <CashCountsSection stream="feeding" range={range} />
     </div>
   );
 }

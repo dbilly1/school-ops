@@ -88,6 +88,24 @@ export class ReportsController {
     return this.reportsService.feedingReport(user.schoolId, startDate, endDate);
   }
 
+  @Get('transport/cash-counts')
+  transportCashCounts(
+    @CurrentUser() user: any,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.reportsService.cashReconciliations(user.schoolId, 'TRANSPORT', startDate, endDate);
+  }
+
+  @Get('feeding/cash-counts')
+  feedingCashCounts(
+    @CurrentUser() user: any,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.reportsService.cashReconciliations(user.schoolId, 'FEEDING', startDate, endDate);
+  }
+
   @Get('performance/:studentId')
   performance(@CurrentUser() user: any, @Param('studentId') studentId: string) {
     return this.reportsService.performanceTracking(user.schoolId, studentId);

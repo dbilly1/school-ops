@@ -5,6 +5,7 @@ import { staffApi } from '@/lib/api';
 import { useApi } from '@/hooks/use-api';
 import { PaymentsCalendarModal } from '@/components/fees/payments-calendar-modal';
 import { ExpensesPanel } from '@/components/finance/expenses-panel';
+import { CashCountCard, type CashCount } from '@/components/finance/cash-count-card';
 import { cn } from '@/lib/cn';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -236,13 +237,14 @@ function ReconciliationTab() {
     cashPaidOut: number;
     totalPaidOut: number;
     expectedCashInHand: number;
+    cashCount: CashCount | null;
   };
 
   const fetchRecon = useCallback(
     () => staffApi.get<ReconResponse>(`/school/feeding/reconciliation?date=${date}`).catch(() => null),
     [date],
   );
-  const { data: recon, loading } = useApi(fetchRecon, date);
+  const { data: recon, loading, refetch } = useApi(fetchRecon, date);
 
   return (
     <div>
@@ -263,6 +265,7 @@ function ReconciliationTab() {
 
       {!loading && recon && (
         <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-6">
             <h3 className="text-sm font-semibold text-slate-700 mb-5">
               Daily reconciliation — {new Date(recon.date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
@@ -291,6 +294,15 @@ function ReconciliationTab() {
             <p className="text-xs mt-2 text-slate-500">
               Collected includes prepayments, arrears settlements and same-day cash. Match “Expected cash in hand” against the cash counted in the drawer. Non-cash expenses are listed below but don’t affect it.
             </p>
+          </div>
+
+            <CashCountCard
+              endpointBase="/school/feeding"
+              date={recon.date}
+              expected={recon.expectedCashInHand}
+              existing={recon.cashCount}
+              onRecorded={refetch}
+            />
           </div>
 
           {recon.expenses.length > 0 && (
