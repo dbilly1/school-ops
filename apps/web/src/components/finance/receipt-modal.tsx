@@ -60,8 +60,8 @@ function buildReceiptHtml(r: ReceiptData, school: SchoolProfile | null) {
 
   // One receipt copy. We print two per page (parent + school) so the cut line
   // separates a copy for the payer and one the school files.
-  const copy = (copyLabel: string) => `
-    <section class="copy">
+  const copy = (copyLabel: string, cls = '') => `
+    <section class="copy ${cls}">
       <div class="copy-tag">${copyLabel}</div>
       <div class="header">
         ${school?.logoUrl ? `<img src="${escapeHtml(school.logoUrl)}" alt="" />` : ''}
@@ -117,13 +117,21 @@ function buildReceiptHtml(r: ReceiptData, school: SchoolProfile | null) {
   .cut::before, .cut::after { content: ""; flex: 1; border-top: 1px dashed #cbd5e1; }
   @page { margin: 10mm; }
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .copy { padding: 14px 30px; } }
+  /* Landscape: the page is too short to stack two copies, so place them
+     side by side with a vertical cut line instead of the horizontal one. */
+  @media print and (orientation: landscape) {
+    .sheet { max-width: none; display: flex; flex-direction: row; align-items: flex-start; }
+    .copy { width: 50%; }
+    .copy-2 { border-left: 1px dashed #cbd5e1; }
+    .cut { display: none; }
+  }
 </style>
 </head>
 <body>
   <div class="sheet">
     ${copy("Customer's Copy")}
     <div class="cut">&#9986; cut here</div>
-    ${copy("School's Copy")}
+    ${copy("School's Copy", 'copy-2')}
   </div>
 </body>
 </html>`;
@@ -233,10 +241,7 @@ export function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData | null
         </div>
       </div>
 
-      <p className="mt-4 text-[11px] text-slate-400 text-center">
-        Prints two copies per page — one for the payer, one for the school to keep.
-      </p>
-      <div className="flex gap-2 mt-2">
+      <div className="flex gap-2 mt-5">
         <button
           onClick={onClose}
           className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 transition">
