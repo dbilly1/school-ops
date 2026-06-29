@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional, IsPositive, IsDateString, IsEnum, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsPositive, IsDateString, IsIn, IsBoolean, IsArray, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class BulkFeeStructureEntry {
@@ -102,10 +102,74 @@ export class RecordPaymentDto {
 
   @IsString()
   @IsOptional()
+  paidBy?: string;
+
+  @IsString()
+  @IsOptional()
   notes?: string;
 }
 
 export class AssignStudentCategoryDto {
   @IsString()
   studentCategoryId!: string;
+}
+
+export class CreateStudentDiscountDto {
+  @IsString()
+  studentId!: string;
+
+  // null/omitted = whole invoice; else scoped to one fee component.
+  @IsString()
+  @IsOptional()
+  feeComponentId?: string | null;
+
+  @IsIn(['DISCOUNT', 'SCHOLARSHIP', 'BURSARY'])
+  @IsOptional()
+  kind?: 'DISCOUNT' | 'SCHOLARSHIP' | 'BURSARY';
+
+  @IsIn(['PERCENT', 'FIXED'])
+  type!: 'PERCENT' | 'FIXED';
+
+  @IsNumber()
+  @IsPositive()
+  value!: number;
+
+  @IsString()
+  @IsOptional()
+  label?: string;
+
+  @IsIn(['PER_TERM', 'PER_YEAR', 'ONE_TIME'])
+  @IsOptional()
+  frequency?: 'PER_TERM' | 'PER_YEAR' | 'ONE_TIME';
+}
+
+export class UpdateStudentDiscountDto {
+  @IsString()
+  @IsOptional()
+  feeComponentId?: string | null;
+
+  @IsIn(['DISCOUNT', 'SCHOLARSHIP', 'BURSARY'])
+  @IsOptional()
+  kind?: 'DISCOUNT' | 'SCHOLARSHIP' | 'BURSARY';
+
+  @IsIn(['PERCENT', 'FIXED'])
+  @IsOptional()
+  type?: 'PERCENT' | 'FIXED';
+
+  @IsNumber()
+  @IsPositive()
+  @IsOptional()
+  value?: number;
+
+  @IsString()
+  @IsOptional()
+  label?: string;
+
+  @IsIn(['PER_TERM', 'PER_YEAR', 'ONE_TIME'])
+  @IsOptional()
+  frequency?: 'PER_TERM' | 'PER_YEAR' | 'ONE_TIME';
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 }

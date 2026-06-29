@@ -18,6 +18,7 @@ export type ReceiptData = {
   paymentDate: string | Date;
   method: string | null;
   reference: string | null;
+  paidBy?: string | null;       // who handed over the money
   recordedBy: string;
   invoiceTotal?: number;        // optional running balance context
   invoicePaid?: number;
@@ -99,6 +100,7 @@ function buildReceiptHtml(r: ReceiptData, school: SchoolProfile | null) {
       ${row('For', escapeHtml(r.description))}
       ${row('Method', escapeHtml(r.method || '—'))}
       ${r.reference ? row('Reference', escapeHtml(r.reference)) : ''}
+      ${r.paidBy ? row('Paid by', escapeHtml(r.paidBy)) : ''}
       ${row('Received by', escapeHtml(r.recordedBy))}
       ${balance != null ? `<tr class="divider"><td colspan="2"></td></tr>
       ${row('Invoice total', ghs(r.invoiceTotal!))}
@@ -190,6 +192,7 @@ export function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData | null
               ['For', receipt.description],
               ['Method', receipt.method || '—'],
               ...(receipt.reference ? [['Reference', receipt.reference]] : []),
+              ...(receipt.paidBy ? [['Paid by', receipt.paidBy]] : []),
               ['Received by', receipt.recordedBy],
             ].map(([label, value]) => (
               <div key={label as string} className="flex items-center justify-between py-2 gap-4">

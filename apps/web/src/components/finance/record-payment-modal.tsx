@@ -20,15 +20,19 @@ export function RecordPaymentModal({
   invoice,
   onClose,
   onRecorded,
+  payerSuggestions = [],
 }: {
   invoice: PayableInvoice | null;
   onClose: () => void;
   onRecorded: () => void;
+  // Names to offer in the "Paid by" datalist (e.g. the student's guardians).
+  payerSuggestions?: string[];
 }) {
   const [form, setForm] = useState({
     amount: '',
     method: 'Cash',
     reference: '',
+    paidBy: '',
     paymentDate: new Date().toISOString().split('T')[0],
   });
   const [saving, setSaving] = useState(false);
@@ -39,7 +43,7 @@ export function RecordPaymentModal({
   const [lastKey, setLastKey] = useState('');
   if (openKey && openKey !== lastKey) {
     setLastKey(openKey);
-    setForm({ amount: '', method: 'Cash', reference: '', paymentDate: new Date().toISOString().split('T')[0] });
+    setForm({ amount: '', method: 'Cash', reference: '', paidBy: '', paymentDate: new Date().toISOString().split('T')[0] });
     setAlert(null);
   }
 
@@ -54,6 +58,7 @@ export function RecordPaymentModal({
         amount:      parseFloat(form.amount),
         method:      form.method,
         reference:   form.reference || null,
+        paidBy:      form.paidBy.trim() || null,
         paymentDate: form.paymentDate,
       });
       onRecorded();
@@ -92,6 +97,15 @@ export function RecordPaymentModal({
         </FormField>
         <FormField label="Reference">
           <Input value={form.reference} onChange={e => setForm(f => ({ ...f, reference: e.target.value }))} placeholder="Receipt / transaction ref" />
+        </FormField>
+        <FormField label="Paid by">
+          <Input list="payer-suggestions" value={form.paidBy}
+            onChange={e => setForm(f => ({ ...f, paidBy: e.target.value }))} placeholder="Name of person paying" />
+          {payerSuggestions.length > 0 && (
+            <datalist id="payer-suggestions">
+              {payerSuggestions.map(n => <option key={n} value={n} />)}
+            </datalist>
+          )}
         </FormField>
         <FormField label="Payment date">
           <Input type="date" value={form.paymentDate} onChange={e => setForm(f => ({ ...f, paymentDate: e.target.value }))} />

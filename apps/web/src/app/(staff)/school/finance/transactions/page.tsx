@@ -11,6 +11,7 @@ type Transaction = {
   paymentDate: string;
   method: string | null;
   reference: string | null;
+  paidBy: string | null;
   recordedBy: { firstName: string; lastName: string };
   invoice: {
     id: string;
@@ -37,6 +38,7 @@ function toReceipt(t: Transaction): ReceiptData {
     paymentDate:  t.paymentDate,
     method:       t.method,
     reference:    t.reference,
+    paidBy:       t.paidBy,
     recordedBy:   `${t.recordedBy.firstName} ${t.recordedBy.lastName}`,
     invoiceTotal: t.invoice.amount,
     invoicePaid:  t.invoice.amountPaid,

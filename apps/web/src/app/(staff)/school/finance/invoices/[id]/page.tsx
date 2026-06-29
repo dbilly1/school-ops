@@ -14,6 +14,7 @@ type Payment = {
   paymentDate: string;
   method: string | null;
   reference: string | null;
+  paidBy: string | null;
   recordedBy: { firstName: string; lastName: string };
 };
 
@@ -22,6 +23,7 @@ type InvoiceItem = {
   name: string;
   amount: number;
   isCarryForward: boolean;
+  isDiscount: boolean;
   sequence: number;
 };
 
@@ -49,7 +51,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const fetchInvoice = useCallback(() => staffApi.get<InvoiceDetail>(`/school/finance/invoices/${id}`), [id]);
   const { data: invoice, loading, refetch } = useApi(fetchInvoice);
 
-  const [form, setForm] = useState({ amount: '', method: 'Cash', reference: '', paymentDate: new Date().toISOString().split('T')[0] });
+  const [form, setForm] = useState({ amount: '', method: 'Cash', reference: '', paidBy: '', paymentDate: new Date().toISOString().split('T')[0] });
   const [saving, setSaving] = useState(false);
   const [alert, setAlert]   = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
@@ -72,7 +74,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       lines: invoice.items.map(it => ({
         name: it.name,
         amount: it.amount,
-        tag: it.isCarryForward ? 'Arrears' : undefined,
+        tag: it.isCarryForward ? 'Arrears' : it.isDiscount ? 'Discount' : undefined,
       })),
       student: {
         name: `${invoice.student.firstName} ${invoice.student.lastName}`,
@@ -94,6 +96,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       paymentDate:  p.paymentDate,
       method:       p.method,
       reference:    p.reference,
+      paidBy:       p.paidBy,
       recordedBy:   `${p.recordedBy.firstName} ${p.recordedBy.lastName}`,
       invoiceTotal: invoice!.amount,
       invoicePaid:  invoice!.amountPaid,
@@ -108,9 +111,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         amount:      parseFloat(form.amount),
         method:      form.method,
         reference:   form.reference || null,
+        paidBy:      form.paidBy.trim() || null,
         paymentDate: form.paymentDate,
       });
-      setForm(f => ({ ...f, amount: '', reference: '' }));
+      setForm(f => ({ ...f, amount: '', reference: '', paidBy: '' }));
       setAlert({ type: 'success', message: 'Payment recorded.' });
       refetch();
     } catch (err) {
@@ -209,9 +213,14 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                             Arrears
                           </span>
                         )}
+                        {it.isDiscount && (
+                          <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                            Discount
+                          </span>
+                        )}
                       </td>
-                      <td className="py-2 text-sm text-right font-medium text-slate-800">
-                        GHS {it.amount.toFixed(2)}
+                      <td className={`py-2 text-sm text-right font-medium ${it.isDiscount ? 'text-emerald-600' : 'text-slate-800'}`}>
+                        {it.isDiscount ? '−' : ''}GHS {Math.abs(it.amount).toFixed(2)}
                       </td>
                     </tr>
                   ))}
@@ -237,6 +246,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     <th className="pb-2 text-right text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount</th>
                     <th className="pb-2 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Method</th>
                     <th className="pb-2 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Reference</th>
+                    <th className="pb-2 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Paid by</th>
                     <th className="pb-2 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Recorded by</th>
                     <th className="pb-2" />
                   </tr>
@@ -254,6 +264,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       </td>
                       <td className="py-2.5 text-xs text-slate-500 pl-4">{p.method ?? '—'}</td>
                       <td className="py-2.5 text-xs font-mono text-slate-400">{p.reference ?? '—'}</td>
+                      <td className="py-2.5 text-xs text-slate-500">{p.paidBy ?? '—'}</td>
                       <td className="py-2.5 text-xs text-slate-500">
                         {p.recordedBy.firstName} {p.recordedBy.lastName}
                       </td>
@@ -290,6 +301,15 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 </FormField>
                 <FormField label="Reference">
                   <Input value={form.reference} onChange={e => setForm(f => ({ ...f, reference: e.target.value }))} placeholder="Receipt / transaction ref" />
+                </FormField>
+                <FormField label="Paid by">
+                  <Input list="payer-suggestions" value={form.paidBy}
+                    onChange={e => setForm(f => ({ ...f, paidBy: e.target.value }))} placeholder="Name of person paying" />
+                  {(studentRecord?.guardians?.length ?? 0) > 0 && (
+                    <datalist id="payer-suggestions">
+                      {studentRecord!.guardians.map(g => <option key={g.name} value={g.name} />)}
+                    </datalist>
+                  )}
                 </FormField>
                 <FormField label="Payment date">
                   <Input type="date" value={form.paymentDate} onChange={e => setForm(f => ({ ...f, paymentDate: e.target.value }))} />

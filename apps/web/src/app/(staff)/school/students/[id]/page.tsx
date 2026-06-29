@@ -74,7 +74,61 @@ const FREQ_LABEL: Record<BillingFrequency, string> = {
   PER_TERM: 'Every term', PER_YEAR: 'Once a year', ONE_TIME: 'One-time',
 };
 
-const TABS = ['Profile', 'Guardians', 'Academic History', 'Performance'] as const;
+type DiscountKind = 'DISCOUNT' | 'SCHOLARSHIP' | 'BURSARY';
+type DiscountType = 'PERCENT' | 'FIXED';
+type Discount = {
+  id: string;
+  feeComponentId: string | null;
+  component: { id: string; name: string } | null;
+  kind: DiscountKind;
+  type: DiscountType;
+  value: number;
+  label: string | null;
+  frequency: BillingFrequency;
+  isActive: boolean;
+};
+
+const KIND_LABEL: Record<DiscountKind, string> = {
+  DISCOUNT: 'Discount', SCHOLARSHIP: 'Scholarship', BURSARY: 'Bursary',
+};
+
+const ghs = (n: number) => `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Mirror of the server's discount maths, for the bill preview: each discount
+// draws from its target component's amount (per-component scope) or the whole
+// fees subtotal, clamped so stacked discounts never push the fees below zero.
+function computeDiscountPreviewLines(
+  lines: { name: string; amount: number; componentId?: string }[],
+  discounts: Discount[],
+): { name: string; amount: number; tag?: string }[] {
+  const feesTotal = lines.reduce((s, l) => s + l.amount, 0);
+  if (feesTotal <= 0) return [];
+  const compAmount = new Map<string, number>();
+  const compName = new Map<string, string>();
+  for (const l of lines) {
+    if (!l.componentId) continue;
+    compAmount.set(l.componentId, (compAmount.get(l.componentId) ?? 0) + l.amount);
+    compName.set(l.componentId, l.name);
+  }
+  const out: { name: string; amount: number; tag?: string }[] = [];
+  let applied = 0;
+  for (const d of discounts.filter(d => d.isActive)) {
+    const headroom = feesTotal - applied;
+    if (headroom <= 0) break;
+    const base = d.feeComponentId ? compAmount.get(d.feeComponentId) ?? 0 : feesTotal;
+    if (base <= 0) continue;
+    let amt = d.type === 'PERCENT' ? base * (d.value / 100) : d.value;
+    amt = Math.round(Math.min(amt, base, headroom) * 100) / 100;
+    if (amt <= 0) continue;
+    applied += amt;
+    const target = d.feeComponentId ? compName.get(d.feeComponentId) : null;
+    const name = (d.label?.trim() || KIND_LABEL[d.kind]) + (target ? ` — ${target}` : '');
+    out.push({ name, amount: -amt, tag: 'Discount' });
+  }
+  return out;
+}
+
+const TABS = ['Profile', 'Guardians', 'Discounts', 'Academic History', 'Performance'] as const;
 type Tab = typeof TABS[number];
 
 // ── Profile tab ───────────────────────────────────────────────────────────────
@@ -557,6 +611,183 @@ function PerformanceTab({ studentId }: { studentId: string }) {
   );
 }
 
+// ── Discounts tab ─────────────────────────────────────────────────────────────
+
+function DiscountsTab({
+  studentId, components, discounts, onChanged,
+}: {
+  studentId: string;
+  components: FeeComponent[] | null;
+  discounts: Discount[] | null;
+  onChanged: () => void;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [alert, setAlert] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [form, setForm] = useState({
+    kind: 'DISCOUNT' as DiscountKind,
+    type: 'PERCENT' as DiscountType,
+    value: '',
+    feeComponentId: '',
+    label: '',
+    frequency: 'PER_TERM' as BillingFrequency,
+  });
+
+  async function add() {
+    const value = parseFloat(form.value);
+    if (!value || value <= 0) { setAlert({ type: 'error', message: 'Enter a value greater than 0.' }); return; }
+    if (form.type === 'PERCENT' && value > 100) { setAlert({ type: 'error', message: 'A percentage cannot exceed 100.' }); return; }
+    setAlert(null); setSaving(true);
+    try {
+      await staffApi.post('/school/finance/discounts', {
+        studentId,
+        kind: form.kind,
+        type: form.type,
+        value,
+        feeComponentId: form.feeComponentId || null,
+        label: form.label.trim() || null,
+        frequency: form.frequency,
+      });
+      setForm({ kind: 'DISCOUNT', type: 'PERCENT', value: '', feeComponentId: '', label: '', frequency: 'PER_TERM' });
+      setShowAdd(false);
+      onChanged();
+    } catch (err) {
+      setAlert({ type: 'error', message: (err as ApiError).message ?? 'Failed to add discount.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleActive(d: Discount) {
+    setBusy(d.id);
+    try {
+      await staffApi.patch(`/school/finance/discounts/${d.id}`, { isActive: !d.isActive });
+      onChanged();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function remove(id: string) {
+    setBusy(id);
+    try {
+      await staffApi.delete(`/school/finance/discounts/${id}`);
+      onChanged();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const valueLabel = (d: Discount) => d.type === 'PERCENT' ? `${d.value}%` : ghs(d.value);
+
+  return (
+    <div className="space-y-4">
+      {alert && <Alert type={alert.type} message={alert.message} />}
+
+      <p className="text-xs text-slate-400">
+        Discounts apply automatically as a credit line on invoices generated from now on. They never reduce
+        carried-forward arrears, and stacked discounts can&apos;t take the fees below zero.
+      </p>
+
+      {discounts === null ? (
+        <div className="space-y-2">
+          {[1, 2].map(i => <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse" />)}
+        </div>
+      ) : (discounts?.length ?? 0) === 0 ? (
+        <p className="text-sm text-slate-400 italic py-4 text-center">No discounts or scholarships for this student.</p>
+      ) : (
+        <div className="space-y-3">
+          {discounts!.map(d => (
+            <div key={d.id} className={cn('border rounded-xl px-4 py-3.5', d.isActive ? 'border-slate-100' : 'border-slate-100 bg-slate-50 opacity-70')}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <p className="text-sm font-semibold text-slate-800">{d.label?.trim() || KIND_LABEL[d.kind]}</p>
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{KIND_LABEL[d.kind]}</span>
+                    {!d.isActive && <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-500">Paused</span>}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    <span className="font-semibold text-slate-700">{valueLabel(d)}</span>
+                    {' off '}{d.component ? d.component.name : 'the whole bill'}
+                    {' · '}{FREQ_LABEL[d.frequency]}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => toggleActive(d)} disabled={busy === d.id}
+                    className="text-xs font-medium text-slate-500 hover:text-slate-800 transition disabled:opacity-40">
+                    {d.isActive ? 'Pause' : 'Resume'}
+                  </button>
+                  <button onClick={() => remove(d.id)} disabled={busy === d.id}
+                    className="text-slate-300 hover:text-red-400 transition text-lg disabled:opacity-40">
+                    {busy === d.id ? '…' : '×'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!showAdd ? (
+        <button onClick={() => setShowAdd(true)}
+          className="w-full py-2.5 border border-dashed border-slate-300 rounded-xl text-sm text-slate-400 hover:border-slate-400 hover:text-slate-600 transition">
+          + Add discount or scholarship
+        </button>
+      ) : (
+        <div className="border border-slate-200 rounded-xl p-4 space-y-3">
+          <p className="text-sm font-semibold text-slate-700">Add discount or scholarship</p>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Type">
+              <select value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value as DiscountKind }))}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
+                {(['DISCOUNT', 'SCHOLARSHIP', 'BURSARY'] as DiscountKind[]).map(k => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Applies to">
+              <select value={form.feeComponentId} onChange={e => setForm(f => ({ ...f, feeComponentId: e.target.value }))}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
+                <option value="">Whole bill</option>
+                {(components ?? []).slice().sort((a, b) => a.sequence - b.sequence).map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="Amount type">
+              <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as DiscountType }))}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
+                <option value="PERCENT">Percentage (%)</option>
+                <option value="FIXED">Fixed amount (GHS)</option>
+              </select>
+            </FormField>
+            <FormField label={form.type === 'PERCENT' ? 'Percentage' : 'Amount (GHS)'} required>
+              <Input type="number" min="0.01" step="0.01" max={form.type === 'PERCENT' ? '100' : undefined}
+                value={form.value} onChange={e => setForm(f => ({ ...f, value: e.target.value }))}
+                placeholder={form.type === 'PERCENT' ? 'e.g. 50' : 'e.g. 200'} />
+            </FormField>
+            <FormField label="Recurs">
+              <select value={form.frequency} onChange={e => setForm(f => ({ ...f, frequency: e.target.value as BillingFrequency }))}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 outline-none">
+                <option value="PER_TERM">Every term</option>
+                <option value="PER_YEAR">First invoice of each year</option>
+                <option value="ONE_TIME">One-time (first invoice only)</option>
+              </select>
+            </FormField>
+            <FormField label="Reason / label">
+              <Input value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
+                placeholder="e.g. Staff child, Sibling" />
+            </FormField>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowAdd(false)} className="text-sm text-slate-400 hover:text-slate-600 transition">Cancel</button>
+            <SaveButton loading={saving} onClick={add} label="Add" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -578,8 +809,10 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
     if (!categoryId) return Promise.resolve([] as FeeItem[]);
     return staffApi.get<FeeItem[]>(`/school/finance/fee-items?studentCategoryId=${categoryId}`);
   }, [categoryId]);
+  const fetchDiscounts = useCallback(() => staffApi.get<Discount[]>(`/school/finance/students/${id}/discounts`).catch(() => []), [id]);
   const { data: components } = useApi(fetchComponents);
   const { data: feeItems }   = useApi(fetchFeeItems, categoryId);
+  const { data: discounts, refetch: refetchDiscounts } = useApi(fetchDiscounts);
 
   const billPreview: InvoicePreviewData | null = useMemo(() => {
     if (!student) return null;
@@ -594,13 +827,14 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         const ov = gradeId ? item.overrides.find(o => o.gradeLevelId === gradeId) : undefined;
         const amount = ov && ov.amount > 0 ? ov.amount : item.defaultAmount;
         const tag = c.billingFrequency !== 'PER_TERM' ? FREQ_LABEL[c.billingFrequency] : undefined;
-        return amount > 0 ? { name: c.name, amount, tag } : null;
+        return amount > 0 ? { name: c.name, amount, tag, componentId: c.id } : null;
       })
       .filter((l): l is NonNullable<typeof l> => !!l);
+    const discountLines = computeDiscountPreviewLines(lines, discounts ?? []);
     const primary = student.guardians.find(g => g.isPrimary) ?? student.guardians[0];
     return {
       className: assignment?.class.name ?? '—',
-      lines,
+      lines: [...lines.map(({ componentId, ...l }) => l), ...discountLines],
       student: {
         name: `${student.firstName} ${student.lastName}`,
         studentId: student.studentId,
@@ -608,7 +842,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
       },
       issuedBy: user ? `${user.firstName} ${user.lastName}`.trim() : null,
     };
-  }, [student, components, feeItems, user]);
+  }, [student, components, feeItems, discounts, user]);
 
   // Admission letter, built from the student's own record — class + year come
   // from their current assignment, guardian from the primary guardian. No
@@ -731,6 +965,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-5">
         {tab === 'Profile'          && <ProfileTab         student={student} onSaved={refetch} />}
         {tab === 'Guardians'        && <GuardiansTab       student={student} onSaved={refetch} />}
+        {tab === 'Discounts'        && <DiscountsTab       studentId={student.id} components={components} discounts={discounts ?? null} onChanged={refetchDiscounts} />}
         {tab === 'Academic History' && <AcademicHistoryTab student={student} />}
         {tab === 'Performance'      && <PerformanceTab     studentId={student.id} />}
       </div>

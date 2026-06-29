@@ -262,6 +262,7 @@ model School {
   feeStructures             FeeStructure[]
   feeComponents             FeeComponent[]
   feeItems                  FeeItem[]
+  studentDiscounts          StudentDiscount[]
   invoices                  Invoice[]
   payments                  Payment[]
   timetableConfigs          TimetableConfig[]
@@ -1073,6 +1074,7 @@ model Student {
   transportPayments     TransportPayment[]
   transportDailyRecords TransportDailyRecord[]
   reportCards           ReportCard[]
+  discounts             StudentDiscount[]
 
   @@unique([schoolId, studentId])
   @@index([schoolId, status])
@@ -1305,8 +1307,9 @@ model InvoiceItem {
   invoiceId      String
   feeComponentId String?
   name           String
-  amount         Decimal
+  amount         Decimal // negative for discount/scholarship lines (isDiscount)
   isCarryForward Boolean @default(false)
+  isDiscount     Boolean @default(false)
   sequence       Int     @default(0)
 
   invoice   Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
@@ -1324,6 +1327,8 @@ model Payment {
   paymentDate DateTime
   method      String?
   reference   String?
+  paidBy      String?  // who handed over the money (parent/guardian/sponsor) — distinct from recordedBy (the staff user)
+  notes       String?
   recordedBy  String
   createdAt   DateTime @default(now())
 
@@ -1363,9 +1368,10 @@ model FeeComponent {
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
 
-  school       School        @relation(fields: [schoolId], references: [id])
+  school       School            @relation(fields: [schoolId], references: [id])
   items        FeeItem[]
   invoiceItems InvoiceItem[]
+  discounts    StudentDiscount[]
 
   @@unique([schoolId, name])
   @@map("fee_components")
@@ -1405,6 +1411,52 @@ model FeeItemOverride {
 
   @@unique([feeItemId, gradeLevelId])
   @@map("fee_item_overrides")
+}
+
+// ============================================================
+// DISCOUNTS & SCHOLARSHIPS (per-student fee reductions)
+// ============================================================
+
+// Labelling only — a scholarship/bursary is mechanically a discount. Lets the
+// school report on how reductions are awarded without separate logic.
+enum DiscountKind {
+  DISCOUNT
+  SCHOLARSHIP
+  BURSARY
+}
+
+enum DiscountType {
+  PERCENT // `value` is a percentage 0–100
+  FIXED // `value` is a flat GHS amount
+}
+
+// A fee reduction awarded to one student. Scope = whole invoice (feeComponentId
+// null) or a single component (e.g. tuition-only). Students may hold several at
+// once (stackable). Applied at invoice generation as a negative InvoiceItem line
+// (isDiscount), capped so the fees portion never goes below zero (arrears are
+// never discounted). `frequency` governs recurrence the same way fee components
+// do (PER_TERM every term, PER_YEAR first invoice of the year, ONE_TIME once).
+model StudentDiscount {
+  id             String              @id @default(uuid())
+  schoolId       String
+  studentId      String
+  feeComponentId String? // null = whole invoice; else scoped to one component
+  kind           DiscountKind        @default(DISCOUNT)
+  type           DiscountType
+  value          Decimal
+  label          String? // e.g. "Staff child", "Sponsored by Rotary" — prints on the invoice
+  frequency      FeeBillingFrequency @default(PER_TERM)
+  isActive       Boolean             @default(true)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  school    School        @relation(fields: [schoolId], references: [id])
+  student   Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  component FeeComponent? @relation(fields: [feeComponentId], references: [id])
+
+  @@index([schoolId])
+  @@index([studentId])
+  @@map("student_discounts")
 }
 
 // ============================================================

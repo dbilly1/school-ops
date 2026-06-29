@@ -4,6 +4,7 @@ import {
   CreateFeeStructureDto, CreateInvoiceDto,
   RecordPaymentDto, AssignStudentCategoryDto,
   BulkCreateFeeStructuresDto, SaveFeeMatrixDto,
+  CreateStudentDiscountDto, UpdateStudentDiscountDto,
 } from './dto/finance.dto';
 
 type InvoiceStatus = 'PAID' | 'PARTIAL' | 'UNPAID';
@@ -263,6 +264,7 @@ export class FinanceService {
         amount: Number(it.amount),
         feeComponentId: it.feeComponentId,
         isCarryForward: it.isCarryForward,
+        isDiscount: it.isDiscount,
         sequence: it.sequence,
       })),
       payments: invoice.payments.map((p) => ({
@@ -359,6 +361,19 @@ export class FinanceService {
       itemsByCategory.set(item.studentCategoryId, list);
     }
 
+    // Preload active discounts/scholarships, grouped by student, so each bill can
+    // apply them as negative lines without a per-student query.
+    const discounts = await this.prisma.studentDiscount.findMany({
+      where: { schoolId, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const discountsByStudent = new Map<string, typeof discounts>();
+    for (const d of discounts) {
+      const list = discountsByStudent.get(d.studentId) ?? [];
+      list.push(d);
+      discountsByStudent.set(d.studentId, list);
+    }
+
     const { order, termToYear } = await this.buildTermMaps(schoolId);
     const currentOrder = order.get(termId) ?? 0;
     const studentIds = assignments.map((a) => a.student.id);
@@ -444,7 +459,21 @@ export class FinanceService {
       }
 
       const feesTotal = lines.reduce((sum, l) => sum + l.amount, 0);
-      const total = feesTotal + carry;
+
+      // Apply this student's discounts/scholarships as negative lines (capped so
+      // the fees portion never goes below zero; arrears are never discounted),
+      // honouring each discount's billing frequency like fee components.
+      const discountLines = this.computeDiscountLines(
+        lines,
+        (discountsByStudent.get(student.id) ?? []).filter((d) => {
+          if (d.frequency === 'ONE_TIME') return !billedEver;
+          if (d.frequency === 'PER_YEAR') return !billedThisYear;
+          return true;
+        }),
+        feesTotal,
+      );
+      const discountTotal = discountLines.reduce((sum, l) => sum + l.amount, 0); // negative
+      const total = feesTotal + carry + discountTotal;
 
       await this.prisma.invoice.create({
         data: {
@@ -460,6 +489,13 @@ export class FinanceService {
                 amount: l.amount,
                 sequence: i,
               })),
+              ...discountLines.map((l, i) => ({
+                feeComponentId: l.feeComponentId ?? undefined,
+                name: l.name,
+                amount: l.amount,
+                isDiscount: true,
+                sequence: lines.length + i,
+              })),
             ],
           },
         },
@@ -468,6 +504,145 @@ export class FinanceService {
     }
 
     return { created, skipped, errors, termId };
+  }
+
+  // Build negative discount lines for one invoice. `feeLines` are the positive
+  // fee-component lines already computed for the student this term. Each discount
+  // draws from either its target component's billed amount (per-component scope)
+  // or the whole fees subtotal, is clamped to that base, and the running total is
+  // clamped to `feesTotal` so stacked discounts never push the fees portion
+  // negative. Returns lines with a negative `amount`.
+  private computeDiscountLines(
+    feeLines: { feeComponentId: string | null; name: string; amount: number }[],
+    studentDiscounts: {
+      feeComponentId: string | null;
+      kind: 'DISCOUNT' | 'SCHOLARSHIP' | 'BURSARY';
+      type: 'PERCENT' | 'FIXED';
+      value: any;
+      label: string | null;
+    }[],
+    feesTotal: number,
+  ): { feeComponentId: string | null; name: string; amount: number }[] {
+    if (feesTotal <= 0 || studentDiscounts.length === 0) return [];
+
+    const KIND_LABEL = { DISCOUNT: 'Discount', SCHOLARSHIP: 'Scholarship', BURSARY: 'Bursary' };
+    const compAmount = new Map<string, number>();
+    const compName = new Map<string, string>();
+    for (const l of feeLines) {
+      if (!l.feeComponentId) continue;
+      compAmount.set(l.feeComponentId, (compAmount.get(l.feeComponentId) ?? 0) + l.amount);
+      compName.set(l.feeComponentId, l.name);
+    }
+
+    const result: { feeComponentId: string | null; name: string; amount: number }[] = [];
+    let appliedTotal = 0;
+    for (const d of studentDiscounts) {
+      const headroom = feesTotal - appliedTotal;
+      if (headroom <= 0) break;
+
+      const base = d.feeComponentId ? compAmount.get(d.feeComponentId) ?? 0 : feesTotal;
+      if (base <= 0) continue; // component not billed on this invoice
+
+      let amt = d.type === 'PERCENT' ? base * (Number(d.value) / 100) : Number(d.value);
+      amt = Math.round(Math.min(amt, base, headroom) * 100) / 100;
+      if (amt <= 0) continue;
+
+      appliedTotal += amt;
+      const targetName = d.feeComponentId ? compName.get(d.feeComponentId) : null;
+      const name = (d.label?.trim() || KIND_LABEL[d.kind]) + (targetName ? ` — ${targetName}` : '');
+      result.push({ feeComponentId: d.feeComponentId, name, amount: -amt });
+    }
+    return result;
+  }
+
+  // ── Discounts & Scholarships ──────────────────────────────
+
+  async listStudentDiscounts(schoolId: string, studentId: string) {
+    const discounts = await this.prisma.studentDiscount.findMany({
+      where: { schoolId, studentId },
+      include: { component: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return discounts.map((d) => ({ ...d, value: Number(d.value) }));
+  }
+
+  async createStudentDiscount(schoolId: string, dto: CreateStudentDiscountDto) {
+    const student = await this.prisma.student.findFirst({
+      where: { id: dto.studentId, schoolId },
+      select: { id: true },
+    });
+    if (!student) throw new NotFoundException('Student not found');
+
+    await this.validateDiscount(schoolId, dto.type, dto.value, dto.feeComponentId);
+
+    const created = await this.prisma.studentDiscount.create({
+      data: {
+        schoolId,
+        studentId: dto.studentId,
+        feeComponentId: dto.feeComponentId || null,
+        kind: dto.kind ?? 'DISCOUNT',
+        type: dto.type,
+        value: dto.value,
+        label: dto.label?.trim() || null,
+        frequency: dto.frequency ?? 'PER_TERM',
+      },
+      include: { component: { select: { id: true, name: true } } },
+    });
+    return { ...created, value: Number(created.value) };
+  }
+
+  async updateStudentDiscount(schoolId: string, id: string, dto: UpdateStudentDiscountDto) {
+    const existing = await this.prisma.studentDiscount.findFirst({ where: { id, schoolId } });
+    if (!existing) throw new NotFoundException('Discount not found');
+
+    const type = dto.type ?? (existing.type as 'PERCENT' | 'FIXED');
+    const value = dto.value ?? Number(existing.value);
+    const feeComponentId =
+      dto.feeComponentId !== undefined ? dto.feeComponentId || null : existing.feeComponentId;
+    await this.validateDiscount(schoolId, type, value, feeComponentId);
+
+    const updated = await this.prisma.studentDiscount.update({
+      where: { id },
+      data: {
+        ...(dto.feeComponentId !== undefined ? { feeComponentId } : {}),
+        ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
+        ...(dto.type !== undefined ? { type: dto.type } : {}),
+        ...(dto.value !== undefined ? { value: dto.value } : {}),
+        ...(dto.label !== undefined ? { label: dto.label?.trim() || null } : {}),
+        ...(dto.frequency !== undefined ? { frequency: dto.frequency } : {}),
+        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+      },
+      include: { component: { select: { id: true, name: true } } },
+    });
+    return { ...updated, value: Number(updated.value) };
+  }
+
+  async deleteStudentDiscount(schoolId: string, id: string) {
+    const existing = await this.prisma.studentDiscount.findFirst({ where: { id, schoolId } });
+    if (!existing) throw new NotFoundException('Discount not found');
+    await this.prisma.studentDiscount.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  // Discounts only affect not-yet-generated invoices (lines are snapshotted), so
+  // we validate inputs but never rewrite existing invoices.
+  private async validateDiscount(
+    schoolId: string,
+    type: 'PERCENT' | 'FIXED',
+    value: number,
+    feeComponentId?: string | null,
+  ) {
+    if (type === 'PERCENT' && (value <= 0 || value > 100))
+      throw new BadRequestException('A percentage discount must be between 0 and 100.');
+    if (type === 'FIXED' && value <= 0)
+      throw new BadRequestException('A fixed discount must be greater than 0.');
+    if (feeComponentId) {
+      const component = await this.prisma.feeComponent.findFirst({
+        where: { id: feeComponentId, schoolId },
+        select: { id: true },
+      });
+      if (!component) throw new NotFoundException('Fee component not found');
+    }
   }
 
   // ── Payments ──────────────────────────────────────────────
@@ -497,6 +672,8 @@ export class FinanceService {
           paymentDate: new Date(dto.paymentDate),
           method: dto.method,
           reference: dto.reference,
+          paidBy: dto.paidBy,
+          notes: dto.notes,
           recordedBy,
         },
       });
@@ -545,6 +722,7 @@ export class FinanceService {
       paymentDate: p.paymentDate,
       method: p.method,
       reference: p.reference,
+      paidBy: p.paidBy,
       recordedBy: p.recordedByUser,
       invoice: {
         id: p.invoice.id,

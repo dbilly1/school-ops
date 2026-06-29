@@ -43,6 +43,8 @@ type SchoolProfile = {
 };
 
 const ghs = (n: number) => `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Signed display for a line amount — discounts are negative.
+const ghsSigned = (n: number) => (n < 0 ? `−${ghs(Math.abs(n))}` : ghs(n));
 
 function formatDate(d: string | Date) {
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -90,7 +92,7 @@ function buildInvoiceHtml(d: InvoicePreviewData, school: SchoolProfile | null) {
         ${escapeHtml(l.name)}
         ${l.tag ? `<span style="font-size:10px;color:#0369a1;background:#e0f2fe;border-radius:9px;padding:1px 6px;margin-left:6px;">${escapeHtml(l.tag)}</span>` : ''}
       </td>
-      <td style="padding:9px 0;text-align:right;font-size:13px;color:#0f172a;font-weight:500;">${ghs(l.amount)}</td>
+      <td style="padding:9px 0;text-align:right;font-size:13px;color:${l.amount < 0 ? '#059669' : '#0f172a'};font-weight:500;">${ghsSigned(l.amount)}</td>
     </tr>`).join('');
 
   return `<!doctype html>
@@ -273,7 +275,7 @@ export function InvoicePreviewModal({ data, onClose }: { data: InvoicePreviewDat
                       </span>
                     )}
                   </td>
-                  <td className="py-2.5 text-right text-slate-800 font-medium">{ghs(l.amount)}</td>
+                  <td className={`py-2.5 text-right font-medium ${l.amount < 0 ? 'text-emerald-600' : 'text-slate-800'}`}>{ghsSigned(l.amount)}</td>
                 </tr>
               ))}
               <tr>

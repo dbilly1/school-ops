@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { FinanceService } from './finance.service';
-import { CreateFeeStructureDto, CreateInvoiceDto, RecordPaymentDto, AssignStudentCategoryDto, BulkCreateFeeStructuresDto, SaveFeeMatrixDto } from './dto/finance.dto';
+import { CreateFeeStructureDto, CreateInvoiceDto, RecordPaymentDto, AssignStudentCategoryDto, BulkCreateFeeStructuresDto, SaveFeeMatrixDto, CreateStudentDiscountDto, UpdateStudentDiscountDto } from './dto/finance.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../permissions/permissions.guard';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
@@ -67,6 +67,35 @@ export class FinanceController {
     @Body() dto: AssignStudentCategoryDto,
   ) {
     return this.financeService.assignStudentCategory(user.schoolId, studentId, dto);
+  }
+
+  // Discounts & scholarships (per student)
+  @Get('students/:studentId/discounts')
+  @RequirePermission('finance', 'VIEW')
+  listStudentDiscounts(@CurrentUser() user: any, @Param('studentId') studentId: string) {
+    return this.financeService.listStudentDiscounts(user.schoolId, studentId);
+  }
+
+  @Post('discounts')
+  @RequirePermission('finance', 'CREATE')
+  createStudentDiscount(@CurrentUser() user: any, @Body() dto: CreateStudentDiscountDto) {
+    return this.financeService.createStudentDiscount(user.schoolId, dto);
+  }
+
+  @Patch('discounts/:id')
+  @RequirePermission('finance', 'EDIT')
+  updateStudentDiscount(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateStudentDiscountDto,
+  ) {
+    return this.financeService.updateStudentDiscount(user.schoolId, id, dto);
+  }
+
+  @Delete('discounts/:id')
+  @RequirePermission('finance', 'DELETE')
+  deleteStudentDiscount(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.financeService.deleteStudentDiscount(user.schoolId, id);
   }
 
   // Invoices
