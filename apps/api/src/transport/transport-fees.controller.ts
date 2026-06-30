@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { TransportFeesService } from './transport-fees.service';
-import { TransportPrepayDto, TransportRefundDto, TransportSettleArrearsDto, TransportMarkPaidDto, RecordCashCountDto } from './dto/transport-fees.dto';
+import { TransportPrepayDto, TransportRefundDto, TransportSettleArrearsDto, TransportMarkPaidDto, TransportMarkBoardingDto, TransportMarkAllBoardingDto, RecordCashCountDto } from './dto/transport-fees.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../permissions/permissions.guard';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
@@ -35,6 +35,18 @@ export class TransportFeesController {
     @Query('month') month: string,
   ) {
     return this.transportFeesService.getStudentCalendar(user.schoolId, studentId, month);
+  }
+
+  @Post('mark-boarding')
+  @RequirePermission('transport', 'CREATE', 'fee_collection')
+  markBoarding(@CurrentUser() user: any, @Body() dto: TransportMarkBoardingDto) {
+    return this.transportFeesService.markBoarding(user.schoolId, dto, user.id);
+  }
+
+  @Post('mark-all-boarding')
+  @RequirePermission('transport', 'CREATE', 'fee_collection')
+  markAllBoarding(@CurrentUser() user: any, @Body() dto: TransportMarkAllBoardingDto) {
+    return this.transportFeesService.markAllBoarding(user.schoolId, dto.routeId, dto.date, user.id);
   }
 
   @Post('mark-paid')

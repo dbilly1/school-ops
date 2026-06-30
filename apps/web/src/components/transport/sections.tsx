@@ -7,7 +7,6 @@ import { SaveButton, Alert, FormField, Input } from '@/components/ui/settings-ca
 import { Modal } from '@/components/ui/modal';
 import { PaymentsCalendarModal } from '@/components/fees/payments-calendar-modal';
 import { CashCountCard, type CashCount } from '@/components/finance/cash-count-card';
-import { cn } from '@/lib/cn';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,28 +23,36 @@ type Route    = {
   _count: { studentAssignments: number };
 };
 
-// Daily-fee collection — shape returned by GET /school/transport-fees/daily/:routeId
-type DailyFeeStatus = 'PAID' | 'PRE_COVERED' | 'ABSENT' | 'UNPAID';
+// Daily boarding register — shape returned by GET /school/transport-fees/daily/:routeId.
+// A day has two legs (AM = pickup, PM = dropoff); each carries its own state.
+type Leg = 'AM' | 'PM';
+type LegState = 'NONE' | 'ABSENT' | 'PRE_COVERED' | 'PAID' | 'UNPAID';
+type BoardingAction = 'rode' | 'off' | 'clear';
 type CollectionRow = {
   student: Student;
-  status: DailyFeeStatus;
+  am: LegState;
+  pm: LegState;
   owedDays: number;
   owedAmount: number;
+  balance: number;
 };
 type DailyCollection = {
   date: string;
   routeId: string;
   dailyRate: number;
+  legRate: number;
   isSchoolDay: boolean;
   rows: CollectionRow[];
-  summary: { total: number; paid: number; preCovered: number; absent: number; unpaid: number };
+  summary: { total: number; ridersAm: number; ridersPm: number; unpaidLegs: number; paidLegs: number };
 };
 
-const STATUS_CONFIG: Record<DailyFeeStatus, { label: string; color: string; bg: string }> = {
-  PAID:        { label: 'Paid',        color: '#22c55e', bg: '#f0fdf4' },
-  PRE_COVERED: { label: 'Pre-covered', color: '#3b82f6', bg: '#eff6ff' },
-  ABSENT:      { label: 'Absent',      color: '#94a3b8', bg: '#f8fafc' },
-  UNPAID:      { label: 'Unpaid',      color: '#ef4444', bg: '#fef2f2' },
+// Per-leg visual treatment. NONE = not yet checked (renders as action buttons).
+const LEG_CONFIG: Record<LegState, { label: string; color: string; bg: string }> = {
+  NONE:        { label: '—',       color: '#cbd5e1', bg: '#f8fafc' },
+  ABSENT:      { label: 'No ride', color: '#64748b', bg: '#f1f5f9' },
+  PRE_COVERED: { label: 'Prepaid', color: '#3b82f6', bg: '#eff6ff' },
+  PAID:        { label: 'Paid',    color: '#22c55e', bg: '#f0fdf4' },
+  UNPAID:      { label: 'Unpaid',  color: '#ef4444', bg: '#fef2f2' },
 };
 
 // ── Assign students modal (searchable, multi-select) ───────────────────────────
@@ -547,11 +554,64 @@ export function DriversTab() {
 
 // ── Transport fees tab ────────────────────────────────────────────────────────
 
+// One AM/PM leg control. An unmarked leg offers an explicit "Rode" / "Didn't
+// ride" choice (boarding spends a prepaid leg or accrues the fare); a marked leg
+// shows its state with a way to clear it, and an unpaid one can take cash.
+function LegControl({ state, busy, disabled, onRode, onOff, onClear, onCash }: {
+  state: LegState;
+  busy: boolean;
+  disabled: boolean;
+  onRode: () => void;
+  onOff: () => void;
+  onClear: () => void;
+  onCash: () => void;
+}) {
+  const cfg = LEG_CONFIG[state];
+
+  if (state === 'NONE') {
+    return (
+      <div className="inline-flex items-center gap-1">
+        <button type="button" onClick={onRode} disabled={busy || disabled}
+          className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white transition disabled:opacity-40"
+          style={{ backgroundColor: '#22c55e' }}>
+          {busy ? '…' : 'Rode'}
+        </button>
+        <button type="button" onClick={onOff} disabled={busy || disabled}
+          className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 text-slate-500 hover:bg-slate-50 transition disabled:opacity-40">
+          Didn&apos;t ride
+        </button>
+      </div>
+    );
+  }
+
+  // Marked: show the state pill, with contextual actions.
+  return (
+    <div className="inline-flex items-center gap-1">
+      <span className="text-xs font-semibold px-2 py-1 rounded-lg" style={{ color: cfg.color, backgroundColor: cfg.bg }}>
+        {cfg.label}
+      </span>
+      {state === 'UNPAID' && (
+        <button type="button" onClick={onCash} disabled={busy}
+          title="Collect cash for this leg"
+          className="px-2 py-1 rounded-lg text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: '#22c55e' }}>
+          {busy ? '…' : 'Cash'}
+        </button>
+      )}
+      {state !== 'PAID' && (
+        <button type="button" onClick={onClear} disabled={busy}
+          title="Clear — back to unmarked" className="text-slate-300 hover:text-red-400 transition text-sm leading-none px-1 disabled:opacity-40">
+          ✕
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function TransportFeesTab() {
   const today = new Date().toISOString().split('T')[0];
   const [date, setDate]       = useState(today);
   const [routeId, setRouteId] = useState('');
-  const [markingPaid, setMarkingPaid] = useState<string | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null); // `${studentId}:${leg}` or 'all'
   const [calendarStudent, setCalendarStudent] = useState<Student | null>(null);
 
   const fetchRoutes     = useCallback(() => staffApi.get<Route[]>('/school/transport/routes'), []);
@@ -573,28 +633,39 @@ export function TransportFeesTab() {
   const rows        = collection?.rows ?? [];
   const summary     = collection?.summary;
   const isSchoolDay = collection?.isSchoolDay ?? true;
-  const cashToday   = summary ? summary.paid * (collection?.dailyRate ?? 0) : 0;
+  const legRate     = collection?.legRate ?? 0;
+  const cashToday   = summary ? summary.paidLegs * legRate : 0;
   const totalOwed   = rows.reduce((s, r) => s + r.owedAmount, 0);
 
-  async function markPaid(studentId: string) {
-    setMarkingPaid(studentId);
-    try {
-      await staffApi.post('/school/transport-fees/mark-paid', { studentId, date });
-    } catch {
-      // Stale row (e.g. already prepaid) — resync below rather than throw.
-    } finally {
-      setMarkingPaid(null);
-      refetch();
-    }
+  async function run(key: string, fn: () => Promise<unknown>) {
+    setBusyKey(key);
+    try { await fn(); } catch { /* stale row — resync below */ }
+    finally { setBusyKey(null); await refetch(); }
   }
+
+  const board   = (studentId: string, leg: Leg, action: BoardingAction) =>
+    run(`${studentId}:${leg}`, () => staffApi.post('/school/transport-fees/mark-boarding', { studentId, date, leg, action }));
+  const cashLeg = (studentId: string, leg: Leg) =>
+    run(`${studentId}:${leg}`, () => staffApi.post('/school/transport-fees/mark-paid', { studentId, date, leg }));
+  const markAll = () =>
+    run('all', () => staffApi.post('/school/transport-fees/mark-all-boarding', { routeId, date }));
 
   return (
     <div>
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <input type="date" value={date} onChange={e => setDate(e.target.value)} max={today}
           className="px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 outline-none"
           onFocus={e => e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)'}
           onBlur={e => e.currentTarget.style.boxShadow = ''} />
+        {routeId && isSchoolDay && rows.length > 0 && (
+          <button onClick={markAll} disabled={busyKey === 'all'}
+            className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white transition disabled:opacity-50"
+            style={{ backgroundColor: 'var(--accent)' }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--accent-hover)'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--accent)'}>
+            {busyKey === 'all' ? 'Marking…' : 'Mark all rode (both legs)'}
+          </button>
+        )}
       </div>
 
       {/* Route tabs */}
@@ -623,16 +694,16 @@ export function TransportFeesTab() {
 
       {routeId && !loading && !isSchoolDay && (
         <div className="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
-          This date is not a school day. Payments cannot be recorded.
+          This date is not a school day. Boarding cannot be recorded.
         </div>
       )}
 
       {routeId && summary && (
-        <div className="flex gap-4 mb-4">
+        <div className="flex gap-4 mb-4 flex-wrap">
           {[
-            { label: 'Paid', value: summary.paid, color: '#22c55e' },
-            { label: 'Unpaid today', value: summary.unpaid, color: '#ef4444' },
-            { label: 'Cash today', value: `GHS ${cashToday.toFixed(2)}`, color: 'var(--accent)' },
+            { label: 'Rode AM', value: `${summary.ridersAm}/${summary.total}`, color: 'var(--accent)' },
+            { label: 'Rode PM', value: `${summary.ridersPm}/${summary.total}`, color: 'var(--accent)' },
+            { label: 'Cash today', value: `GHS ${cashToday.toFixed(2)}`, color: '#22c55e' },
             { label: 'Outstanding', value: `GHS ${totalOwed.toFixed(2)}`, color: '#b45309' },
           ].map(c => (
             <div key={c.label} className="bg-white rounded-xl border border-slate-100 px-4 py-3 text-center">
@@ -644,58 +715,61 @@ export function TransportFeesTab() {
       )}
 
       {routeId && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <table className="w-full">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+          <table className="w-full min-w-[640px]">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">Student</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">Status</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">AM · pickup</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">PM · dropoff</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-400 uppercase tracking-wide">Owes</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
               {loading && Array.from({length:6}).map((_,i) => (
-                <tr key={i}><td colSpan={4} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td></tr>
+                <tr key={i}><td colSpan={5} className="px-4 py-3"><div className="h-7 bg-slate-100 rounded animate-pulse" /></td></tr>
               ))}
-              {!loading && rows.map(row => {
-                const cfg    = STATUS_CONFIG[row.status];
-                const canPay = row.status === 'UNPAID' && isSchoolDay;
-                return (
-                  <tr key={row.student.id} className={cn('border-b border-slate-50', row.status === 'ABSENT' ? 'opacity-50' : 'hover:bg-slate-50/40 transition')}>
-                    <td className="px-4 py-3">
-                      <p className="text-sm font-medium text-slate-800">{row.student.lastName}, {row.student.firstName}</p>
-                      <p className="text-xs font-mono text-slate-400">{row.student.studentId}</p>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full"
-                        style={{ color: cfg.color, backgroundColor: cfg.bg }}>
-                        {cfg.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      {row.owedAmount > 0
-                        ? <span className="text-sm font-semibold text-amber-700" title={`${row.owedDays} unpaid day(s)`}>GHS {row.owedAmount.toFixed(2)}</span>
-                        : <span className="text-slate-300 text-sm">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      {canPay && (
-                        <button onClick={() => markPaid(row.student.id)} disabled={markingPaid === row.student.id}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
-                          style={{ backgroundColor: '#22c55e' }}>
-                          {markingPaid === row.student.id ? '…' : 'Mark paid'}
-                        </button>
-                      )}
-                      <button onClick={() => setCalendarStudent(row.student)}
-                        className="ml-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition">
-                        Payments
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+              {!loading && rows.map(row => (
+                <tr key={row.student.id} className="border-b border-slate-50 hover:bg-slate-50/40 transition">
+                  <td className="px-4 py-3">
+                    <p className="text-sm font-medium text-slate-800">{row.student.lastName}, {row.student.firstName}</p>
+                    <p className="text-xs font-mono text-slate-400">
+                      {row.student.studentId}
+                      {row.balance > 0 && <span className="ml-2 text-blue-500">{row.balance} day{row.balance === 1 ? '' : 's'} prepaid</span>}
+                    </p>
+                  </td>
+                  {(['am', 'pm'] as const).map(legKey => {
+                    const leg: Leg = legKey === 'am' ? 'AM' : 'PM';
+                    return (
+                      <td key={legKey} className="px-4 py-3 text-center">
+                        <LegControl
+                          state={row[legKey]}
+                          busy={busyKey === `${row.student.id}:${leg}`}
+                          disabled={!isSchoolDay}
+                          onRode={() => board(row.student.id, leg, 'rode')}
+                          onOff={() => board(row.student.id, leg, 'off')}
+                          onClear={() => board(row.student.id, leg, 'clear')}
+                          onCash={() => cashLeg(row.student.id, leg)}
+                        />
+                      </td>
+                    );
+                  })}
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {row.owedAmount > 0
+                      ? <span className="text-sm font-semibold text-amber-700" title={`${row.owedDays} unpaid day(s)`}>GHS {row.owedAmount.toFixed(2)}</span>
+                      : <span className="text-slate-300 text-sm">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <button onClick={() => setCalendarStudent(row.student)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition">
+                      Payments
+                    </button>
+                  </td>
+                </tr>
+              ))}
               {!loading && rows.length === 0 && (
-                <tr><td colSpan={4} className="px-4 py-10 text-center text-sm text-slate-400">No students on this route.</td></tr>
+                <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-slate-400">No students on this route.</td></tr>
               )}
             </tbody>
           </table>

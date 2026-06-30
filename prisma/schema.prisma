@@ -67,6 +67,13 @@ enum DailyFeeStatus {
   UNPAID
 }
 
+// A transport day has two directional legs: AM (pickup → school) and PM
+// (school → home). Each ride record is one leg and bills half the daily rate.
+enum TransportLeg {
+  AM
+  PM
+}
+
 enum AdmissionStage {
   LEAD
   INQUIRY
@@ -1777,6 +1784,8 @@ model TransportDailyRecord {
   schoolId           String
   studentId          String
   recordDate         DateTime
+  // Which leg of the day this ride is (AM pickup / PM dropoff).
+  leg                TransportLeg
   status             DailyFeeStatus
   transportPaymentId String?
   createdAt          DateTime       @default(now())
@@ -1785,7 +1794,7 @@ model TransportDailyRecord {
   student          Student           @relation(fields: [studentId], references: [id])
   transportPayment TransportPayment? @relation(fields: [transportPaymentId], references: [id])
 
-  @@unique([schoolId, studentId, recordDate])
+  @@unique([schoolId, studentId, recordDate, leg])
   @@map("transport_daily_records")
 }
 

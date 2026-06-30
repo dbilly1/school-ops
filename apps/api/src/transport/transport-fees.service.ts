@@ -1,14 +1,34 @@
 import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../school-setup/calendar/calendar.service';
-import { TransportPrepayDto, TransportRefundDto, TransportSettleArrearsDto, TransportMarkPaidDto } from './dto/transport-fees.dto';
+import {
+  TransportPrepayDto,
+  TransportRefundDto,
+  TransportSettleArrearsDto,
+  TransportMarkPaidDto,
+  TransportMarkBoardingDto,
+} from './dto/transport-fees.dto';
 
 // Calendar cell states (superset of the DailyFeeStatus enum).
 //   NON_SCHOOL — weekend/holiday/out-of-term, not payable
 //   PROJECTED  — future school day covered by remaining prepaid balance
-//   NONE       — future school day with no coverage
+//   NONE       — no ride recorded (didn't board, or not yet marked)
 type CalendarStatus = 'PAID' | 'PRE_COVERED' | 'ABSENT' | 'UNPAID' | 'NON_SCHOOL' | 'PROJECTED' | 'NONE';
+
+type Leg = 'AM' | 'PM';
+// Per-leg state on the boarding register.
+//   NONE        — not yet checked (no record)
+//   ABSENT      — explicitly marked as not riding this leg (no charge)
+//   PRE_COVERED — boarded, paid from prepaid balance
+//   PAID        — boarded, cash collected
+//   UNPAID      — boarded, owes (accruing arrears)
+type LegState = 'NONE' | 'ABSENT' | 'PRE_COVERED' | 'PAID' | 'UNPAID';
+// Did the student actually board (vs. off/not-checked)? Drives rider counts.
+const isRide = (s: LegState): boolean => s === 'PRE_COVERED' || s === 'PAID' || s === 'UNPAID';
+
+// A day has two legs, so the billing unit is a leg = half the daily (round-trip)
+// rate. Balances and arrears are counted in days, half a day per leg record.
+const LEG_WEIGHT = 0.5;
 
 @Injectable()
 export class TransportFeesService {
@@ -18,12 +38,12 @@ export class TransportFeesService {
   ) {}
 
   // ── Prepaid balance ───────────────────────────────────────
-  // Balance = days banked via payments − days already consumed (PRE_COVERED
-  // records). A banked day is only consumed on a day the student actually rides,
-  // so absences leave the credit intact and it carries forward automatically.
+  // Balance (in days) = days banked via payments − days already consumed (each
+  // PRE_COVERED leg burns half a day). Credit is only spent when a ride is
+  // actually marked, so unused balance carries forward across days off the bus.
 
   private async getStudentBalance(schoolId: string, studentId: string): Promise<number> {
-    const [banked, consumed] = await Promise.all([
+    const [banked, consumedLegs] = await Promise.all([
       this.prisma.transportPayment.aggregate({
         where: { schoolId, studentId },
         _sum: { daysCovered: true },
@@ -32,13 +52,21 @@ export class TransportFeesService {
         where: { schoolId, studentId, status: 'PRE_COVERED' },
       }),
     ]);
-    return (banked._sum.daysCovered ?? 0) - consumed;
+    return (banked._sum.daysCovered ?? 0) - consumedLegs * LEG_WEIGHT;
   }
 
-  // ── Daily Collection Screen (per route) ───────────────────
-  // For dates up to today this also *reconciles* coverage: present students with
-  // prepaid balance get a banked day consumed (→ PRE_COVERED); students marked
-  // absent have any consumed day for that date released back to their balance.
+  // Outstanding (in days): ride legs the student boarded but never covered.
+  private async getStudentArrears(schoolId: string, studentId: string): Promise<number> {
+    const unpaidLegs = await this.prisma.transportDailyRecord.count({
+      where: { schoolId, studentId, status: 'UNPAID' },
+    });
+    return unpaidLegs * LEG_WEIGHT;
+  }
+
+  // ── Daily Boarding Register (per route) ───────────────────
+  // Read-only. Lists every rider on the route with an AM and a PM slot. Nothing
+  // is assumed — a slot is only PAID/PRE_COVERED/UNPAID once someone confirms the
+  // student actually boarded (see markBoarding). Unmarked = didn't ride = no charge.
 
   async getDailyCollection(schoolId: string, routeId: string, date: string) {
     const dateObj = new Date(date);
@@ -57,148 +85,269 @@ export class TransportFeesService {
     });
     const studentIds = assignments.map((a) => a.student.id);
 
-    const [records, attendanceRecords, bankedGroups, consumedGroups] = await Promise.all([
+    const [dayRecords, arrearsGroups, preCoveredGroups, bankedGroups] = await Promise.all([
       this.prisma.transportDailyRecord.findMany({
         where: {
           schoolId,
           studentId: { in: studentIds },
           recordDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
         },
+        select: { studentId: true, leg: true, status: true },
       }),
-      this.prisma.studentAttendanceRecord.findMany({
-        where: {
-          schoolId,
-          studentId: { in: studentIds },
-          date: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
-        },
-      }),
-      this.prisma.transportPayment.groupBy({
+      this.prisma.transportDailyRecord.groupBy({
         by: ['studentId'],
-        where: { schoolId, studentId: { in: studentIds } },
-        _sum: { daysCovered: true },
+        where: { schoolId, studentId: { in: studentIds }, status: 'UNPAID' },
+        _count: { _all: true },
       }),
       this.prisma.transportDailyRecord.groupBy({
         by: ['studentId'],
         where: { schoolId, studentId: { in: studentIds }, status: 'PRE_COVERED' },
         _count: { _all: true },
       }),
+      this.prisma.transportPayment.groupBy({
+        by: ['studentId'],
+        where: { schoolId, studentId: { in: studentIds } },
+        _sum: { daysCovered: true },
+      }),
     ]);
 
-    const recordMap = new Map(records.map((r) => [r.studentId, r]));
-    const attendanceMap = new Map(attendanceRecords.map((r) => [r.studentId, r]));
-    const bankedMap = new Map(bankedGroups.map((g) => [g.studentId, g._sum.daysCovered ?? 0]));
-    const consumedMap = new Map(consumedGroups.map((g) => [g.studentId, g._count._all]));
+    // Group today's records by student.
+    const recordsByStudent = new Map<string, { leg: Leg; status: LegState }[]>();
+    for (const r of dayRecords) {
+      const arr = recordsByStudent.get(r.studentId) ?? [];
+      arr.push({ leg: r.leg as Leg, status: r.status as LegState });
+      recordsByStudent.set(r.studentId, arr);
+    }
 
-    // Only reconcile (consume/release/record-debt) for real, settled school days (≤ today).
-    const reconcilable = isSchoolDay && dateObj <= this.endOfDay(new Date());
-    const writes: Prisma.PrismaPromise<unknown>[] = [];
+    // Per-student owed days and consumed days (half a day per leg record).
+    const owedByStudent = new Map(arrearsGroups.map((g) => [g.studentId, g._count._all * LEG_WEIGHT]));
+    const consumedByStudent = new Map(preCoveredGroups.map((g) => [g.studentId, g._count._all * LEG_WEIGHT]));
+    const bankedByStudent = new Map(bankedGroups.map((g) => [g.studentId, g._sum.daysCovered ?? 0]));
+
     const dailyRate = Number(route.dailyRate);
+    const legRate = dailyRate * LEG_WEIGHT;
 
-    const baseRows = assignments.map(({ student }) => {
-      const attendance = attendanceMap.get(student.id);
-      const isAbsent = attendance?.status === 'ABSENT';
-      const existing = recordMap.get(student.id);
-      const banked = bankedMap.get(student.id) ?? 0;
-      const consumedTotal = consumedMap.get(student.id) ?? 0;
+    const rows = assignments
+      .map(({ student }) => {
+        const recs = recordsByStudent.get(student.id) ?? [];
+        const stateFor = (leg: Leg): LegState =>
+          recs.find((r) => r.leg === leg)?.status ?? 'NONE';
 
-      let status: 'PAID' | 'PRE_COVERED' | 'ABSENT' | 'UNPAID';
+        const owedDays = owedByStudent.get(student.id) ?? 0;
+        const balance = (bankedByStudent.get(student.id) ?? 0) - (consumedByStudent.get(student.id) ?? 0);
 
-      if (existing?.status === 'PAID') {
-        // Cash already collected for this day — always wins.
-        status = 'PAID';
-      } else if (isAbsent) {
-        status = 'ABSENT';
-        // Absent day owes nothing: release any prepaid/unpaid record for it.
-        if (reconcilable && existing) {
-          writes.push(this.prisma.transportDailyRecord.delete({ where: { id: existing.id } }));
-        }
-      } else if (!reconcilable) {
-        status = existing?.status === 'PRE_COVERED' ? 'PRE_COVERED' : 'UNPAID';
-      } else {
-        // Days consumed on *other* dates — this date may already hold one.
-        const consumedOther = consumedTotal - (existing?.status === 'PRE_COVERED' ? 1 : 0);
-        if (consumedOther < banked) {
-          status = 'PRE_COVERED';
-          if (!existing) {
-            writes.push(this.prisma.transportDailyRecord.create({
-              data: { schoolId, studentId: student.id, recordDate: dateObj, status: 'PRE_COVERED' },
-            }));
-          } else if (existing.status !== 'PRE_COVERED') {
-            writes.push(this.prisma.transportDailyRecord.update({
-              where: { id: existing.id }, data: { status: 'PRE_COVERED' },
-            }));
-          }
-        } else {
-          // Rode but uncovered → record the debt (IOU) so arrears accrue.
-          status = 'UNPAID';
-          if (!existing) {
-            writes.push(this.prisma.transportDailyRecord.create({
-              data: { schoolId, studentId: student.id, recordDate: dateObj, status: 'UNPAID' },
-            }));
-          } else if (existing.status !== 'UNPAID') {
-            writes.push(this.prisma.transportDailyRecord.update({
-              where: { id: existing.id }, data: { status: 'UNPAID' },
-            }));
-          }
-        }
-      }
-      return { student, status };
-    });
-
-    if (writes.length) await this.prisma.$transaction(writes);
-
-    // Total outstanding per student (across all days), computed after reconciliation.
-    const arrearsGroups = await this.prisma.transportDailyRecord.groupBy({
-      by: ['studentId'],
-      where: { schoolId, studentId: { in: studentIds }, status: 'UNPAID' },
-      _count: { _all: true },
-    });
-    const arrearsMap = new Map(arrearsGroups.map((g) => [g.studentId, g._count._all]));
-
-    const rows = baseRows
-      .map((r) => {
-        const owedDays = arrearsMap.get(r.student.id) ?? 0;
-        return { ...r, owedDays, owedAmount: owedDays * dailyRate };
+        return {
+          student,
+          am: stateFor('AM'),
+          pm: stateFor('PM'),
+          owedDays,
+          owedAmount: owedDays * dailyRate,
+          balance,
+        };
       })
       .sort((a, b) => a.student.lastName.localeCompare(b.student.lastName));
 
     const summary = {
       total: rows.length,
-      paid: rows.filter((r) => r.status === 'PAID').length,
-      preCovered: rows.filter((r) => r.status === 'PRE_COVERED').length,
-      absent: rows.filter((r) => r.status === 'ABSENT').length,
-      unpaid: rows.filter((r) => r.status === 'UNPAID').length,
+      ridersAm: rows.filter((r) => isRide(r.am)).length,
+      ridersPm: rows.filter((r) => isRide(r.pm)).length,
+      // Legs boarded-but-unpaid today (awaiting cash).
+      unpaidLegs: rows.reduce(
+        (n, r) => n + (r.am === 'UNPAID' ? 1 : 0) + (r.pm === 'UNPAID' ? 1 : 0),
+        0,
+      ),
+      // Cash legs collected today.
+      paidLegs: rows.reduce(
+        (n, r) => n + (r.am === 'PAID' ? 1 : 0) + (r.pm === 'PAID' ? 1 : 0),
+        0,
+      ),
     };
 
-    return { date, routeId, dailyRate, isSchoolDay, rows, summary };
+    return { date, routeId, dailyRate, legRate, isSchoolDay, rows, summary };
   }
 
-  // Mark a student as paid today (cash collected now)
-  async markPaid(schoolId: string, dto: TransportMarkPaidDto, _collectedBy: string) {
+  // Set a student's status for a given leg. Boarding is the single source of
+  // truth — marking ridden consumes a prepaid leg (PRE_COVERED) or records the
+  // debt (UNPAID); "off" records an explicit no-ride; "clear" returns to unmarked.
+  async markBoarding(schoolId: string, dto: TransportMarkBoardingDto, _userId: string) {
     const dateObj = new Date(dto.date);
     const isSchoolDay = await this.calendar.isSchoolDay(schoolId, dateObj);
     if (!isSchoolDay) throw new BadRequestException('Not a school day');
+    await this.getStudentDailyRate(schoolId, dto.studentId); // validates route assignment
 
-    const existing = await this.prisma.transportDailyRecord.findUnique({
-      where: { schoolId_studentId_recordDate: { schoolId, studentId: dto.studentId, recordDate: dateObj } },
+    const where = {
+      schoolId_studentId_recordDate_leg: {
+        schoolId,
+        studentId: dto.studentId,
+        recordDate: dateObj,
+        leg: dto.leg,
+      },
+    };
+    const existing = await this.prisma.transportDailyRecord.findUnique({ where });
+
+    // Cash already collected can't be silently reversed — refund it first.
+    if (existing?.status === 'PAID' && dto.action !== 'rode')
+      throw new ConflictException('Cash was already collected for this leg — refund it before changing this');
+
+    if (dto.action === 'clear') {
+      if (existing) await this.prisma.transportDailyRecord.delete({ where: { id: existing.id } });
+      return this.boardingResult(schoolId, dto.studentId, 'NONE');
+    }
+
+    if (dto.action === 'off') {
+      // Explicit no-ride: record ABSENT (no charge; frees any prepaid leg held).
+      if (existing?.status === 'ABSENT') return this.boardingResult(schoolId, dto.studentId, 'ABSENT');
+      await this.prisma.transportDailyRecord.upsert({
+        where,
+        update: { status: 'ABSENT', transportPaymentId: null },
+        create: { schoolId, studentId: dto.studentId, recordDate: dateObj, leg: dto.leg, status: 'ABSENT' },
+      });
+      return this.boardingResult(schoolId, dto.studentId, 'ABSENT');
+    }
+
+    // action === 'rode'. Idempotent if it's already a ride; an ABSENT leg flips.
+    if (existing && existing.status !== 'ABSENT')
+      return this.boardingResult(schoolId, dto.studentId, existing.status as LegState);
+
+    const balance = await this.getStudentBalance(schoolId, dto.studentId);
+    const status: LegState = balance >= LEG_WEIGHT ? 'PRE_COVERED' : 'UNPAID';
+    await this.prisma.transportDailyRecord.upsert({
+      where,
+      update: { status },
+      create: { schoolId, studentId: dto.studentId, recordDate: dateObj, leg: dto.leg, status },
     });
-    // Don't take cash for a day already covered by prepaid balance.
-    if (existing?.status === 'PRE_COVERED')
-      throw new ConflictException("This day is already covered by the student's prepaid balance");
-    // Already settled in cash — idempotent, nothing to charge again.
-    if (existing?.status === 'PAID') return existing;
+    return this.boardingResult(schoolId, dto.studentId, status);
+  }
 
+  // Fast path: mark every still-unmarked leg (AM and PM) as ridden for the whole
+  // route — "everyone rode both legs today" — so the operator only un-marks the
+  // exceptions. Each student's prepaid balance is allocated leg-by-leg.
+  async markAllBoarding(schoolId: string, routeId: string, date: string, _userId: string) {
+    const dateObj = new Date(date);
+    const isSchoolDay = await this.calendar.isSchoolDay(schoolId, dateObj);
+    if (!isSchoolDay) throw new BadRequestException('Not a school day');
+
+    const assignments = await this.prisma.studentTransportAssignment.findMany({
+      where: { transportRouteId: routeId, transportRoute: { schoolId } },
+      select: { studentId: true },
+    });
+    const studentIds = assignments.map((a) => a.studentId);
+    if (studentIds.length === 0) return { created: 0 };
+
+    const [todays, preCoveredGroups, banked] = await Promise.all([
+      this.prisma.transportDailyRecord.findMany({
+        where: {
+          schoolId,
+          studentId: { in: studentIds },
+          recordDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
+        },
+        select: { studentId: true, leg: true },
+      }),
+      this.prisma.transportDailyRecord.groupBy({
+        by: ['studentId'],
+        where: { schoolId, studentId: { in: studentIds }, status: 'PRE_COVERED' },
+        _count: { _all: true },
+      }),
+      this.prisma.transportPayment.groupBy({
+        by: ['studentId'],
+        where: { schoolId, studentId: { in: studentIds } },
+        _sum: { daysCovered: true },
+      }),
+    ]);
+
+    const consumed = new Map(preCoveredGroups.map((g) => [g.studentId, g._count._all * LEG_WEIGHT]));
+    const bankedMap = new Map(banked.map((g) => [g.studentId, g._sum.daysCovered ?? 0]));
+    const presentLegs = new Map<string, Set<Leg>>();
+    for (const r of todays) {
+      const set = presentLegs.get(r.studentId) ?? new Set<Leg>();
+      set.add(r.leg as Leg);
+      presentLegs.set(r.studentId, set);
+    }
+
+    const creates = [];
+    for (const studentId of studentIds) {
+      const present = presentLegs.get(studentId) ?? new Set<Leg>();
+      let bal = (bankedMap.get(studentId) ?? 0) - (consumed.get(studentId) ?? 0);
+      for (const leg of ['AM', 'PM'] as Leg[]) {
+        if (present.has(leg)) continue;
+        const status: LegState = bal >= LEG_WEIGHT ? 'PRE_COVERED' : 'UNPAID';
+        if (status === 'PRE_COVERED') bal -= LEG_WEIGHT;
+        creates.push(
+          this.prisma.transportDailyRecord.create({
+            data: { schoolId, studentId, recordDate: dateObj, leg, status },
+          }),
+        );
+      }
+    }
+
+    if (creates.length) await this.prisma.$transaction(creates);
+    return { created: creates.length };
+  }
+
+  private async boardingResult(schoolId: string, studentId: string, status: LegState) {
+    const [balance, owedDays, rate] = await Promise.all([
+      this.getStudentBalance(schoolId, studentId),
+      this.getStudentArrears(schoolId, studentId),
+      this.getStudentDailyRate(schoolId, studentId).catch(() => 0),
+    ]);
+    return { status, balance, owedDays, owedAmount: owedDays * rate };
+  }
+
+  // Collect cash for a leg the student boarded. With a leg, settles that one leg;
+  // without a leg (e.g. from the per-student calendar) settles every unpaid leg
+  // for the day. Cash never touches the prepaid balance, but it IS banked as a
+  // payment (daysCovered = 0) so it lands in the day's cash reconciliation.
+  async markPaid(schoolId: string, dto: TransportMarkPaidDto, collectedBy: string) {
+    const dateObj = new Date(dto.date);
+    const isSchoolDay = await this.calendar.isSchoolDay(schoolId, dateObj);
+    if (!isSchoolDay) throw new BadRequestException('Not a school day');
+    const dailyRate = await this.getStudentDailyRate(schoolId, dto.studentId);
+
+    if (!dto.leg) {
+      // Day-level: settle whatever is unpaid for the date.
+      const unpaid = await this.prisma.transportDailyRecord.findMany({
+        where: {
+          schoolId,
+          studentId: dto.studentId,
+          status: 'UNPAID',
+          recordDate: { gte: this.startOfDay(dateObj), lte: this.endOfDay(dateObj) },
+        },
+      });
+      if (unpaid.length === 0)
+        throw new ConflictException('No unpaid ride to settle for this day');
+
+      const amount = unpaid.length * LEG_WEIGHT * dailyRate;
+      const payment = await this.prisma.transportPayment.create({
+        data: { schoolId, studentId: dto.studentId, amountPaid: amount, paymentDate: new Date(), daysCovered: 0, recordedBy: collectedBy },
+      });
+      await this.prisma.transportDailyRecord.updateMany({
+        where: { id: { in: unpaid.map((r) => r.id) } },
+        data: { status: 'PAID', transportPaymentId: payment.id },
+      });
+      return { settled: unpaid.length, amount };
+    }
+
+    const where = {
+      schoolId_studentId_recordDate_leg: { schoolId, studentId: dto.studentId, recordDate: dateObj, leg: dto.leg },
+    };
+    const existing = await this.prisma.transportDailyRecord.findUnique({ where });
+    if (existing?.status === 'PRE_COVERED')
+      throw new ConflictException("This leg is already covered by the student's prepaid balance");
+    if (existing?.status === 'PAID') return existing; // already settled — don't bank twice
+
+    const payment = await this.prisma.transportPayment.create({
+      data: { schoolId, studentId: dto.studentId, amountPaid: dailyRate * LEG_WEIGHT, paymentDate: new Date(), daysCovered: 0, recordedBy: collectedBy },
+    });
     return this.prisma.transportDailyRecord.upsert({
-      where: { schoolId_studentId_recordDate: { schoolId, studentId: dto.studentId, recordDate: dateObj } },
-      update: { status: 'PAID' },
-      create: { schoolId, studentId: dto.studentId, recordDate: dateObj, status: 'PAID' },
+      where,
+      update: { status: 'PAID', transportPaymentId: payment.id },
+      create: { schoolId, studentId: dto.studentId, recordDate: dateObj, leg: dto.leg, status: 'PAID', transportPaymentId: payment.id },
     });
   }
 
   // ── Prepayment (top up balance) ───────────────────────────
-  // Banks `days` of credit. Unlike the old flow it does NOT stamp specific future
-  // dates — coverage is consumed lazily on actual ride days (see getDailyCollection),
-  // which is what lets unused credit carry past absences.
+  // Banks `days` of credit (a day = a round trip = two legs). Coverage is
+  // consumed lazily, half a day at a time, as legs are actually boarded.
 
   async prepay(schoolId: string, dto: TransportPrepayDto, recordedBy: string) {
     const dailyRate = await this.getStudentDailyRate(schoolId, dto.studentId);
@@ -247,16 +396,9 @@ export class TransportFeesService {
   }
 
   // ── Arrears ───────────────────────────────────────────────
-  // Outstanding = days the student rode but never covered (materialised UNPAID
-  // records). Settling clears the oldest debts first and books the cash as a
-  // zero-day payment (so it shows in today's reconciliation without touching the
-  // prepaid-balance math).
-
-  private async getStudentArrears(schoolId: string, studentId: string): Promise<number> {
-    return this.prisma.transportDailyRecord.count({
-      where: { schoolId, studentId, status: 'UNPAID' },
-    });
-  }
+  // Settling clears the oldest boarded-but-unpaid legs first and books the cash
+  // as a zero-day payment (so it shows in today's reconciliation without touching
+  // the prepaid-balance math).
 
   async settleArrears(schoolId: string, dto: TransportSettleArrearsDto, recordedBy: string) {
     const unpaid = await this.prisma.transportDailyRecord.findMany({
@@ -267,7 +409,8 @@ export class TransportFeesService {
     if (unpaid.length === 0) throw new BadRequestException('No arrears to settle');
 
     const dailyRate = await this.getStudentDailyRate(schoolId, dto.studentId);
-    const amountSettled = unpaid.length * dailyRate;
+    const daysSettled = unpaid.length * LEG_WEIGHT;
+    const amountSettled = daysSettled * dailyRate;
 
     const payment = await this.prisma.transportPayment.create({
       data: {
@@ -286,12 +429,13 @@ export class TransportFeesService {
     });
 
     const owedDays = await this.getStudentArrears(schoolId, dto.studentId);
-    return { daysSettled: unpaid.length, amountSettled, owedDays, owedAmount: owedDays * dailyRate };
+    return { daysSettled, amountSettled, owedDays, owedAmount: owedDays * dailyRate };
   }
 
   // ── Per-student payment calendar ──────────────────────────
-  // Read-only view for the prepay modal: past/today reflect materialised records,
-  // future school days are a soft projection from the remaining balance.
+  // Read-only history view for the prepay modal. A day aggregates its two legs:
+  // any unpaid leg shows UNPAID, otherwise paid/prepaid if covered, else (no ride
+  // recorded) it's simply blank — boarding is no longer assumed from attendance.
 
   async getStudentCalendar(schoolId: string, studentId: string, month: string) {
     const student = await this.prisma.student.findFirst({
@@ -308,20 +452,24 @@ export class TransportFeesService {
     const first = new Date(year, mon - 1, 1);
     const last = new Date(year, mon, 0); // day 0 of next month = last day of this month
 
-    const [dailyRate, balance, owedDays, records, attendanceRecords] = await Promise.all([
+    const [dailyRate, balance, owedDays, records] = await Promise.all([
       this.getStudentDailyRate(schoolId, studentId).catch(() => 0),
       this.getStudentBalance(schoolId, studentId),
       this.getStudentArrears(schoolId, studentId),
       this.prisma.transportDailyRecord.findMany({
         where: { schoolId, studentId, recordDate: { gte: this.startOfDay(first), lte: this.endOfDay(last) } },
-      }),
-      this.prisma.studentAttendanceRecord.findMany({
-        where: { schoolId, studentId, date: { gte: this.startOfDay(first), lte: this.endOfDay(last) } },
+        select: { recordDate: true, status: true },
       }),
     ]);
 
-    const recordMap = new Map(records.map((r) => [this.dayKey(r.recordDate), r]));
-    const attendanceMap = new Map(attendanceRecords.map((r) => [this.dayKey(r.date), r]));
+    // Group records by day → set of statuses present.
+    const statusesByDay = new Map<string, Set<string>>();
+    for (const r of records) {
+      const key = this.dayKey(r.recordDate);
+      const set = statusesByDay.get(key) ?? new Set<string>();
+      set.add(r.status);
+      statusesByDay.set(key, set);
+    }
 
     const dayList: Date[] = [];
     for (let d = 1; d <= last.getDate(); d++) dayList.push(new Date(year, mon - 1, d));
@@ -334,18 +482,20 @@ export class TransportFeesService {
     const days = dayList.map((d, i) => {
       const key = this.dayKey(d);
       const isSchoolDay = schoolDayFlags[i];
-      const record = recordMap.get(key);
-      const isAbsent = attendanceMap.get(key)?.status === 'ABSENT';
+      const statuses = statusesByDay.get(key);
 
       let status: CalendarStatus;
       if (!isSchoolDay) status = 'NON_SCHOOL';
-      else if (isAbsent) status = 'ABSENT';
-      else if (record?.status === 'PAID') status = 'PAID';
-      else if (record?.status === 'PRE_COVERED') status = 'PRE_COVERED';
-      else if (key < todayKey) status = 'UNPAID'; // past school day, rode but not settled
-      // today-or-future school day with no record: covered by remaining balance (auto-slides past absences)
-      else if (projectionRemaining > 0) { projectionRemaining--; status = 'PROJECTED'; }
-      else status = key === todayKey ? 'UNPAID' : 'NONE'; // today with no balance still needs settling
+      else if (statuses?.has('UNPAID')) status = 'UNPAID';
+      else if (statuses?.has('PAID')) status = 'PAID';
+      else if (statuses?.has('PRE_COVERED')) status = 'PRE_COVERED';
+      else if (statuses?.has('ABSENT')) status = 'ABSENT'; // explicitly marked off the bus
+      // No ride recorded. Future school days project against remaining balance
+      // (a round trip a day); past/today simply had no ride → blank.
+      else if (key > todayKey && projectionRemaining >= 1) {
+        projectionRemaining -= 1;
+        status = 'PROJECTED';
+      } else status = 'NONE';
 
       return { date: key, isSchoolDay, status };
     });
